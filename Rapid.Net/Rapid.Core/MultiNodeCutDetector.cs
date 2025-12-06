@@ -65,7 +65,7 @@ internal sealed class MultiNodeCutDetector
     public List<Endpoint> AggregateForProposal(AlertMessage msg)
     {
         ArgumentNullException.ThrowIfNull(msg);
-        
+
         var proposals = new List<Endpoint>();
         foreach (var ringNumber in msg.RingNumber)
         {
@@ -74,7 +74,7 @@ internal sealed class MultiNodeCutDetector
         return proposals;
     }
 
-    private List<Endpoint> AggregateForProposal(Endpoint linkSrc, Endpoint linkDst, 
+    private List<Endpoint> AggregateForProposal(Endpoint linkSrc, Endpoint linkDst,
                                                 EdgeStatus edgeStatus, int ringNumber)
     {
         if (ringNumber > _k)
@@ -93,12 +93,11 @@ internal sealed class MultiNodeCutDetector
                 _reportsPerHost[linkDst] = reportsForHost;
             }
 
-            if (reportsForHost.ContainsKey(ringNumber))
+            if (!reportsForHost.TryAdd(ringNumber, linkSrc))
             {
                 return [];  // duplicate announcement, ignore.
             }
 
-            reportsForHost[ringNumber] = linkSrc;
             var numReportsForHost = reportsForHost.Count;
 
             if (numReportsForHost == _l)
@@ -148,13 +147,13 @@ internal sealed class MultiNodeCutDetector
 
             var proposalsToReturn = new List<Endpoint>();
             var preProposalCopy = new List<Endpoint>(_preProposal);
-            
+
             foreach (var nodeInFlux in preProposalCopy)
             {
                 var observers = view.IsHostPresent(nodeInFlux)
                     ? view.GetObserversOf(nodeInFlux)          // For failing nodes
                     : view.GetExpectedObserversOf(nodeInFlux); // For joining nodes
-                
+
                 // Account for all edges between nodes that are past the L threshold
                 int ringNumber = 0;
                 foreach (var observer in observers)

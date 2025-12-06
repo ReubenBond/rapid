@@ -18,7 +18,7 @@ public partial class Rank : IComparable<Rank>
     public int CompareTo(Rank? other)
     {
         if (other == null) return 1;
-        
+
         var roundCmp = Round.CompareTo(other.Round);
         if (roundCmp != 0) return roundCmp;
         return NodeIndex.CompareTo(other.NodeIndex);

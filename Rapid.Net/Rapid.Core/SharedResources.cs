@@ -25,7 +25,7 @@ public sealed class SharedResources : IDisposable
     private readonly ILogger<SharedResources> _logger;
     private readonly CancellationTokenSource _shutdownCts = new();
     private readonly Channel<Func<Task>> _protocolExecutor;
-    
+
     public Channel<Action> ProtocolChannel { get; }
 
     public Channel<Func<Task>> GetProtocolExecutor() => _protocolExecutor;
@@ -33,21 +33,21 @@ public sealed class SharedResources : IDisposable
     public SharedResources(ILoggerFactory? loggerFactory = null)
     {
         _logger = (loggerFactory ?? NullLoggerFactory.Instance).CreateLogger<SharedResources>();
-        
+
         // Create a single-threaded channel for protocol execution
         ProtocolChannel = Channel.CreateUnbounded<Action>(new UnboundedChannelOptions
         {
             SingleReader = true,
             SingleWriter = false
         });
-        
+
         // Create protocol executor channel for async tasks
         _protocolExecutor = Channel.CreateUnbounded<Func<Task>>(new UnboundedChannelOptions
         {
             SingleReader = true,
             SingleWriter = false
         });
-        
+
         // Start the protocol executors
         _ = Task.Run(ProcessProtocolMessages);
         _ = Task.Run(ProcessProtocolMessagesAsync);

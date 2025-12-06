@@ -30,7 +30,7 @@ public class MembershipViewTests
     {
         var mview = new MembershipView(K);
         var addr = Utils.HostFromParts("127.0.0.1", 123);
-        
+
         mview.RingAdd(addr, Utils.NodeIdFromUuid(Guid.NewGuid()));
 
         for (int k = 0; k < K; k++)
@@ -57,7 +57,7 @@ public class MembershipViewTests
         {
             mview.RingAdd(Utils.HostFromParts("127.0.0.1", i), Utils.NodeIdFromUuid(Guid.NewGuid()));
         }
-        
+
         for (int k = 0; k < K; k++)
         {
             var list = mview.GetRing(k);
@@ -113,7 +113,7 @@ public class MembershipViewTests
         var mview = new MembershipView(K);
         const int numNodes = 10;
         int numThrows = 0;
-        
+
         for (int i = 0; i < numNodes; i++)
         {
             try
@@ -163,7 +163,7 @@ public class MembershipViewTests
     {
         var mview = new MembershipView(K);
         var n1 = Utils.HostFromParts("127.0.0.1", 1);
-        
+
         mview.RingAdd(n1, Utils.NodeIdFromUuid(Guid.NewGuid()));
         Assert.Empty(mview.GetSubjectsOf(n1));
         Assert.Empty(mview.GetObserversOf(n1));
@@ -196,10 +196,10 @@ public class MembershipViewTests
         var mview = new MembershipView(K);
         var n1 = Utils.HostFromParts("127.0.0.1", 1);
         var n2 = Utils.HostFromParts("127.0.0.1", 2);
-        
+
         mview.RingAdd(n1, Utils.NodeIdFromUuid(Guid.NewGuid()));
         mview.RingAdd(n2, Utils.NodeIdFromUuid(Guid.NewGuid()));
-        
+
         Assert.Equal(K, mview.GetSubjectsOf(n1).Count);
         Assert.Equal(K, mview.GetObserversOf(n1).Count);
         Assert.Single(mview.GetSubjectsOf(n1).ToHashSet());
@@ -216,18 +216,18 @@ public class MembershipViewTests
         var n1 = Utils.HostFromParts("127.0.0.1", 1);
         var n2 = Utils.HostFromParts("127.0.0.1", 2);
         var n3 = Utils.HostFromParts("127.0.0.1", 3);
-        
+
         mview.RingAdd(n1, Utils.NodeIdFromUuid(Guid.NewGuid()));
         mview.RingAdd(n2, Utils.NodeIdFromUuid(Guid.NewGuid()));
         mview.RingAdd(n3, Utils.NodeIdFromUuid(Guid.NewGuid()));
-        
+
         Assert.Equal(K, mview.GetSubjectsOf(n1).Count);
         Assert.Equal(K, mview.GetObserversOf(n1).Count);
         Assert.Equal(2, mview.GetSubjectsOf(n1).ToHashSet().Count);
         Assert.Equal(2, mview.GetObserversOf(n1).ToHashSet().Count);
 
         mview.RingDelete(n2);
-        
+
         Assert.Equal(K, mview.GetSubjectsOf(n1).Count);
         Assert.Equal(K, mview.GetObserversOf(n1).Count);
         Assert.Single(mview.GetSubjectsOf(n1).ToHashSet());
@@ -245,18 +245,18 @@ public class MembershipViewTests
 
         var n1 = Utils.HostFromParts("127.0.0.1", 1);
         mview.RingAdd(n1, Utils.NodeIdFromUuid(Guid.NewGuid()));
-        
+
         var configAfterAdd = mview.GetCurrentConfigurationId();
         Assert.NotEqual(initialConfig, configAfterAdd);
 
         var n2 = Utils.HostFromParts("127.0.0.1", 2);
         mview.RingAdd(n2, Utils.NodeIdFromUuid(Guid.NewGuid()));
-        
+
         var configAfterSecondAdd = mview.GetCurrentConfigurationId();
         Assert.NotEqual(configAfterAdd, configAfterSecondAdd);
 
         mview.RingDelete(n1);
-        
+
         var configAfterDelete = mview.GetCurrentConfigurationId();
         Assert.NotEqual(configAfterSecondAdd, configAfterDelete);
     }
@@ -299,12 +299,12 @@ public class MembershipViewTests
         Assert.False(mview.IsIdentifierPresent(nodeId1));
 
         mview.RingAdd(n1, nodeId1);
-        
+
         Assert.True(mview.IsHostPresent(n1));
         Assert.True(mview.IsIdentifierPresent(nodeId1));
 
         mview.RingDelete(n1);
-        
+
         Assert.False(mview.IsHostPresent(n1));
         // Note: Identifier remains in the set after deletion to prevent UUID reuse
         Assert.True(mview.IsIdentifierPresent(nodeId1));
@@ -322,7 +322,7 @@ public class MembershipViewTests
         var sharedUuid = Utils.NodeIdFromUuid(Guid.NewGuid());
 
         mview.RingAdd(n1, sharedUuid);
-        
+
         // Adding a different node with the same UUID should throw
         Assert.Throws<MembershipView.UuidAlreadySeenException>(() => mview.RingAdd(n2, sharedUuid));
     }
@@ -604,17 +604,17 @@ public static class GuidUtility
     {
         var nameBytes = System.Text.Encoding.UTF8.GetBytes(name);
         var namespaceBytes = namespaceId.ToByteArray();
-        
+
         SwapByteOrder(namespaceBytes);
-        
+
         var hash = System.Security.Cryptography.SHA1.HashData(namespaceBytes.Concat(nameBytes).ToArray());
-        
+
         var newGuid = new byte[16];
         Array.Copy(hash, newGuid, 16);
-        
+
         newGuid[6] = (byte)((newGuid[6] & 0x0F) | 0x50);
         newGuid[8] = (byte)((newGuid[8] & 0x3F) | 0x80);
-        
+
         SwapByteOrder(newGuid);
         return new Guid(newGuid);
     }

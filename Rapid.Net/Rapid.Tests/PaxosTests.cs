@@ -28,7 +28,7 @@ public class PaxosTests
     {
         var rank1 = new Rank { Round = 1, NodeIndex = 0 };
         var rank2 = new Rank { Round = 2, NodeIndex = 0 };
-        
+
         // rank2 should be greater
         Assert.True(CompareRanks(rank2, rank1) > 0);
         Assert.True(CompareRanks(rank1, rank2) < 0);
@@ -42,7 +42,7 @@ public class PaxosTests
     {
         var rank1 = new Rank { Round = 1, NodeIndex = 0 };
         var rank2 = new Rank { Round = 1, NodeIndex = 1 };
-        
+
         // rank2 should be greater
         Assert.True(CompareRanks(rank2, rank1) > 0);
         Assert.True(CompareRanks(rank1, rank2) < 0);
@@ -56,7 +56,7 @@ public class PaxosTests
     {
         var rank1 = new Rank { Round = 1, NodeIndex = 5 };
         var rank2 = new Rank { Round = 1, NodeIndex = 5 };
-        
+
         Assert.Equal(0, CompareRanks(rank1, rank2));
     }
 
@@ -69,7 +69,7 @@ public class PaxosTests
         var sender = Utils.HostFromParts("127.0.0.1", 1234);
         var rnd = new Rank { Round = 5, NodeIndex = 1 };
         var vrnd = new Rank { Round = 3, NodeIndex = 0 };
-        
+
         var msg = new Phase1bMessage
         {
             Sender = sender,
@@ -77,7 +77,7 @@ public class PaxosTests
             Rnd = rnd,
             Vrnd = vrnd
         };
-        
+
         Assert.Equal(sender, msg.Sender);
         Assert.Equal(100, msg.ConfigurationId);
         Assert.Equal(5, msg.Rnd.Round);
@@ -93,7 +93,7 @@ public class PaxosTests
         var sender = Utils.HostFromParts("127.0.0.1", 1234);
         var value = Utils.HostFromParts("127.0.0.1", 5678);
         var rnd = new Rank { Round = 5, NodeIndex = 1 };
-        
+
         var msg = new Phase2aMessage
         {
             Sender = sender,
@@ -101,7 +101,7 @@ public class PaxosTests
             Rnd = rnd
         };
         msg.Vval.Add(value);
-        
+
         Assert.Equal(sender, msg.Sender);
         Assert.Equal(100, msg.ConfigurationId);
         Assert.Equal(5, msg.Rnd.Round);

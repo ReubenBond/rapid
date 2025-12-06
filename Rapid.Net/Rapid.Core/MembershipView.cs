@@ -13,6 +13,8 @@
 
 using System.Collections.Concurrent;
 using System.IO.Hashing;
+using System.Runtime.InteropServices;
+using Microsoft.AspNetCore.Authentication;
 using Rapid.Pb;
 
 namespace Rapid;
@@ -37,31 +39,31 @@ internal sealed class MembershipView
     public MembershipView(int k)
     {
         if (k <= 0) throw new ArgumentException("K must be positive", nameof(k));
-        
+
         _k = k;
         _rings = new List<SortedSet<Endpoint>>(k);
         _addressComparators = new List<AddressComparator>(k);
         _identifiersSeen = new SortedSet<NodeId>(NodeIdComparer.Instance);
-        
+
         for (int i = 0; i < k; i++)
         {
             var comparator = new AddressComparator(i);
             _addressComparators.Add(comparator);
             _rings.Add(new SortedSet<Endpoint>(comparator));
         }
-        
+
         _currentConfiguration = new Configuration(_identifiersSeen, _rings[0]);
     }
 
     public MembershipView(int k, ICollection<NodeId> nodeIds, ICollection<Endpoint> endpoints)
     {
         if (k <= 0) throw new ArgumentException("K must be positive", nameof(k));
-        
+
         _k = k;
         _rings = new List<SortedSet<Endpoint>>(k);
         _addressComparators = new List<AddressComparator>(k);
         _identifiersSeen = new SortedSet<NodeId>(NodeIdComparer.Instance);
-        
+
         for (int i = 0; i < k; i++)
         {
             var comparator = new AddressComparator(i);
@@ -74,12 +76,12 @@ internal sealed class MembershipView
             }
             _rings.Add(set);
         }
-        
+
         foreach (var nodeId in nodeIds)
         {
             _identifiersSeen.Add(nodeId);
         }
-        
+
         _currentConfiguration = new Configuration(_identifiersSeen, _rings[0]);
     }
 
@@ -156,7 +158,7 @@ internal sealed class MembershipView
     public void RingDelete(Endpoint node)
     {
         ArgumentNullException.ThrowIfNull(node);
-        
+
         _rwLock.EnterWriteLock();
         try
         {
@@ -199,7 +201,7 @@ internal sealed class MembershipView
     public List<Endpoint> GetObserversOf(Endpoint node)
     {
         ArgumentNullException.ThrowIfNull(node);
-        
+
         _rwLock.EnterReadLock();
         try
         {
@@ -207,7 +209,7 @@ internal sealed class MembershipView
             {
                 throw new NodeNotInRingException(node);
             }
-            
+
             if (!_cachedObservers.TryGetValue(node, out var observers))
             {
                 observers = ComputeObserversOf(node);
@@ -224,7 +226,7 @@ internal sealed class MembershipView
     private List<Endpoint> ComputeObserversOf(Endpoint node)
     {
         ArgumentNullException.ThrowIfNull(node);
-        
+
         if (!_rings[0].Contains(node))
         {
             throw new NodeNotInRingException(node);
@@ -256,7 +258,7 @@ internal sealed class MembershipView
     public List<Endpoint> GetSubjectsOf(Endpoint node)
     {
         ArgumentNullException.ThrowIfNull(node);
-        
+
         _rwLock.EnterReadLock();
         try
         {
@@ -269,7 +271,7 @@ internal sealed class MembershipView
             {
                 return [];
             }
-            
+
             return GetPredecessorsOf(node);
         }
         finally
@@ -281,7 +283,7 @@ internal sealed class MembershipView
     public List<Endpoint> GetExpectedObserversOf(Endpoint node)
     {
         ArgumentNullException.ThrowIfNull(node);
-        
+
         _rwLock.EnterReadLock();
         try
         {
@@ -444,11 +446,11 @@ internal sealed class MembershipView
     private static Endpoint? GetLower(SortedSet<Endpoint> set, Endpoint value)
     {
         if (set.Count == 0) return null;
-        
+
         var min = set.Min!;
         // If value is less than or equal to min, there is no lower element
         if (set.Comparer.Compare(value, min) <= 0) return null;
-        
+
         return set.GetViewBetween(min, value).Where(e => !e.Equals(value)).LastOrDefault();
     }
 
@@ -501,7 +503,7 @@ internal sealed class MembershipView
     private sealed class AddressComparator(int seed) : IComparer<Endpoint>
     {
         private readonly int _seed = seed;
-        private readonly ConcurrentDictionary<Endpoint, long> _hashCache = new();
+        private readonly Dictionary<Endpoint, long> _hashCache = [];
 
         public int Compare(Endpoint? x, Endpoint? y)
         {
@@ -509,21 +511,34 @@ internal sealed class MembershipView
             if (x == null) return -1;
             if (y == null) return 1;
 
-            var hash1 = _hashCache.GetOrAdd(x, ComputeHash);
-            var hash2 = _hashCache.GetOrAdd(y, ComputeHash);
+            var hash1 = GetCachedHash(x);
+            var hash2 = GetCachedHash(y);
             return hash1.CompareTo(hash2);
         }
 
-        private long ComputeHash(Endpoint endpoint)
+        private static long ComputeHash(int seed, Endpoint endpoint)
         {
-            var hostnameHash = (long)XxHash64.HashToUInt64(endpoint.Hostname.Span, _seed);
-            var portHash = (long)XxHash64.HashToUInt64(BitConverter.GetBytes(endpoint.Port), _seed);
+            var hostnameHash = (long)XxHash64.HashToUInt64(endpoint.Hostname.Span, seed);
+            var portHash = (long)XxHash64.HashToUInt64(BitConverter.GetBytes(endpoint.Port), seed);
             return hostnameHash * 31 + portHash;
         }
 
         public void RemoveEndpoint(Endpoint endpoint)
         {
-            _hashCache.TryRemove(endpoint, out _);
+            _hashCache.Remove(endpoint, out _);
+        }
+
+        private long GetCachedHash(Endpoint endpoint)
+        {
+            lock (this)
+            {
+                ref var hash = ref CollectionsMarshal.GetValueRefOrAddDefault(_hashCache, endpoint, out var exists);
+                if (!exists)
+                {
+                    hash = ComputeHash(_seed, endpoint);
+                }
+                return hash;
+            }
         }
     }
 

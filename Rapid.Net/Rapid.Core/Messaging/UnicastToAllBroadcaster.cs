@@ -18,7 +18,7 @@ public sealed class UnicastToAllBroadcaster(IMessagingClient client) : IBroadcas
 
     public async Task BroadcastAsync(RapidRequest request)
     {
-        var tasks = _membership.Select(endpoint => 
+        var tasks = _membership.Select(endpoint =>
             _client.SendMessageBestEffortAsync(endpoint, request));
         await Task.WhenAll(tasks);
     }

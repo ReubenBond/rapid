@@ -15,6 +15,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Rapid.Messaging;
 using Rapid.Pb;
+using System.Runtime.InteropServices;
 
 namespace Rapid;
 
@@ -62,7 +63,7 @@ internal sealed class FastPaxos
             onDecide(hosts);
         };
 
-        _paxos = new Paxos(myAddr, configurationId, membershipSize, client, broadcaster, 
+        _paxos = new Paxos(myAddr, configurationId, membershipSize, client, broadcaster,
                           _onDecidedWrapped, loggerFactory);
     }
 
@@ -125,17 +126,14 @@ internal sealed class FastPaxos
         }
 
         _votesReceived.Add(proposalMessage.Sender);
-        
+
         var proposalList = new List<Endpoint>(proposalMessage.Endpoints);
-        if (!_votesPerProposal.ContainsKey(proposalList))
-        {
-            _votesPerProposal[proposalList] = 0;
-        }
-        _votesPerProposal[proposalList]++;
-        
-        var count = _votesPerProposal[proposalList];
+        ref var entry = ref CollectionsMarshal.GetValueRefOrAddDefault(_votesPerProposal, proposalList, out var exists);
+        ++entry;
+
+        var count = entry;
         var f = (int)Math.Floor((_membershipSize - 1) / 4.0); // Fast Paxos resiliency.
-        
+
         if (_votesReceived.Count >= _membershipSize - f)
         {
             if (count >= _membershipSize - f)

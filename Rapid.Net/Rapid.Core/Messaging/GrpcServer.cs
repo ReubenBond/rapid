@@ -22,13 +22,13 @@ public sealed class GrpcServer : IMessagingServer
     private readonly ILoggerFactory _loggerFactory;
     private readonly MembershipServiceImpl _serviceImpl;
     private WebApplication? _app;
-    
+
     private static readonly RapidResponse BootstrappingMessage = new()
     {
         ProbeResponse = new ProbeResponse { Status = NodeStatus.Bootstrapping }
     };
 
-    public GrpcServer(Endpoint listenAddress, SharedResources sharedResources, Settings settings, 
+    public GrpcServer(Endpoint listenAddress, SharedResources sharedResources, Settings settings,
                      ILoggerFactory? loggerFactory = null)
     {
         _listenAddress = listenAddress;
@@ -48,7 +48,7 @@ public sealed class GrpcServer : IMessagingServer
         var port = _listenAddress.Port;
 
         var builder = WebApplication.CreateBuilder();
-        
+
         // Configure Kestrel to listen on the specified address and port
         builder.WebHost.ConfigureKestrel(options =>
         {

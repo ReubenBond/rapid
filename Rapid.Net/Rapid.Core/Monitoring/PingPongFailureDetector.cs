@@ -49,7 +49,7 @@ public sealed class PingPongFailureDetectorFactory(Endpoint localEndpoint, IMess
                 {
                     var request = Utils.ToRapidRequest(new ProbeMessage { Sender = _observer });
                     var response = await _client.SendMessageAsync(_subject, request, _cts.Token);
-                    
+
                     if (response.ProbeResponse == null)
                     {
                         _logger.LogWarning("Probe failed for {Subject}", Utils.Loggable(_subject));

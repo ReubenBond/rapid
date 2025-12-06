@@ -17,7 +17,7 @@ namespace Rapid.Messaging;
 
 public interface IMessagingClient : IDisposable
 {
-    Task<RapidResponse> SendMessageAsync(Endpoint remote, RapidRequest request, 
+    Task<RapidResponse> SendMessageAsync(Endpoint remote, RapidRequest request,
         CancellationToken cancellationToken = default);
     Task<RapidResponse> SendMessageBestEffortAsync(Endpoint remote, RapidRequest request,
         CancellationToken cancellationToken = default);

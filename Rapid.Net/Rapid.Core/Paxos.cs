@@ -69,11 +69,8 @@ internal sealed class Paxos
 
     public void RegisterFastRoundVote(List<Endpoint> proposal)
     {
-        if (!_fastRoundVotes.ContainsKey(proposal))
-        {
-            _fastRoundVotes[proposal] = 0;
-        }
-        _fastRoundVotes[proposal]++;
+        ref var voteCount = ref CollectionsMarshal.GetValueRefOrAddDefault(_fastRoundVotes, proposal, out var _);
+        ++voteCount;
     }
 
     public void StartPhase1a(int round)
@@ -194,15 +191,15 @@ internal sealed class Paxos
             return;
         }
 
-        if (!_acceptResponses.ContainsKey(_crnd))
+        if (!_acceptResponses.TryGetValue(_crnd, out var acceptResponses))
         {
-            _acceptResponses[_crnd] = [];
+            _acceptResponses[_crnd] = acceptResponses = [];
         }
 
-        _acceptResponses[_crnd][phase2bMessage.Sender] = phase2bMessage;
+        acceptResponses[phase2bMessage.Sender] = phase2bMessage;
 
         var f = (int)Math.Floor((_n - 1) / 4.0);
-        if (_acceptResponses[_crnd].Count >= _n - f && !_decided)
+        if (acceptResponses.Count >= _n - f && !_decided)
         {
             _decided = true;
             var endpoints = new List<Endpoint>(phase2bMessage.Endpoints);

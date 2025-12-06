@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Rapid.Messaging;
 using Rapid.Monitoring;
 using Rapid.Pb;
+using System.Runtime.InteropServices;
 
 namespace Rapid;
 
@@ -27,7 +28,7 @@ public sealed class Cluster : IDisposable
     private readonly ILogger<Cluster> _logger;
     private bool _hasShutdown;
 
-    private Cluster(IMessagingServer rpcServer, MembershipService? membershipService, 
+    private Cluster(IMessagingServer rpcServer, MembershipService? membershipService,
         SharedResources sharedResources, Endpoint listenAddress,
         ILoggerFactory? loggerFactory = null)
     {
@@ -45,7 +46,7 @@ public sealed class Cluster : IDisposable
     {
         if (_hasShutdown)
             throw new InvalidOperationException("Can't access the memberlist after having shut down");
-        
+
         return _membershipService?.GetMembershipView() ?? [];
     }
 
@@ -56,7 +57,7 @@ public sealed class Cluster : IDisposable
     {
         if (_hasShutdown)
             throw new InvalidOperationException("Can't access the memberlist after having shut down");
-        
+
         return _membershipService?.GetMembershipSize() ?? 0;
     }
 
@@ -67,7 +68,7 @@ public sealed class Cluster : IDisposable
     {
         if (_hasShutdown)
             throw new InvalidOperationException("Can't access metadata after having shut down");
-        
+
         return _membershipService?.GetMetadata() ?? [];
     }
 
@@ -147,10 +148,9 @@ public sealed class Cluster : IDisposable
 
         public ClusterBuilder AddSubscription(ClusterEvents eventType, Action<ClusterStatusChange> callback)
         {
-            if (!_subscriptions.ContainsKey(eventType))
-                _subscriptions[eventType] = [];
-            
-            _subscriptions[eventType].Add(callback);
+            ref var entry = ref CollectionsMarshal.GetValueRefOrAddDefault(_subscriptions, eventType, out var exists);
+            entry ??= [];
+            entry.Add(callback);
             return this;
         }
 
@@ -180,37 +180,37 @@ public sealed class Cluster : IDisposable
         {
             var sharedResources = new SharedResources(_loggerFactory);
             var currentIdentifier = Utils.NodeIdFromUuid(Guid.NewGuid());
-            
+
             // Create messaging infrastructure
             _messagingClient ??= new GrpcClient(_settings, _loggerFactory);
             _messagingServer ??= new GrpcServer(_listenAddress, sharedResources, _settings, _loggerFactory);
-            
+
             // Create membership view with just this node
-            var membershipView = new MembershipView(K, [currentIdentifier], 
+            var membershipView = new MembershipView(K, [currentIdentifier],
                                                     [_listenAddress]);
-            
+
             // Create cut detector
             var cutDetector = new MultiNodeCutDetector(K, H, L);
-            
+
             // Create failure detector factory if not provided
             _edgeFailureDetector ??= new PingPongFailureDetectorFactory(_listenAddress, _messagingClient, _loggerFactory);
-            
+
             // Create metadata dictionary
             var metadataMap = new Dictionary<Endpoint, Metadata> { { _listenAddress, _metadata } };
-            
+
             // Create membership service
             var membershipService = new MembershipService(_listenAddress, cutDetector, membershipView,
                                                          sharedResources, _settings, _messagingClient,
                                                          _edgeFailureDetector, metadataMap, _subscriptions,
                                                          _loggerFactory);
-            
+
             // Wire up the server to handle messages
             ((GrpcServer)_messagingServer).SetMembershipService(membershipService);
-            
+
             // Start server
             await _messagingServer.StartAsync();
 
-            var cluster = new Cluster(_messagingServer, membershipService, sharedResources, 
+            var cluster = new Cluster(_messagingServer, membershipService, sharedResources,
                                      _listenAddress, _loggerFactory);
             return cluster;
         }
@@ -222,7 +222,7 @@ public sealed class Cluster : IDisposable
         {
             var sharedResources = new SharedResources(_loggerFactory);
             var currentIdentifier = Utils.NodeIdFromUuid(Guid.NewGuid());
-            
+
             // Create messaging infrastructure
             _messagingClient ??= new GrpcClient(_settings, _loggerFactory);
             _messagingServer ??= new GrpcServer(_listenAddress, sharedResources, _settings, _loggerFactory);
@@ -237,7 +237,7 @@ public sealed class Cluster : IDisposable
                 NodeId = currentIdentifier
             };
 
-            var preJoinResponse = await _messagingClient.SendMessageAsync(seedAddress, 
+            var preJoinResponse = await _messagingClient.SendMessageAsync(seedAddress,
                                                                          Utils.ToRapidRequest(preJoinMessage));
             var joinResponse = preJoinResponse.JoinResponse;
 

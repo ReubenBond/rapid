@@ -57,7 +57,7 @@ public class ClusterIntegrationTests : IDisposable
     public async Task SingleSeedNodeStarts()
     {
         var seedAddress = Utils.HostFromParts("127.0.0.1", _nextPort++);
-        
+
         var seed = await new Cluster.ClusterBuilder(seedAddress)
             .UseLoggerFactory(_loggerFactory)
             .StartAsync();
@@ -74,7 +74,7 @@ public class ClusterIntegrationTests : IDisposable
     {
         var seedAddress = Utils.HostFromParts("127.0.0.1", _nextPort++);
         var joinerAddress = Utils.HostFromParts("127.0.0.1", _nextPort++);
-        
+
         var seed = await new Cluster.ClusterBuilder(seedAddress)
             .UseLoggerFactory(_loggerFactory)
             .StartAsync();
@@ -104,7 +104,7 @@ public class ClusterIntegrationTests : IDisposable
         var seedAddress = Utils.HostFromParts("127.0.0.1", _nextPort++);
         var joiner1Address = Utils.HostFromParts("127.0.0.1", _nextPort++);
         var joiner2Address = Utils.HostFromParts("127.0.0.1", _nextPort++);
-        
+
         var seed = await new Cluster.ClusterBuilder(seedAddress)
             .UseLoggerFactory(_loggerFactory)
             .StartAsync();
@@ -138,9 +138,9 @@ public class ClusterIntegrationTests : IDisposable
     {
         var seedAddress = Utils.HostFromParts("127.0.0.1", _nextPort++);
         var joinerAddress = Utils.HostFromParts("127.0.0.1", _nextPort++);
-        
+
         var viewChanges = new ConcurrentBag<ClusterStatusChange>();
-        
+
         var seed = await new Cluster.ClusterBuilder(seedAddress)
             .UseLoggerFactory(_loggerFactory)
             .StartAsync();
@@ -171,13 +171,13 @@ public class ClusterIntegrationTests : IDisposable
     {
         var seedAddress = Utils.HostFromParts("127.0.0.1", _nextPort++);
         var joinerAddress = Utils.HostFromParts("127.0.0.1", _nextPort++);
-        
+
         var seedMetadataDict = new Dictionary<string, Google.Protobuf.ByteString>
         {
             ["role"] = Google.Protobuf.ByteString.CopyFromUtf8("seed"),
             ["datacenter"] = Google.Protobuf.ByteString.CopyFromUtf8("us-west")
         };
-        
+
         var seed = await new Cluster.ClusterBuilder(seedAddress)
             .UseLoggerFactory(_loggerFactory)
             .SetMetadata(seedMetadataDict)
@@ -189,7 +189,7 @@ public class ClusterIntegrationTests : IDisposable
             ["role"] = Google.Protobuf.ByteString.CopyFromUtf8("worker"),
             ["datacenter"] = Google.Protobuf.ByteString.CopyFromUtf8("us-east")
         };
-        
+
         var joiner = await new Cluster.ClusterBuilder(joinerAddress)
             .UseLoggerFactory(_loggerFactory)
             .SetMetadata(joinerMetadataDict)
@@ -203,7 +203,7 @@ public class ClusterIntegrationTests : IDisposable
         var allMetadata = seed.GetClusterMetadata();
         Assert.Contains(seedAddress, allMetadata.Keys);
         Assert.Contains(joinerAddress, allMetadata.Keys);
-        
+
         Assert.Equal("seed", allMetadata[seedAddress].Metadata_["role"].ToStringUtf8());
         Assert.Equal("worker", allMetadata[joinerAddress].Metadata_["role"].ToStringUtf8());
     }
@@ -216,7 +216,7 @@ public class ClusterIntegrationTests : IDisposable
     {
         var seedAddress = Utils.HostFromParts("127.0.0.1", _nextPort++);
         var joinerAddress = Utils.HostFromParts("127.0.0.1", _nextPort++);
-        
+
         var seed = await new Cluster.ClusterBuilder(seedAddress)
             .UseLoggerFactory(_loggerFactory)
             .StartAsync();
@@ -249,7 +249,7 @@ public class ClusterIntegrationTests : IDisposable
     public async Task MultipleNodesConcurrentJoin()
     {
         var seedAddress = Utils.HostFromParts("127.0.0.1", _nextPort++);
-        
+
         var seed = await new Cluster.ClusterBuilder(seedAddress)
             .UseLoggerFactory(_loggerFactory)
             .StartAsync();
@@ -274,7 +274,7 @@ public class ClusterIntegrationTests : IDisposable
         await WaitForClusterSize(seed, numJoiners + 1, TimeSpan.FromSeconds(30));
 
         Assert.Equal(numJoiners + 1, seed.GetMembershipSize());
-        
+
         foreach (var joiner in joiners)
         {
             await WaitForClusterSize(joiner, numJoiners + 1, TimeSpan.FromSeconds(30));
@@ -290,9 +290,9 @@ public class ClusterIntegrationTests : IDisposable
     {
         var seedAddress = Utils.HostFromParts("127.0.0.1", _nextPort++);
         var joinerAddress = Utils.HostFromParts("127.0.0.1", _nextPort++);
-        
+
         var proposals = new ConcurrentBag<ClusterStatusChange>();
-        
+
         var seed = await new Cluster.ClusterBuilder(seedAddress)
             .UseLoggerFactory(_loggerFactory)
             .StartAsync();
@@ -326,7 +326,7 @@ public class ClusterIntegrationTests : IDisposable
             }
             await Task.Delay(100);
         }
-        
+
         throw new TimeoutException(
             $"Cluster did not reach expected size {expectedSize} within {timeout}. Current size: {cluster.GetMembershipSize()}");
     }

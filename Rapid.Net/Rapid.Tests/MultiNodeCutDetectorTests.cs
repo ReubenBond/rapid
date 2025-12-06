@@ -25,7 +25,7 @@ public class MultiNodeCutDetectorTests
     private const int L = 2;
     private const long ConfigurationId = -1; // Should not affect the following tests
 
-    private static AlertMessage CreateAlertMessage(Endpoint src, Endpoint dst, EdgeStatus status, 
+    private static AlertMessage CreateAlertMessage(Endpoint src, Endpoint dst, EdgeStatus status,
         long configurationId, int ringNumber)
     {
         var msg = new AlertMessage
@@ -252,7 +252,7 @@ public class MultiNodeCutDetectorTests
         var detector = new MultiNodeCutDetector(K, H, L);
         const int numNodes = 3;
         var endpoints = new List<Endpoint>();
-        
+
         for (int i = 0; i < numNodes; i++)
         {
             endpoints.Add(Utils.HostFromParts("127.0.0.2", 2 + i));
@@ -279,7 +279,7 @@ public class MultiNodeCutDetectorTests
         var detector = new MultiNodeCutDetector(K, H, L);
         const int numNodes = 30;
         var endpoints = new List<Endpoint>();
-        
+
         for (int i = 0; i < numNodes; i++)
         {
             var node = Utils.HostFromParts("127.0.0.2", 2 + i);
@@ -322,7 +322,7 @@ public class MultiNodeCutDetectorTests
         ret = detector.InvalidateFailingEdges(mView);
         Assert.Equal(4, ret.Count);
         Assert.Equal(1, detector.GetNumProposals());
-        
+
         foreach (var node in ret)
         {
             Assert.True(failedObservers.Contains(node) || node.Equals(dst));
