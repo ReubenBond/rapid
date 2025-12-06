@@ -1,7 +1,3 @@
-/*
- * Copyright © 2016 - 2025 VMware, Inc. All Rights Reserved.
- */
-
 using Rapid.Pb;
 
 namespace Rapid.Messaging;
@@ -19,7 +15,7 @@ public sealed class UnicastToAllBroadcaster(IMessagingClient client) : IBroadcas
     public async Task BroadcastAsync(RapidRequest request)
     {
         var tasks = _membership.Select(endpoint =>
-            _client.SendMessageBestEffortAsync(endpoint, request));
+            _client.SendMessageBestEffortAsync(endpoint, request, CancellationToken.None));
         await Task.WhenAll(tasks).ConfigureAwait(false);
     }
 }

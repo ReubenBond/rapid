@@ -1,10 +1,7 @@
-/*
- * Copyright © 2016 - 2025 VMware, Inc. All Rights Reserved.
- */
-
 using System.Collections.Concurrent;
 using Grpc.Core;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Rapid.Pb;
 
 namespace Rapid.Messaging;
@@ -12,13 +9,19 @@ namespace Rapid.Messaging;
 /// <summary>
 /// gRPC-based messaging client for Rapid.
 /// </summary>
-internal sealed partial class GrpcClient(Settings settings, ILoggerFactory? loggerFactory = null) : IMessagingClient
+internal sealed partial class GrpcClient : IMessagingClient
 {
-    private readonly Settings _settings = settings;
-    private readonly ILogger<GrpcClient> _logger = (loggerFactory ?? Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance)
-            .CreateLogger<GrpcClient>();
+    private readonly RapidProtocolOptions _options;
+    private readonly ILogger<GrpcClient> _logger;
     private readonly ConcurrentDictionary<string, Pb.MembershipService.MembershipServiceClient> _clients = new();
     private bool _disposed;
+
+    public GrpcClient(IOptions<RapidProtocolOptions> options, ILoggerFactory? loggerFactory = null)
+    {
+        _options = options.Value;
+        _logger = (loggerFactory ?? Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance)
+            .CreateLogger<GrpcClient>();
+    }
 
     private readonly struct LoggableEndpoint(Endpoint endpoint)
     {
@@ -30,14 +33,14 @@ internal sealed partial class GrpcClient(Settings settings, ILoggerFactory? logg
     private partial void LogRpcFailed(Exception ex, LoggableEndpoint Remote);
 
     public async Task<RapidResponse> SendMessageAsync(Endpoint remote, RapidRequest request,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken)
     {
         var client = GetOrCreateClient(remote);
 
         try
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            cts.CancelAfter(_settings.GrpcTimeoutMs);
+            cts.CancelAfter(_options.GrpcTimeout);
 
             var response = await client.sendRequestAsync(request, cancellationToken: cts.Token);
             return response;
@@ -50,7 +53,7 @@ internal sealed partial class GrpcClient(Settings settings, ILoggerFactory? logg
     }
 
     public async Task<RapidResponse> SendMessageBestEffortAsync(Endpoint remote, RapidRequest request,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken)
     {
 #pragma warning disable CA1031
         try

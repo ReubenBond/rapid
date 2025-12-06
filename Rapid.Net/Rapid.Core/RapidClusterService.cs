@@ -1,7 +1,3 @@
-/*
- * Copyright © 2016 - 2025 VMware, Inc. All Rights Reserved.
- */
-
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -22,6 +18,7 @@ internal sealed partial class RapidClusterService : BackgroundService
     private readonly ILogger<RapidClusterService> _logger;
     private readonly ILoggerFactory _loggerFactory;
     private readonly SharedResources _sharedResources;
+    private readonly IOptions<RapidProtocolOptions> _protocolOptions;
     private MembershipService? _membershipService;
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Starting Rapid cluster service on {ListenAddress}")]
@@ -38,12 +35,14 @@ internal sealed partial class RapidClusterService : BackgroundService
 
     public RapidClusterService(
         IOptions<RapidOptions> options,
+        IOptions<RapidProtocolOptions> protocolOptions,
         IMessagingClient messagingClient,
         IEdgeFailureDetectorFactory edgeFailureDetectorFactory,
         SharedResources sharedResources,
         ILoggerFactory loggerFactory)
     {
         _options = options.Value;
+        _protocolOptions = protocolOptions;
         _messagingClient = messagingClient;
         _edgeFailureDetectorFactory = edgeFailureDetectorFactory;
         _sharedResources = sharedResources;
@@ -95,7 +94,9 @@ internal sealed partial class RapidClusterService : BackgroundService
         const int L = 4;
 
         var currentIdentifier = RapidUtils.NodeIdFromUuid(Guid.NewGuid());
+#pragma warning disable CA2000 // Dispose objects before losing scope - MembershipView ownership transferred to MembershipService
         var membershipView = new MembershipView(K, [currentIdentifier], [_options.ListenAddress]);
+#pragma warning restore CA2000
         var cutDetector = new MultiNodeCutDetector(K, H, L);
         var metadataMap = new Dictionary<Endpoint, Metadata> { { _options.ListenAddress, _options.Metadata } };
 
@@ -104,7 +105,7 @@ internal sealed partial class RapidClusterService : BackgroundService
             cutDetector,
             membershipView,
             _sharedResources,
-            _options.Settings,
+            _protocolOptions,
             _messagingClient,
             _edgeFailureDetectorFactory,
             metadataMap,
@@ -129,7 +130,8 @@ internal sealed partial class RapidClusterService : BackgroundService
 
         var preJoinResponse = await _messagingClient.SendMessageAsync(
             _options.SeedAddress!,
-            RapidUtils.ToRapidRequest(preJoinMessage)).ConfigureAwait(false);
+            RapidUtils.ToRapidRequest(preJoinMessage),
+            cancellationToken).ConfigureAwait(false);
         var joinResponse = preJoinResponse.JoinResponse;
 
         if (joinResponse.StatusCode != JoinStatusCode.SafeToJoin &&
@@ -169,7 +171,8 @@ internal sealed partial class RapidClusterService : BackgroundService
 
             return await _messagingClient.SendMessageAsync(
                 entry.Key,
-                RapidUtils.ToRapidRequest(joinMessageForObserver)).WithDefaultOnException().ConfigureAwait(false);
+                RapidUtils.ToRapidRequest(joinMessageForObserver),
+                cancellationToken).WithDefaultOnException().ConfigureAwait(false);
         });
 
         var responses = await Task.WhenAll(tasks).ConfigureAwait(false);
@@ -181,7 +184,9 @@ internal sealed partial class RapidClusterService : BackgroundService
         }
 
         // Initialize membership view from response
+#pragma warning disable CA2000 // Dispose objects before losing scope - MembershipView ownership transferred to MembershipService
         var membershipView = new MembershipView(K, successfulResponse.Identifiers, successfulResponse.Endpoints);
+#pragma warning restore CA2000
         var cutDetector = new MultiNodeCutDetector(K, H, L);
 
         var metadataMap = new Dictionary<Endpoint, Metadata>();
@@ -197,7 +202,7 @@ internal sealed partial class RapidClusterService : BackgroundService
             cutDetector,
             membershipView,
             _sharedResources,
-            _options.Settings,
+            _protocolOptions,
             _messagingClient,
             _edgeFailureDetectorFactory,
             metadataMap,

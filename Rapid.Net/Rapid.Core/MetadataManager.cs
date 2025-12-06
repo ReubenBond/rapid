@@ -1,7 +1,3 @@
-/*
- * Copyright © 2016 - 2025 VMware, Inc. All Rights Reserved.
- */
-
 using Rapid.Pb;
 
 namespace Rapid;

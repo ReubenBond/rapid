@@ -1,7 +1,3 @@
-/*
- * Copyright © 2016 - 2025 VMware, Inc. All Rights Reserved.
- */
-
 using Google.Protobuf;
 using Rapid.Messaging;
 using Rapid.Pb;
@@ -27,11 +23,6 @@ public sealed class RapidOptions
     /// Metadata for this node.
     /// </summary>
     public Metadata Metadata { get; set; } = new();
-
-    /// <summary>
-    /// Settings for Rapid configuration.
-    /// </summary>
-    public Settings Settings { get; set; } = new();
 
     /// <summary>
     /// Event subscriptions.

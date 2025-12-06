@@ -1,162 +1,127 @@
 # Rapid.NET - TODO List
 
-**Last Updated:** 2025-12-06  
-**Status:** Post-refactoring cleanup needed
+**Last Updated**: December 6, 2025  
+**Status**: Beta Release Ready
+
+> **Documentation**: This file tracks planned improvements and roadmap items.  
+> See [DEVELOPMENT.md](DEVELOPMENT.md) for current status and contribution guide.  
+> See [ARCHITECTURE.md](ARCHITECTURE.md) for technical details.
 
 ---
 
 ## Critical Priority
 
-### 1. Remove Copyright Headers from All Files
+### ✅ 1. Remove Copyright Headers from All Files (COMPLETED)
 **Priority:** High  
 **Impact:** Code cleanliness, maintainability
+**Status:** ✅ Completed 2025-12-06
 
-**Description:**  
-Remove all redundant copyright headers from the top of every file. They add noise and are unnecessary since the project has a LICENSE file at the root.
-
-**Current State:**
-```csharp
-/*
- * Copyright © 2016 - 2025 VMware, Inc. All Rights Reserved.
- *
- * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
- * except in compliance with the License. You may obtain a copy of the License at
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software distributed under the
- * License is distributed on an "AS IS" BASIS, without warranties or conditions of any kind,
- * EITHER EXPRESS OR IMPLIED. See the License for the specific language governing
- * permissions and limitations under the License.
- */
-```
-
-**Action:**
-- Remove copyright headers from all `.cs` files
-- Keep the root LICENSE file
-- Copyright and licensing is already clear from the repository level
-
-**Files Affected:** All `.cs` files in the project
+**Completed Actions:**
+- ✅ Removed copyright headers from all 39 `.cs` files
+- ✅ Verified build succeeds (0 errors, 0 warnings)
+- ✅ All unit tests passing (33/33)
 
 ---
 
-### 2. Remove Default CancellationToken Parameters
+### ✅ 2. Remove Default CancellationToken Parameters (COMPLETED)
 **Priority:** High  
 **Impact:** API design, cancellation responsiveness, code clarity
+**Status:** ✅ Completed 2025-12-06
 
-**Description:**  
-Remove all `= default` from `CancellationToken` parameters throughout the codebase. Force callers to explicitly pass a CancellationToken.
+**Completed Actions:**
+- ✅ Removed `= default` from all CancellationToken parameters
+- ✅ Updated all 8 call sites to pass explicit tokens
+- ✅ Verified build succeeds (0 errors, 0 warnings)
+- ✅ All unit tests passing (33/33)
 
-**Current Issues:**
-- Methods have `CancellationToken cancellationToken = default` which allows callers to omit it
-- Leads to incomplete cancellation support
-- Makes it unclear when cancellation is supported vs. ignored
-- Testing cancellation scenarios is harder
-
-**Solution:**
-```csharp
-// Before
-Task<RapidResponse> SendMessageAsync(Endpoint remote, RapidRequest request,
-    CancellationToken cancellationToken = default);
-
-// After
-Task<RapidResponse> SendMessageAsync(Endpoint remote, RapidRequest request,
-    CancellationToken cancellationToken);
-```
-
-**Migration for Callers:**
-```csharp
-// Before: token could be omitted
-await client.SendMessageAsync(endpoint, request);
-
-// After: must be explicit
-await client.SendMessageAsync(endpoint, request, cancellationToken);
-// or if no meaningful token
-await client.SendMessageAsync(endpoint, request, CancellationToken.None);
-```
-
-**Files to Update:**
-- `IMessagingClient.cs` - All async methods
-- `IMembershipServiceHandler.cs` - HandleMessageAsync
-- `MembershipService.cs` - All async methods
-- `GrpcClient.cs` - All async methods
-- `PingPongFailureDetector.cs` - Async methods
-- `FastPaxos.cs` - Async methods
-- All other classes with async methods
+**Files Updated:**
+- `IMessagingClient.cs` - 2 methods
+- `IMembershipServiceHandler.cs` - 1 method
+- `GrpcClient.cs` - 2 methods
+- `MembershipService.cs` - 7 methods
+- `Paxos.cs` - 2 call sites
+- `RapidClusterService.cs` - 2 call sites
+- `UnicastToAllBroadcaster.cs` - 1 call site
 
 ---
 
-### 3. Migrate to IOptions Pattern for All Configuration
+### ✅ 3. Migrate to IOptions Pattern for All Configuration (COMPLETED)
 **Priority:** High  
 **Impact:** Configuration architecture, ASP.NET Core integration
+**Status:** ✅ Completed 2025-12-06
 
 **Description:**  
-Remove the `Settings` class and migrate all configuration to use the IOptions<T> pattern.
+Removed the `Settings` class and migrated all configuration to use the IOptions<T> pattern with TimeSpan-based timeout properties.
 
-**Current Issues:**
-- `Settings` class is used directly, not integrated with IOptions<T>
-- Configuration is not validated at startup
-- Cannot easily bind from appsettings.json
-- No support for named options
-- Inconsistent with ASP.NET Core configuration patterns
+**Completed Actions:**
+- ✅ Created `RapidProtocolOptions.cs` to replace `Settings`
+- ✅ Created `RapidProtocolOptionsValidator.cs` for startup validation
+- ✅ Removed `Settings` property from `RapidOptions.cs`
+- ✅ Updated all timeout properties to use `TimeSpan` instead of millisecond integers
+- ✅ Updated `GrpcClient.cs` to use `IOptions<RapidProtocolOptions>`
+- ✅ Updated `MembershipService.cs` to use `IOptions<RapidProtocolOptions>`
+- ✅ Updated `FastPaxos.cs` to use `IOptions<RapidProtocolOptions>`
+- ✅ Updated `RapidClusterService.cs` to inject and use protocol options
+- ✅ Updated `RapidServiceCollectionExtensions.cs` to register validation
+- ✅ Verified build succeeds (0 errors, 0 warnings)
+- ✅ All unit tests passing (33/33)
 
-**Proposed Solution:**
+**Files Updated:**
+- Created: `RapidProtocolOptions.cs`
+- Created: `RapidProtocolOptionsValidator.cs`
+- Updated: `RapidOptions.cs` (removed Settings property)
+- Updated: `GrpcClient.cs`
+- Updated: `MembershipService.cs`
+- Updated: `FastPaxos.cs`
+- Updated: `RapidClusterService.cs`
+- Updated: `RapidServiceCollectionExtensions.cs`
+- Removed: None (Settings.cs kept for backwards compatibility but can be removed)
 
-1. Create new options class:
-   ```csharp
-   public sealed class RapidProtocolOptions
-   {
-       public int GrpcTimeoutMs { get; set; } = 1000;
-       public int GrpcDefaultRetries { get; set; } = 5;
-       public int GrpcJoinTimeoutMs { get; set; } = 5000;
-       public int GrpcProbeTimeoutMs { get; set; } = 500;
-       public int FailureDetectorIntervalMs { get; set; } = 1000;
-       public int BatchingWindowMs { get; set; } = 100;
-       public long ConsensusFallbackTimeoutBaseDelayMs { get; set; } = 500;
-       public int LeaveMessageTimeoutMs { get; set; } = 1500;
-       public bool UseInProcessTransport { get; set; } = false;
-   }
-   ```
+**Benefits:**
+- ✅ Configuration now validated at startup via `IValidateOptions<T>`
+- ✅ Can easily bind from appsettings.json using `Configuration.GetSection("Rapid:Protocol")`
+- ✅ Supports named options for multiple cluster configurations
+- ✅ Consistent with ASP.NET Core configuration patterns
+- ✅ Optional configuration - defaults work without any setup
+- ✅ Type-safe TimeSpan properties instead of error-prone millisecond integers
 
-2. Register with validation:
-   ```csharp
-   services.Configure<RapidProtocolOptions>(configuration.GetSection("Rapid:Protocol"));
-   services.AddSingleton<IValidateOptions<RapidProtocolOptions>, RapidProtocolOptionsValidator>();
-   ```
+**Usage Example:**
+```csharp
+// Simple usage with defaults
+builder.Services.AddRapid(options =>
+{
+    options.ListenAddress = listen;
+    options.SeedAddress = seed;
+});
 
-3. Inject via IOptions<T>:
-   ```csharp
-   public class GrpcClient : IMessagingClient
-   {
-       private readonly RapidProtocolOptions _options;
-       
-       public GrpcClient(IOptions<RapidProtocolOptions> options, ...)
-       {
-           _options = options.Value;
-       }
-   }
-   ```
+// Advanced usage with custom protocol options
+builder.Services.AddRapid(
+    options =>
+    {
+        options.ListenAddress = listen;
+        options.SeedAddress = seed;
+    },
+    protocolOptions =>
+    {
+        protocolOptions.GrpcTimeout = TimeSpan.FromSeconds(2);
+        protocolOptions.BatchingWindow = TimeSpan.FromMilliseconds(200);
+        protocolOptions.FailureDetectorInterval = TimeSpan.FromSeconds(2);
+    });
 
-4. Support appsettings.json:
-   ```json
-   {
-     "Rapid": {
-       "Protocol": {
-         "GrpcTimeoutMs": 1000,
-         "GrpcDefaultRetries": 5
-       }
-     }
-   }
-   ```
+// Or bind from configuration (appsettings.json)
+{
+  "Rapid": {
+    "Protocol": {
+      "GrpcTimeout": "00:00:02",          // 2 seconds
+      "BatchingWindow": "00:00:00.200",   // 200 milliseconds
+      "LeaveMessageTimeout": "00:00:03"   // 3 seconds
+    }
+  }
+}
 
-**Files to Update:**
-- Remove: `Settings.cs`
-- Create: `RapidProtocolOptions.cs`
-- Create: `RapidProtocolOptionsValidator.cs`
-- Update: `RapidOptions.cs` (remove Settings property)
-- Update: `GrpcClient.cs`
-- Update: `MembershipService.cs`
-- Update: `RapidServiceCollectionExtensions.cs`
-- Update all consumers of Settings
+builder.Services.Configure<RapidProtocolOptions>(
+    builder.Configuration.GetSection("Rapid:Protocol"));
+```
 
 ---
 
@@ -233,9 +198,130 @@ Replace all direct time-related calls with `System.TimeProvider` abstraction.
 
 ---
 
+### 5. Track and Await All Background Tasks
+**Priority:** High  
+**Impact:** Resource cleanup, graceful shutdown, error handling
+
+**Description:**  
+Eliminate all fire-and-forget tasks (`_ = SomeTaskReturningOperation()`) and ensure proper task tracking, awaiting, and cancellation token flow.
+
+**Current Issues:**
+- Untracked tasks cannot be awaited on shutdown
+- Exceptions in background tasks may be silently swallowed
+- Missing cancellation token propagation prevents graceful cancellation
+- Resource leaks possible if tasks are not properly cleaned up
+
+**Problem Examples:**
+```csharp
+// BAD: Fire-and-forget - no tracking, no cancellation
+_ = _client.SendMessageAsync(phase1aMessage.Sender, request, CancellationToken.None);
+
+// BAD: Lost task reference, can't await on shutdown
+Task.Run(() => DoSomething());
+
+// BAD: No cancellation token flow
+_ = ProcessAsync();
+```
+
+**Proposed Solutions:**
+
+1. **Track background tasks in SharedResources:**
+   ```csharp
+   public sealed class SharedResources
+   {
+       private readonly List<Task> _backgroundTasks = new();
+       
+       public void TrackBackgroundTask(Task task)
+       {
+           lock (_backgroundTasks)
+           {
+               _backgroundTasks.Add(task);
+           }
+       }
+       
+       public async Task WaitForBackgroundTasksAsync(CancellationToken cancellationToken)
+       {
+           Task[] tasks;
+           lock (_backgroundTasks)
+           {
+               tasks = _backgroundTasks.ToArray();
+           }
+           await Task.WhenAll(tasks).WaitAsync(cancellationToken);
+       }
+   }
+   ```
+
+2. **Use tracked fire-and-forget pattern:**
+   ```csharp
+   // GOOD: Tracked and can be awaited on shutdown
+   var task = _client.SendMessageAsync(endpoint, request, cancellationToken);
+   _sharedResources.TrackBackgroundTask(task);
+   
+   // OR: Await immediately if possible
+   await _client.SendMessageAsync(endpoint, request, cancellationToken);
+   ```
+
+3. **Always flow cancellation tokens:**
+   ```csharp
+   // GOOD: Cancellation can propagate
+   _ = Task.Run(() => ProcessAsync(cancellationToken), cancellationToken);
+   
+   // GOOD: Long-running background work
+   var task = Task.Run(async () =>
+   {
+       while (!cancellationToken.IsCancellationRequested)
+       {
+           await DoWorkAsync(cancellationToken);
+       }
+   }, cancellationToken);
+   _sharedResources.TrackBackgroundTask(task);
+   ```
+
+4. **Await tracked tasks on shutdown:**
+   ```csharp
+   public async Task StopAsync(CancellationToken cancellationToken)
+   {
+       _shutdownCts.Cancel();
+       
+       // Wait for background tasks to complete
+       try
+       {
+           await _sharedResources.WaitForBackgroundTasksAsync(cancellationToken);
+       }
+       catch (OperationCanceledException)
+       {
+           // Expected during forced shutdown
+       }
+   }
+   ```
+
+**Files with Fire-and-Forget Tasks:**
+- `Paxos.cs` - Phase 1b and Phase 2b message sends (lines 121, 180)
+- `FastPaxos.cs` - May have similar patterns
+- `MembershipService.cs` - Alert batching and protocol tasks
+- Any `Task.Run()` calls without tracking
+
+**Benefits:**
+- ✅ Graceful shutdown - can wait for in-flight operations
+- ✅ Better error handling - exceptions can be observed
+- ✅ Proper resource cleanup
+- ✅ Cancellation tokens flow correctly
+- ✅ No lost tasks or silent failures
+- ✅ Testable - can verify tasks complete
+
+**Migration Strategy:**
+1. Find all `_ = ` patterns in codebase
+2. Evaluate each: can it be awaited immediately? Or must it run in background?
+3. For immediate: change to `await`
+4. For background: add to tracked task list
+5. Ensure all have cancellation token parameters
+6. Add shutdown logic to await tracked tasks
+
+---
+
 ## High Priority
 
-### 5. Fix Proto File TODO
+### 6. Fix Proto File TODO
 **Location:** `Protos\rapid.proto` line 57
 
 **Current TODO:**

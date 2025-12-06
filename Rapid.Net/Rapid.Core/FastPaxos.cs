@@ -1,19 +1,7 @@
-/*
- * Copyright © 2016 - 2025 VMware, Inc. All Rights Reserved.
- *
- * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
- * except in compliance with the License. You may obtain a copy of the License at
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software distributed under the
- * License is distributed on an "AS IS" BASIS, without warranties or conditions of any kind,
- * EITHER EXPRESS OR IMPLIED. See the License for the specific language governing
- * permissions and limitations under the License.
- */
-
 using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Rapid.Messaging;
 using Rapid.Pb;
 
@@ -35,9 +23,9 @@ internal sealed partial class FastPaxos : IDisposable
     private readonly HashSet<Endpoint> _votesReceived = [];
     private readonly Paxos _paxos;
     private readonly Lock _paxosLock = new();
-    private bool _decided = false;
+    private bool _decided;
     private CancellationTokenSource? _scheduledClassicRoundCts;
-    private readonly Settings _settings;
+    private readonly RapidProtocolOptions _options;
 
     private readonly struct LoggableEndpoints(IEnumerable<Endpoint> endpoints)
     {
@@ -55,18 +43,23 @@ internal sealed partial class FastPaxos : IDisposable
     private partial void LogFastRoundMayNotSucceed();
 
     [LoggerMessage(Level = LogLevel.Trace, Message = "Scheduling classic round with delay: {Delay}")]
-    private partial void LogSchedulingClassicRound(long Delay);
+    private partial void LogSchedulingClassicRound(TimeSpan Delay);
 
-    public FastPaxos(Endpoint myAddr, long configurationId, int membershipSize,
-                     IMessagingClient client, IBroadcaster broadcaster,
-                     SharedResources sharedResources, Action<List<Endpoint>> onDecide,
-                     Settings settings, ILoggerFactory? loggerFactory = null)
+    public FastPaxos(
+        Endpoint myAddr,
+        long configurationId,
+        int membershipSize,
+        IMessagingClient client,
+        IBroadcaster broadcaster,
+        Action<List<Endpoint>> onDecide,
+        IOptions<RapidProtocolOptions> options,
+        ILoggerFactory? loggerFactory = null)
     {
         _myAddr = myAddr;
         _configurationId = configurationId;
         _membershipSize = membershipSize;
         _broadcaster = broadcaster;
-        _settings = settings;
+        _options = options.Value;
         _logger = (loggerFactory ?? NullLoggerFactory.Instance).CreateLogger<FastPaxos>();
 
         // The rate of a random expovariate variable, used to determine a jitter over a base delay to start classic
@@ -89,8 +82,8 @@ internal sealed partial class FastPaxos : IDisposable
     /// Propose a value for a fast round with a delay to trigger the recovery protocol.
     /// </summary>
     /// <param name="proposal">The membership change proposal towards a configuration change.</param>
-    /// <param name="recoveryDelayInMs">Delay before starting classic Paxos round</param>
-    public void Propose(List<Endpoint> proposal, long recoveryDelayInMs)
+    /// <param name="recoveryDelay">Delay before starting classic Paxos round</param>
+    public void Propose(List<Endpoint> proposal, TimeSpan recoveryDelay)
     {
         lock (_paxosLock)
         {
@@ -107,9 +100,9 @@ internal sealed partial class FastPaxos : IDisposable
         var proposalMessage = RapidUtils.ToRapidRequest(consensusMessage);
         _ = _broadcaster.BroadcastAsync(proposalMessage);
 
-        LogSchedulingClassicRound(recoveryDelayInMs);
+        LogSchedulingClassicRound(recoveryDelay);
         _scheduledClassicRoundCts = new CancellationTokenSource();
-        _ = Task.Delay(TimeSpan.FromMilliseconds(recoveryDelayInMs), _scheduledClassicRoundCts.Token)
+        _ = Task.Delay(recoveryDelay, _scheduledClassicRoundCts.Token)
             .ContinueWith(_ => StartClassicPaxosRound(), TaskScheduler.Default);
     }
 
@@ -119,7 +112,7 @@ internal sealed partial class FastPaxos : IDisposable
     /// <param name="proposal">The membership change proposal towards a configuration change.</param>
     public void Propose(List<Endpoint> proposal)
     {
-        Propose(proposal, GetRandomDelayMs());
+        Propose(proposal, GetRandomDelay());
     }
 
     /// <summary>
@@ -213,12 +206,12 @@ internal sealed partial class FastPaxos : IDisposable
     /// <summary>
     /// Random expovariate variable plus a base delay.
     /// </summary>
-    private long GetRandomDelayMs()
+    private TimeSpan GetRandomDelay()
     {
 #pragma warning disable CA5394 // Do not use insecure randomness. Justification: this is not security-sensitive code.
         var jitter = (long)(-1000 * Math.Log(1 - Random.Shared.NextDouble()) / _jitterRate);
 #pragma warning restore CA5394 // Do not use insecure randomness
-        return jitter + _settings.ConsensusFallbackTimeoutBaseDelayMs;
+        return TimeSpan.FromMicroseconds(jitter + (long)_options.ConsensusFallbackTimeoutBaseDelay.TotalMilliseconds);
     }
 
     public void Dispose()

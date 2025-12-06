@@ -1,16 +1,3 @@
-/*
- * Copyright © 2016 - 2025 VMware, Inc. All Rights Reserved.
- *
- * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
- * except in compliance with the License. You may obtain a copy of the License at
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software distributed under the
- * License is distributed on an "AS IS" BASIS, without warranties or conditions of any kind,
- * EITHER EXPRESS OR IMPLIED. See the License for the specific language governing
- * permissions and limitations under the License.
- */
-
 using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -61,13 +48,19 @@ internal sealed partial class Paxos
     private List<Endpoint> _cval = [];
 
     private readonly Action<List<Endpoint>> _onDecide;
-    private bool _decided = false;
+    private bool _decided;
 
     // Fast round votes tracking
     private readonly Dictionary<List<Endpoint>, int> _fastRoundVotes = new(ListEndpointComparer.Instance);
 
-    public Paxos(Endpoint myAddr, long configurationId, int n, IMessagingClient client,
-                 IBroadcaster broadcaster, Action<List<Endpoint>> onDecide, ILoggerFactory? loggerFactory = null)
+    public Paxos(
+        Endpoint myAddr,
+        long configurationId,
+        int n,
+        IMessagingClient client,
+        IBroadcaster broadcaster,
+        Action<List<Endpoint>> onDecide,
+        ILoggerFactory? loggerFactory = null)
     {
         _myAddr = myAddr;
         _configurationId = configurationId;
@@ -131,7 +124,7 @@ internal sealed partial class Paxos
             phase1b.Vval.AddRange(_vval);
 
             var request = RapidUtils.ToRapidRequest(phase1b);
-            _ = _client.SendMessageAsync(phase1aMessage.Sender, request);
+            _ = _client.SendMessageAsync(phase1aMessage.Sender, request, CancellationToken.None);
         }
     }
 
@@ -190,7 +183,7 @@ internal sealed partial class Paxos
             phase2b.Endpoints.AddRange(_vval);
 
             var request = RapidUtils.ToRapidRequest(phase2b);
-            _ = _client.SendMessageAsync(phase2aMessage.Sender, request);
+            _ = _client.SendMessageAsync(phase2aMessage.Sender, request, CancellationToken.None);
         }
     }
 

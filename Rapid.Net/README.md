@@ -157,10 +157,15 @@ dotnet run --project Rapid.Examples -- --listen 127.0.0.1:1236 --seed 127.0.0.1:
 
 ## Documentation
 
-For more details, see:
+- **[DEVELOPMENT.md](DEVELOPMENT.md)** - Development guide, testing, CI/CD
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** - Technical architecture and design
+- **[CHANGELOG.md](CHANGELOG.md)** - Version history and changes
+- **[TODO.md](TODO.md)** - Roadmap and planned improvements
+
+### External Resources
 - [Original Rapid Paper (USENIX ATC 2018)](https://www.usenix.org/conference/atc18/presentation/suresh)
-- [API Documentation](docs/api.md)
-- [Architecture Guide](docs/architecture.md)
+- [Fast Paxos Paper (Microsoft Research)](https://www.microsoft.com/en-us/research/wp-content/uploads/2016/02/tr-2005-112.pdf)
+- [Original Java Implementation](https://github.com/lalithsuresh/rapid)
 
 ## License
 

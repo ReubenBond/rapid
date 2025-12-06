@@ -1,7 +1,3 @@
-/*
- * Copyright © 2016 - 2025 VMware, Inc. All Rights Reserved.
- */
-
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Rapid.Messaging;
@@ -20,16 +16,31 @@ public static class RapidServiceCollectionExtensions
     /// </summary>
     /// <param name="services">The service collection.</param>
     /// <param name="configure">Configuration action for Rapid options.</param>
+    /// <param name="configureProtocol">Optional configuration action for protocol options.</param>
     /// <returns>The service collection for chaining.</returns>
     public static IServiceCollection AddRapid(
         this IServiceCollection services,
-        Action<RapidOptions> configure)
+        Action<RapidOptions> configure,
+        Action<RapidProtocolOptions>? configureProtocol = null)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configure);
 
         // Configure options
         services.Configure(configure);
+        
+        // Configure protocol options
+        if (configureProtocol != null)
+        {
+            services.Configure(configureProtocol);
+        }
+        else
+        {
+            services.Configure<RapidProtocolOptions>(_ => { });
+        }
+        
+        // Add validation
+        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<RapidProtocolOptions>, RapidProtocolOptionsValidator>();
 
         // Add core services
         services.AddGrpc();

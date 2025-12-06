@@ -1,20 +1,8 @@
-/*
- * Copyright © 2016 - 2025 VMware, Inc. All Rights Reserved.
- *
- * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
- * except in compliance with the License at
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software distributed under the
- * License is distributed on an "AS IS" BASIS, without warranties or conditions of any kind,
- * EITHER EXPRESS OR IMPLIED. See the License for the specific language governing
- * permissions and limitations under the License.
- */
-
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Rapid.Messaging;
 using Rapid.Monitoring;
 using Rapid.Pb;
@@ -46,9 +34,10 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
     private readonly CancellationTokenSource _shutdownCts = new();
     private readonly List<IDisposable> _failureDetectors = [];
     private readonly IEdgeFailureDetectorFactory _fdFactory;
-    private bool _announcedProposal = false;
+    private bool _announcedProposal;
     private readonly Lock _membershipUpdateLock = new();
-    private readonly Settings _settings;
+    private readonly RapidProtocolOptions _options;
+    private readonly IOptions<RapidProtocolOptions> _protocolOptions;
 
     private readonly struct LoggableEndpoint(Endpoint endpoint)
     {
@@ -124,11 +113,11 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         MultiNodeCutDetector cutDetection,
         MembershipView membershipView,
         SharedResources sharedResources,
-        Settings settings,
+        IOptions<RapidProtocolOptions> options,
         IMessagingClient messagingClient,
         IEdgeFailureDetectorFactory edgeFailureDetector,
         ILoggerFactory? loggerFactory = null)
-        : this(myAddr, cutDetection, membershipView, sharedResources, settings, messagingClient,
+        : this(myAddr, cutDetection, membershipView, sharedResources, options, messagingClient,
               edgeFailureDetector, [],
               [], loggerFactory)
     {
@@ -136,14 +125,15 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
 
     public MembershipService(Endpoint myAddr, MultiNodeCutDetector cutDetection,
                             MembershipView membershipView, SharedResources sharedResources,
-                            Settings settings, IMessagingClient messagingClient,
+                            IOptions<RapidProtocolOptions> options, IMessagingClient messagingClient,
                             IEdgeFailureDetectorFactory edgeFailureDetector,
                             Dictionary<Endpoint, Metadata> metadataMap,
                             Dictionary<ClusterEvents, List<Action<ClusterStatusChange>>> subscriptions,
                             ILoggerFactory? loggerFactory = null)
     {
         _myAddr = myAddr;
-        _settings = settings;
+        _protocolOptions = options;
+        _options = options.Value;
         _membershipView = membershipView;
         _cutDetection = cutDetection;
         _sharedResources = sharedResources;
@@ -173,8 +163,8 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         // Prepare consensus instance
         _fastPaxosInstance = new FastPaxos(_myAddr, _membershipView.GetCurrentConfigurationId(),
                                           _membershipView.GetMembershipSize(), _messagingClient,
-                                          _broadcaster, _sharedResources, DecideViewChange,
-                                          _settings, loggerFactory);
+                                          _broadcaster, DecideViewChange,
+                                          _protocolOptions, loggerFactory);
 
         CreateFailureDetectorsForCurrentConfiguration();
 
@@ -190,7 +180,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         }
     }
 
-    public async Task<RapidResponse> HandleMessageAsync(RapidRequest msg, CancellationToken cancellationToken = default)
+    public async Task<RapidResponse> HandleMessageAsync(RapidRequest msg, CancellationToken cancellationToken)
     {
         return msg.ContentCase switch
         {
@@ -208,7 +198,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         };
     }
 
-    private async Task<RapidResponse> HandlePreJoinMessageAsync(PreJoinMessage msg, CancellationToken cancellationToken = default)
+    private async Task<RapidResponse> HandlePreJoinMessageAsync(PreJoinMessage msg, CancellationToken cancellationToken)
     {
         var tcs = new TaskCompletionSource<RapidResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -237,7 +227,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         return await tcs.Task.ConfigureAwait(false);
     }
 
-    private async Task<RapidResponse> HandleJoinMessageAsync(JoinMessage joinMessage, CancellationToken cancellationToken = default)
+    private async Task<RapidResponse> HandleJoinMessageAsync(JoinMessage joinMessage, CancellationToken cancellationToken)
     {
         var tcs = new TaskCompletionSource<RapidResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -301,7 +291,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         return await tcs.Task.ConfigureAwait(false);
     }
 
-    private async Task<RapidResponse> HandleBatchedAlertMessageAsync(BatchedAlertMessage messageBatch, CancellationToken cancellationToken = default)
+    private async Task<RapidResponse> HandleBatchedAlertMessageAsync(BatchedAlertMessage messageBatch, CancellationToken cancellationToken)
     {
         var tcs = new TaskCompletionSource<RapidResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -350,13 +340,13 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         return await tcs.Task.ConfigureAwait(false);
     }
 
-    private Task<RapidResponse> HandleConsensusMessagesAsync(RapidRequest request, CancellationToken cancellationToken = default)
+    private Task<RapidResponse> HandleConsensusMessagesAsync(RapidRequest request, CancellationToken cancellationToken)
     {
         return Task.Run(() => _fastPaxosInstance?.HandleMessages(request)
                              ?? RapidUtils.ToRapidResponse(new ConsensusResponse()));
     }
 
-    private async Task<RapidResponse> HandleLeaveMessageAsync(RapidRequest request, CancellationToken cancellationToken = default)
+    private async Task<RapidResponse> HandleLeaveMessageAsync(RapidRequest request, CancellationToken cancellationToken)
     {
         var leaveMessage = request.LeaveMessage;
         LogReceivedLeaveMessage(new LoggableEndpoint(leaveMessage.Sender), new LoggableEndpoint(_myAddr));
@@ -364,7 +354,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         return RapidUtils.ToRapidResponse(new ConsensusResponse());
     }
 
-    private static async Task<RapidResponse> HandleProbeMessage(ProbeMessage probeMessage, CancellationToken cancellationToken = default) => RapidUtils.ToRapidResponse(new ProbeResponse());
+    private static async Task<RapidResponse> HandleProbeMessage(ProbeMessage probeMessage, CancellationToken cancellationToken) => RapidUtils.ToRapidResponse(new ProbeResponse());
 
     private void DecideViewChange(List<Endpoint> proposal)
     {
@@ -438,7 +428,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
 
         _fastPaxosInstance = new FastPaxos(_myAddr, _membershipView.GetCurrentConfigurationId(),
                                           _membershipView.GetMembershipSize(), _messagingClient,
-                                          _broadcaster, _sharedResources, DecideViewChange, _settings);
+                                          _broadcaster, DecideViewChange, _protocolOptions);
 
         CreateFailureDetectorsForCurrentConfiguration();
 
@@ -497,7 +487,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
             var tasks = observers.Select(endpoint =>
                 _messagingClient.SendMessageBestEffortAsync(endpoint, leave, CancellationToken.None).WithDefaultOnException());
 
-            using var timeoutCts = new CancellationTokenSource(_settings.LeaveMessageTimeoutMs);
+            using var timeoutCts = new CancellationTokenSource(_options.LeaveMessageTimeout);
             try
             {
                 await Task.WhenAll(tasks).WaitAsync(timeoutCts.Token).ConfigureAwait(false);
@@ -535,7 +525,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         {
             try
             {
-                await Task.Delay(_settings.BatchingWindowMs, _shutdownCts.Token).ConfigureAwait(false);
+                await Task.Delay(_options.BatchingWindow, _shutdownCts.Token).ConfigureAwait(false);
 
                 lock (_batchSchedulerLock)
                 {
