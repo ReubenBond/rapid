@@ -432,7 +432,7 @@ internal sealed class MembershipService : IMembershipServiceHandler
             var observers = _membershipView.GetObserversOf(_myAddr);
             _logger.LogInformation("Leaving: {MyAddr} has {Count} observers: {Observers}",
                 Utils.Loggable(_myAddr), observers.Count, string.Join(", ", observers.Select(Utils.Loggable)));
-            
+
             var tasks = observers.Select(endpoint =>
                 _messagingClient.SendMessageBestEffortAsync(endpoint, leave, CancellationToken.None));
 
@@ -560,38 +560,37 @@ internal sealed class MembershipService : IMembershipServiceHandler
 
     private void EdgeFailureNotification(Endpoint subject, long configurationId)
     {
-        try
+        _sharedResources.GetProtocolExecutor().Writer.TryWrite(async () =>
         {
-            var ringNumbers = _membershipView.GetRingNumbers(_myAddr, subject);
-            _logger.LogInformation("EdgeFailureNotification: {MyAddr} monitoring {Subject} on {RingCount} rings: {Rings}",
-                Utils.Loggable(_myAddr), Utils.Loggable(subject), ringNumbers.Count, string.Join(",", ringNumbers));
-            
-            if (ringNumbers.Count == 0)
+            try
             {
-                _logger.LogWarning("No monitoring relationship between {MyAddr} and {Subject} - skipping alert",
-                    Utils.Loggable(_myAddr), Utils.Loggable(subject));
-                return;
+                if (configurationId != _membershipView.GetCurrentConfigurationId())
+                {
+                    _logger.LogInformation("Ignoring failure notification from old configuration {Subject}, config: {CurrentConfig}, oldConfiguration: {OldConfig}",
+                        Utils.Loggable(subject), _membershipView.GetCurrentConfigurationId(), configurationId);
+                    return;
+                }
+
+                _logger.LogDebug("Announcing EdgeFail event {Subject}, observer: {MyAddr}, config: {Config}, size: {Size}",
+                    Utils.Loggable(subject), Utils.Loggable(_myAddr), configurationId, _membershipView.GetMembershipSize());
+
+                var ringNumbers = _membershipView.GetRingNumbers(_myAddr, subject);
+
+                var msg = new AlertMessage
+                {
+                    EdgeSrc = _myAddr,
+                    EdgeDst = subject,
+                    EdgeStatus = EdgeStatus.Down,
+                    ConfigurationId = configurationId
+                };
+                msg.RingNumber.AddRange(ringNumbers);
+
+                EnqueueAlertMessage(msg);
             }
-
-            var msg = new AlertMessage
+            catch (Exception ex)
             {
-                EdgeSrc = _myAddr,
-                EdgeDst = subject,
-                EdgeStatus = EdgeStatus.Down,
-                ConfigurationId = configurationId
-            };
-            msg.RingNumber.AddRange(ringNumbers);
-
-            EnqueueAlertMessage(msg);
-        }
-        catch (MembershipView.NodeNotInRingException ex)
-        {
-            _logger.LogWarning("Node {Subject} not in ring when processing edge failure notification: {Message}",
-                Utils.Loggable(subject), ex.Message);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error in EdgeFailureNotification for {Subject}", Utils.Loggable(subject));
-        }
+                _logger.LogError(ex, "Error in EdgeFailureNotification for {Subject}", Utils.Loggable(subject));
+            }
+        });
     }
 }

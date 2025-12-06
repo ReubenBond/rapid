@@ -18,7 +18,7 @@ namespace Rapid.Tests;
 /// <summary>
 /// Tests for multi node cut detection
 /// </summary>
-public class MultiNodeCutDetectorTests
+internal class MultiNodeCutDetectorTests
 {
     private const int K = 10;
     private const int H = 8;

@@ -11,10 +11,8 @@
  * permissions and limitations under the License.
  */
 
-using System.Collections.Concurrent;
 using System.IO.Hashing;
 using System.Runtime.InteropServices;
-using Microsoft.AspNetCore.Authentication;
 using Rapid.Pb;
 
 namespace Rapid;
@@ -36,6 +34,11 @@ internal sealed class MembershipView
     private Configuration _currentConfiguration;
     private bool _shouldUpdateConfigurationId = true;
 
+    /// <summary>
+    /// Initializes a new instance of the MembershipView class with the specified number of rings.
+    /// </summary>
+    /// <param name="k">Number of monitoring rings to maintain. Must be positive.</param>
+    /// <exception cref="ArgumentException">Thrown when k is not positive.</exception>
     public MembershipView(int k)
     {
         if (k <= 0) throw new ArgumentException("K must be positive", nameof(k));
@@ -55,6 +58,14 @@ internal sealed class MembershipView
         _currentConfiguration = new Configuration(_identifiersSeen, _rings[0]);
     }
 
+    /// <summary>
+    /// Initializes a new instance of the MembershipView class with the specified number of rings
+    /// and pre-populated with the given nodes.
+    /// </summary>
+    /// <param name="k">Number of monitoring rings to maintain.</param>
+    /// <param name="nodeIds">Collection of node identifiers to add.</param>
+    /// <param name="endpoints">Collection of endpoints corresponding to the node IDs.</param>
+    /// <exception cref="ArgumentException">Thrown when nodeIds and endpoints counts don't match.</exception>
     public MembershipView(int k, ICollection<NodeId> nodeIds, ICollection<Endpoint> endpoints)
     {
         if (k <= 0) throw new ArgumentException("K must be positive", nameof(k));
@@ -85,6 +96,15 @@ internal sealed class MembershipView
         _currentConfiguration = new Configuration(_identifiersSeen, _rings[0]);
     }
 
+    /// <summary>
+    /// Checks whether it is safe for a node to join the membership view.
+    /// </summary>
+    /// <param name="node">The endpoint of the node attempting to join.</param>
+    /// <param name="uuid">The unique identifier of the node attempting to join.</param>
+    /// <returns>
+    /// A JoinStatusCode indicating whether the join is safe:
+    /// SAFE_TO_JOIN, HOSTNAME_ALREADY_IN_RING, UUID_ALREADY_IN_RING, or CONFIG_CHANGED.
+    /// </returns>
     public JoinStatusCode IsSafeToJoin(Endpoint node, NodeId uuid)
     {
         _rwLock.EnterReadLock();
@@ -108,6 +128,13 @@ internal sealed class MembershipView
         }
     }
 
+    /// <summary>
+    /// Adds a node to all K rings in the membership view.
+    /// </summary>
+    /// <param name="node">The endpoint of the node to add.</param>
+    /// <param name="nodeId">The unique identifier for the node.</param>
+    /// <exception cref="NodeAlreadyInRingException">Thrown if the node is already in the ring.</exception>
+    /// <exception cref="UuidAlreadySeenException">Thrown if the node ID has been seen before.</exception>
     public void RingAdd(Endpoint node, NodeId nodeId)
     {
         ArgumentNullException.ThrowIfNull(node);
@@ -155,6 +182,11 @@ internal sealed class MembershipView
         }
     }
 
+    /// <summary>
+    /// Removes a node from all K rings in the membership view.
+    /// </summary>
+    /// <param name="node">The endpoint of the node to remove.</param>
+    /// <exception cref="NodeNotInRingException">Thrown if the node is not in the ring.</exception>
     public void RingDelete(Endpoint node)
     {
         ArgumentNullException.ThrowIfNull(node);
@@ -198,6 +230,12 @@ internal sealed class MembershipView
         }
     }
 
+    /// <summary>
+    /// Gets the list of observers monitoring the given node across all K rings.
+    /// An observer is a node that monitors its successor on a ring.
+    /// </summary>
+    /// <param name="node">The node being monitored.</param>
+    /// <returns>A list of endpoints that are observers of the given node.</returns>
     public List<Endpoint> GetObserversOf(Endpoint node)
     {
         ArgumentNullException.ThrowIfNull(node);
@@ -255,6 +293,12 @@ internal sealed class MembershipView
         return observers;
     }
 
+    /// <summary>
+    /// Gets the list of subjects that the given node is monitoring across all K rings.
+    /// A subject is a node being monitored by its predecessor on a ring.
+    /// </summary>
+    /// <param name="node">The observing node.</param>
+    /// <returns>A list of endpoints that the given node is monitoring.</returns>
     public List<Endpoint> GetSubjectsOf(Endpoint node)
     {
         ArgumentNullException.ThrowIfNull(node);
@@ -280,6 +324,12 @@ internal sealed class MembershipView
         }
     }
 
+    /// <summary>
+    /// Gets the expected list of observers for a node that hasn't been added to the rings yet.
+    /// This is used during the join protocol to determine which nodes should monitor the joining node.
+    /// </summary>
+    /// <param name="node">The node to calculate expected observers for.</param>
+    /// <returns>A list of endpoints that would observe this node if it were added.</returns>
     public List<Endpoint> GetExpectedObserversOf(Endpoint node)
     {
         ArgumentNullException.ThrowIfNull(node);
@@ -319,6 +369,11 @@ internal sealed class MembershipView
         return subjects;
     }
 
+    /// <summary>
+    /// Checks if a host endpoint is present in the membership view.
+    /// </summary>
+    /// <param name="address">The endpoint to check.</param>
+    /// <returns>True if the endpoint is present; otherwise, false.</returns>
     public bool IsHostPresent(Endpoint address)
     {
         _rwLock.EnterReadLock();
@@ -332,6 +387,11 @@ internal sealed class MembershipView
         }
     }
 
+    /// <summary>
+    /// Checks if a node identifier has been seen before in the membership view.
+    /// </summary>
+    /// <param name="identifier">The node identifier to check.</param>
+    /// <returns>True if the identifier has been seen; otherwise, false.</returns>
     public bool IsIdentifierPresent(NodeId identifier)
     {
         _rwLock.EnterReadLock();
@@ -345,6 +405,11 @@ internal sealed class MembershipView
         }
     }
 
+    /// <summary>
+    /// Gets the current configuration identifier for the membership view.
+    /// The configuration ID is a hash of all node identifiers and endpoints in the view.
+    /// </summary>
+    /// <returns>The current configuration ID.</returns>
     public long GetCurrentConfigurationId()
     {
         _rwLock.EnterReadLock();
@@ -363,6 +428,12 @@ internal sealed class MembershipView
         }
     }
 
+    /// <summary>
+    /// Gets all endpoints in a specific ring.
+    /// </summary>
+    /// <param name="k">The ring number (0-based index).</param>
+    /// <returns>A list of endpoints in the specified ring.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown if k is out of range.</exception>
     public List<Endpoint> GetRing(int k)
     {
         _rwLock.EnterReadLock();
@@ -377,6 +448,12 @@ internal sealed class MembershipView
         }
     }
 
+    /// <summary>
+    /// Gets the ring numbers where an observer is monitoring a subject.
+    /// </summary>
+    /// <param name="observer">The observing node.</param>
+    /// <param name="subject">The subject being monitored.</param>
+    /// <returns>A list of ring numbers where the observer monitors the subject.</returns>
     public List<int> GetRingNumbers(Endpoint observer, Endpoint subject)
     {
         _rwLock.EnterReadLock();
@@ -406,6 +483,10 @@ internal sealed class MembershipView
         }
     }
 
+    /// <summary>
+    /// Gets the current number of nodes in the membership view.
+    /// </summary>
+    /// <returns>The number of nodes in the view.</returns>
     public int GetMembershipSize()
     {
         _rwLock.EnterReadLock();
@@ -425,6 +506,10 @@ internal sealed class MembershipView
         _currentConfigurationId = _currentConfiguration.GetConfigurationId();
     }
 
+    /// <summary>
+    /// Gets the current configuration containing all node identifiers and endpoints.
+    /// </summary>
+    /// <returns>The current configuration object.</returns>
     public Configuration GetConfiguration()
     {
         _rwLock.EnterReadLock();
@@ -463,14 +548,23 @@ internal sealed class MembershipView
 
     public sealed class NodeAlreadyInRingException(Endpoint node) : Exception(node.ToString())
     {
+        public NodeAlreadyInRingException()
+        {
+        }
     }
 
     public sealed class NodeNotInRingException(Endpoint node) : Exception(node.ToString())
     {
+        public NodeNotInRingException()
+        {
+        }
     }
 
     public sealed class UuidAlreadySeenException(Endpoint node, NodeId nodeId) : Exception($"Endpoint add attempt with identifier already seen: {{host: {node}, identifier: {nodeId}}}")
     {
+        public UuidAlreadySeenException()
+        {
+        }
     }
 
     public sealed class Configuration(IEnumerable<NodeId> nodeIds, IEnumerable<Endpoint> endpoints)

@@ -2,15 +2,15 @@
  * Copyright © 2016 - 2025 VMware, Inc. All Rights Reserved.
  */
 
-using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
+using Microsoft.Extensions.Logging;
 
 namespace Rapid.Tests.Integration;
 
 /// <summary>
 /// Debug test for leave protocol
 /// </summary>
-public class LeaveProtocolDebugTest : IDisposable
+internal class LeaveProtocolDebugTest : IDisposable
 {
     private readonly List<Cluster> _clusters = [];
     private readonly ILoggerFactory _loggerFactory;

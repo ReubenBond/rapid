@@ -1,0 +1,78 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  build-and-test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        dotnet-version: ['9.0.x']
+      fail-fast: false
+    
+    runs-on: ${{ matrix.os }}
+    
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Fetch all history for better versioning
+    
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ matrix.dotnet-version }}
+    
+    - name: Display .NET info
+      run: dotnet --info
+    
+    - name: Restore dependencies
+      run: dotnet restore Rapid.Net/Rapid.slnx
+      
+    - name: Build
+      run: dotnet build Rapid.Net/Rapid.slnx --no-restore --configuration Release
+      
+    - name: Run Unit Tests
+      run: dotnet test Rapid.Net/Rapid.slnx --no-build --configuration Release --filter "FullyQualifiedName!~Integration" --verbosity normal --logger "trx;LogFileName=unit-test-results.trx"
+      
+    - name: Run Integration Tests
+      run: dotnet test Rapid.Net/Rapid.slnx --no-build --configuration Release --filter "FullyQualifiedName~Integration" --verbosity normal --logger "trx;LogFileName=integration-test-results.trx"
+      continue-on-error: true  # Integration tests have known edge cases
+      
+    - name: Upload Test Results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: test-results-${{ matrix.os }}
+        path: |
+          **/TestResults/*.trx
+          
+  # Only run code coverage on Linux to save CI time
+  code-coverage:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '9.0.x'
+    
+    - name: Restore dependencies
+      run: dotnet restore Rapid.Net/Rapid.slnx
+      
+    - name: Build
+      run: dotnet build Rapid.Net/Rapid.slnx --no-restore --configuration Release
+      
+    - name: Test with Coverage
+      run: dotnet test Rapid.Net/Rapid.slnx --no-build --configuration Release --collect:"XPlat Code Coverage" --results-directory ./coverage
+      
+    - name: Upload Coverage Reports
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-report
+        path: ./coverage

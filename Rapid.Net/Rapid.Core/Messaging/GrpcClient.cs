@@ -2,10 +2,10 @@
  * Copyright © 2016 - 2025 VMware, Inc. All Rights Reserved.
  */
 
+using System.Collections.Concurrent;
+using Grpc.Core;
 using Microsoft.Extensions.Logging;
 using Rapid.Pb;
-using Grpc.Core;
-using System.Collections.Concurrent;
 
 namespace Rapid.Messaging;
 

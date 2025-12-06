@@ -2,13 +2,13 @@
  * Copyright © 2016 - 2025 VMware, Inc. All Rights Reserved.
  */
 
+using System.Runtime.InteropServices;
 using Google.Protobuf;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Rapid.Messaging;
 using Rapid.Monitoring;
 using Rapid.Pb;
-using System.Runtime.InteropServices;
 
 namespace Rapid;
 
@@ -333,5 +333,8 @@ public sealed class Cluster : IDisposable
 
     public class JoinException(string message) : Exception(message)
     {
+        public JoinException()
+        {
+        }
     }
 }

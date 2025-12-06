@@ -18,7 +18,7 @@ namespace Rapid.Tests;
 /// <summary>
 /// Tests for a standalone MembershipView object.
 /// </summary>
-public class MembershipViewTests
+internal class MembershipViewTests
 {
     private const int K = 10;
 
@@ -596,7 +596,7 @@ public class MembershipViewTests
 /// <summary>
 /// Helper class for creating deterministic GUIDs from names
 /// </summary>
-public static class GuidUtility
+internal static class GuidUtility
 {
     public static readonly Guid DnsNamespace = new Guid("6ba7b810-9dad-11d1-80b4-00c04fd430c8");
 

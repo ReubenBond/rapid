@@ -1,15 +1,12 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
-		<TargetFramework>net10.0</TargetFramework>
-		<ImplicitUsings>enable</ImplicitUsings>
-		<Nullable>enable</Nullable>
-		<LangVersion>latest</LangVersion>
-		<Authors>Rapid Team</Authors>
-		<Description>Rapid - A distributed membership service for .NET</Description>
-		<Copyright>Copyright © 2016-2025 VMware, Inc. All Rights Reserved.</Copyright>
-		<PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+		<Description>Rapid - A distributed membership service for .NET. Fast, scalable, and stable failure detection and membership tracking for cloud-native distributed systems. Port of VMware Research Rapid.</Description>
 		<RootNamespace>Rapid</RootNamespace>
+		<PackageId>Rapid.Net</PackageId>
+		<Version>1.0.0-beta.1</Version>
+		<PackageTags>distributed-systems;membership;failure-detection;consensus;cluster;microservices;grpc;paxos</PackageTags>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -17,20 +14,24 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<PackageReference Include="Google.Protobuf" Version="3.33.2" />
-		<PackageReference Include="Grpc.Net.Client" Version="2.71.0" />
-		<PackageReference Include="Grpc.AspNetCore" Version="2.71.0" />
-		<PackageReference Include="Grpc.Core" Version="2.46.6" />
-		<PackageReference Include="Grpc.Tools" Version="2.76.0">
+		<PackageReference Include="Google.Protobuf" />
+		<PackageReference Include="Grpc.Net.Client" />
+		<PackageReference Include="Grpc.AspNetCore" />
+		<PackageReference Include="Grpc.Core" />
+		<PackageReference Include="Grpc.Tools">
 			<PrivateAssets>all</PrivateAssets>
 			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
 		</PackageReference>
-		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
-		<PackageReference Include="System.IO.Hashing" Version="10.0.0" />
+		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+		<PackageReference Include="System.IO.Hashing" />
 	</ItemGroup>
 
 	<ItemGroup>
 		<Protobuf Include="Protos\rapid.proto" GrpcServices="Both" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<None Include="..\..\README.md" Pack="true" PackagePath="\" />
 	</ItemGroup>
 
 </Project>

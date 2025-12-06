@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Copyright © 2016 - 2025 VMware, Inc. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
@@ -11,9 +11,9 @@
  * permissions and limitations under the License.
  */
 
+using System.CommandLine;
 using Microsoft.Extensions.Logging;
 using Rapid;
-using System.CommandLine;
 
 /// <summary>
 /// Rapid Cluster example application.

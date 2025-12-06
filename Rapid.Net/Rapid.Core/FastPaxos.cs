@@ -11,11 +11,11 @@
  * permissions and limitations under the License.
  */
 
+using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Rapid.Messaging;
 using Rapid.Pb;
-using System.Runtime.InteropServices;
 
 namespace Rapid;
 
