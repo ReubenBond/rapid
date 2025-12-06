@@ -13,7 +13,6 @@
 
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using Rapid.Pb;
 using System.Threading.Channels;
 
 namespace Rapid;

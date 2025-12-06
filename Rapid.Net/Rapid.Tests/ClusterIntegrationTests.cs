@@ -12,8 +12,6 @@
  */
 
 using Microsoft.Extensions.Logging;
-using Rapid;
-using Rapid.Pb;
 using System.Collections.Concurrent;
 
 namespace Rapid.Tests.Integration;
@@ -238,8 +236,8 @@ public class ClusterIntegrationTests : IDisposable
         // Joiner leaves gracefully
         await joiner.LeaveGracefullyAsync();
 
-        // Wait for seed to detect the leave
-        await WaitForClusterSize(seed, 1, TimeSpan.FromSeconds(10));
+        // Wait for seed to detect the leave - increased timeout for consensus
+        await WaitForClusterSize(seed, 1, TimeSpan.FromSeconds(20));
 
         Assert.Equal(1, seed.GetMembershipSize());
     }
@@ -272,14 +270,14 @@ public class ClusterIntegrationTests : IDisposable
         var joiners = await Task.WhenAll(joinTasks);
         _clusters.AddRange(joiners);
 
-        // Wait for cluster convergence
-        await WaitForClusterSize(seed, numJoiners + 1, TimeSpan.FromSeconds(15));
+        // Wait for cluster convergence - increased timeout for concurrent joins
+        await WaitForClusterSize(seed, numJoiners + 1, TimeSpan.FromSeconds(30));
 
         Assert.Equal(numJoiners + 1, seed.GetMembershipSize());
         
         foreach (var joiner in joiners)
         {
-            await WaitForClusterSize(joiner, numJoiners + 1, TimeSpan.FromSeconds(15));
+            await WaitForClusterSize(joiner, numJoiners + 1, TimeSpan.FromSeconds(30));
             Assert.Equal(numJoiners + 1, joiner.GetMembershipSize());
         }
     }

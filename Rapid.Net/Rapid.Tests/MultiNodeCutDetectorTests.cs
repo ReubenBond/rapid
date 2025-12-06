@@ -11,7 +11,6 @@
  * permissions and limitations under the License.
  */
 
-using Rapid;
 using Rapid.Pb;
 
 namespace Rapid.Tests;

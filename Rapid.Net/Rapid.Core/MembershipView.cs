@@ -13,7 +13,6 @@
 
 using System.Collections.Concurrent;
 using System.IO.Hashing;
-using Google.Protobuf;
 using Rapid.Pb;
 
 namespace Rapid;
@@ -442,11 +441,6 @@ internal sealed class MembershipView
         }
     }
 
-    public AddressComparator GetRingZeroComparator()
-    {
-        return _addressComparators[0];
-    }
-
     private static Endpoint? GetLower(SortedSet<Endpoint> set, Endpoint value)
     {
         if (set.Count == 0) return null;
@@ -504,7 +498,7 @@ internal sealed class MembershipView
         }
     }
 
-    public sealed class AddressComparator(int seed) : IComparer<Endpoint>
+    private sealed class AddressComparator(int seed) : IComparer<Endpoint>
     {
         private readonly int _seed = seed;
         private readonly ConcurrentDictionary<Endpoint, long> _hashCache = new();

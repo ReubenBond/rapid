@@ -182,7 +182,7 @@ public sealed class Cluster : IDisposable
             var currentIdentifier = Utils.NodeIdFromUuid(Guid.NewGuid());
             
             // Create messaging infrastructure
-            _messagingClient ??= new GrpcClient(_listenAddress, sharedResources, _settings, _loggerFactory);
+            _messagingClient ??= new GrpcClient(_settings, _loggerFactory);
             _messagingServer ??= new GrpcServer(_listenAddress, sharedResources, _settings, _loggerFactory);
             
             // Create membership view with just this node
@@ -193,7 +193,7 @@ public sealed class Cluster : IDisposable
             var cutDetector = new MultiNodeCutDetector(K, H, L);
             
             // Create failure detector factory if not provided
-            _edgeFailureDetector ??= new Monitoring.PingPongFailureDetectorFactory(_listenAddress, _messagingClient, _loggerFactory);
+            _edgeFailureDetector ??= new PingPongFailureDetectorFactory(_listenAddress, _messagingClient, _loggerFactory);
             
             // Create metadata dictionary
             var metadataMap = new Dictionary<Endpoint, Metadata> { { _listenAddress, _metadata } };
@@ -224,7 +224,7 @@ public sealed class Cluster : IDisposable
             var currentIdentifier = Utils.NodeIdFromUuid(Guid.NewGuid());
             
             // Create messaging infrastructure
-            _messagingClient ??= new GrpcClient(_listenAddress, sharedResources, _settings, _loggerFactory);
+            _messagingClient ??= new GrpcClient(_settings, _loggerFactory);
             _messagingServer ??= new GrpcServer(_listenAddress, sharedResources, _settings, _loggerFactory);
 
             // Start server first
@@ -302,7 +302,7 @@ public sealed class Cluster : IDisposable
             // Initialize membership view from response
             var membershipView = new MembershipView(K, successfulResponse.Identifiers, successfulResponse.Endpoints);
             var cutDetector = new MultiNodeCutDetector(K, H, L);
-            _edgeFailureDetector ??= new Monitoring.PingPongFailureDetectorFactory(_listenAddress, _messagingClient, _loggerFactory);
+            _edgeFailureDetector ??= new PingPongFailureDetectorFactory(_listenAddress, _messagingClient, _loggerFactory);
 
             // Build metadata map
             var metadataMap = new Dictionary<Endpoint, Metadata>();

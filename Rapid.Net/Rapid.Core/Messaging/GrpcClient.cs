@@ -3,7 +3,6 @@
  */
 
 using Microsoft.Extensions.Logging;
-using Rapid.Messaging;
 using Rapid.Pb;
 using Grpc.Core;
 using System.Collections.Concurrent;
@@ -13,11 +12,8 @@ namespace Rapid.Messaging;
 /// <summary>
 /// gRPC-based messaging client for Rapid.
 /// </summary>
-public sealed class GrpcClient(Endpoint localEndpoint, SharedResources sharedResources, Settings settings,
-                 ILoggerFactory? loggerFactory = null) : IMessagingClient
+public sealed class GrpcClient(Settings settings, ILoggerFactory? loggerFactory = null) : IMessagingClient
 {
-    private readonly Endpoint _localEndpoint = localEndpoint;
-    private readonly SharedResources _sharedResources = sharedResources; // Reserved for future use
     private readonly Settings _settings = settings;
     private readonly ILogger<GrpcClient> _logger = (loggerFactory ?? Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance)
             .CreateLogger<GrpcClient>();
@@ -28,12 +24,12 @@ public sealed class GrpcClient(Endpoint localEndpoint, SharedResources sharedRes
         CancellationToken cancellationToken = default)
     {
         var client = GetOrCreateClient(remote);
-        
+
         try
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             cts.CancelAfter(_settings.GrpcTimeoutMs);
-            
+
             var response = await client.sendRequestAsync(request, cancellationToken: cts.Token);
             return response;
         }

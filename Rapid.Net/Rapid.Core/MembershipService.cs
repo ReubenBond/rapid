@@ -113,7 +113,7 @@ internal sealed class MembershipService : IMembershipServiceHandler
         var currentMembership = _membershipView.GetRing(0);
         var nodeStatusChanges = GetInitialViewChange();
         var clusterStatusChange = new ClusterStatusChange(configurationId, currentMembership, nodeStatusChanges);
-        
+
         foreach (var cb in _subscriptions[ClusterEvents.ViewChange])
         {
             cb(clusterStatusChange);
@@ -141,7 +141,7 @@ internal sealed class MembershipService : IMembershipServiceHandler
     private async Task<RapidResponse> HandleMessageAsync(PreJoinMessage msg)
     {
         var tcs = new TaskCompletionSource<RapidResponse>();
-        
+
         await _sharedResources.GetProtocolExecutor().Writer.WriteAsync(async () =>
         {
             var joiningEndpoint = msg.Sender;
@@ -175,7 +175,7 @@ internal sealed class MembershipService : IMembershipServiceHandler
         await _sharedResources.GetProtocolExecutor().Writer.WriteAsync(async () =>
         {
             var currentConfiguration = _membershipView.GetCurrentConfigurationId();
-            
+
             if (currentConfiguration == joinMessage.ConfigurationId)
             {
                 _logger.LogTrace("Enqueuing SAFE_TO_JOIN for {{sender:{Sender}, config:{Config}, size:{Size}}}",
@@ -198,7 +198,7 @@ internal sealed class MembershipService : IMembershipServiceHandler
                     Metadata = joinMessage.Metadata
                 };
                 alertMsg.RingNumber.AddRange(joinMessage.RingNumber);
-                
+
                 EnqueueAlertMessage(alertMsg);
             }
             else
@@ -207,7 +207,7 @@ internal sealed class MembershipService : IMembershipServiceHandler
                 _logger.LogInformation("Wrong configuration for {{sender:{Sender}, config:{Config}, myConfig:{MyConfig}, size:{Size}}}",
                     Utils.Loggable(joinMessage.Sender), joinMessage.ConfigurationId,
                     currentConfiguration, _membershipView.GetMembershipSize());
-                
+
                 var responseBuilder = new JoinResponse
                 {
                     Sender = _myAddr,
@@ -264,17 +264,17 @@ internal sealed class MembershipService : IMembershipServiceHandler
                     _announcedProposal = true;
                     var currentConfigurationId = _membershipView.GetCurrentConfigurationId();
                     _logger.LogDebug("Initiating consensus for {Proposal}", Utils.Loggable(proposals));
-                    
+
                     // Notify subscribers about the proposal
                     var nodeStatusChanges = CreateNodeStatusChangeList(proposals);
                     var currentMembership = _membershipView.GetRing(0);
                     var clusterStatusChange = new ClusterStatusChange(currentConfigurationId, currentMembership, nodeStatusChanges);
-                    
+
                     foreach (var cb in _subscriptions[ClusterEvents.ViewChangeProposal])
                     {
                         cb(clusterStatusChange);
                     }
-                    
+
                     _fastPaxosInstance?.Propose(proposals);
                 }
             }
@@ -287,7 +287,7 @@ internal sealed class MembershipService : IMembershipServiceHandler
 
     private Task<RapidResponse> HandleConsensusMessagesAsync(RapidRequest request)
     {
-        return Task.Run(() => _fastPaxosInstance?.HandleMessages(request) 
+        return Task.Run(() => _fastPaxosInstance?.HandleMessages(request)
                              ?? Utils.ToRapidResponse(new ConsensusResponse()));
     }
 
@@ -327,11 +327,11 @@ internal sealed class MembershipService : IMembershipServiceHandler
 
                 var nodeId = _joinerUuid[node];
                 var metadata = _joinerMetadata.GetValueOrDefault(node, new Metadata());
-                
+
                 _logger.LogDebug("Adding node {Node}", Utils.Loggable(node));
                 _membershipView.RingAdd(node, nodeId);
                 _metadataManager.Add(node, metadata);
-                
+
                 _joinerUuid.Remove(node);
                 _joinerMetadata.Remove(node);
 
@@ -352,13 +352,13 @@ internal sealed class MembershipService : IMembershipServiceHandler
                     response.MetadataValues.AddRange(allMetadata.Values);
 
                     var rapidResponse = Utils.ToRapidResponse(response);
-                    
+
                     // Send response to all waiting tasks
                     while (channel.Reader.TryRead(out var tcs))
                     {
                         tcs.SetResult(rapidResponse);
                     }
-                    
+
                     _joinersToRespondTo.Remove(node);
                 }
             }
@@ -430,7 +430,7 @@ internal sealed class MembershipService : IMembershipServiceHandler
         try
         {
             var observers = _membershipView.GetObserversOf(_myAddr);
-            var tasks = observers.Select(endpoint => 
+            var tasks = observers.Select(endpoint =>
                 _messagingClient.SendMessageBestEffortAsync(endpoint, leave, CancellationToken.None));
 
             using var timeoutCts = new CancellationTokenSource(_settings.LeaveMessageTimeoutMs);
@@ -464,13 +464,13 @@ internal sealed class MembershipService : IMembershipServiceHandler
     private async Task AlertBatcherAsync()
     {
         var buffer = new List<AlertMessage>();
-        
+
         while (!_shutdownCts.Token.IsCancellationRequested)
         {
             try
             {
                 await Task.Delay(_settings.BatchingWindowMs, _shutdownCts.Token);
-                
+
                 lock (_batchSchedulerLock)
                 {
                     while (_sendQueue.Reader.TryRead(out var msg))
