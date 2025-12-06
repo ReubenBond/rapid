@@ -449,7 +449,13 @@ internal sealed class MembershipView
 
     private static Endpoint? GetLower(SortedSet<Endpoint> set, Endpoint value)
     {
-        return set.GetViewBetween(set.Min!, value).Where(e => !e.Equals(value)).LastOrDefault();
+        if (set.Count == 0) return null;
+        
+        var min = set.Min!;
+        // If value is less than or equal to min, there is no lower element
+        if (set.Comparer.Compare(value, min) <= 0) return null;
+        
+        return set.GetViewBetween(min, value).Where(e => !e.Equals(value)).LastOrDefault();
     }
 
     private static Endpoint? GetHigher(SortedSet<Endpoint> set, Endpoint value)

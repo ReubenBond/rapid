@@ -23,30 +23,30 @@ internal class Program
     private const int SleepIntervalMs = 1000;
     private const int MaxTries = 400;
 
-    static async Task<int> Main(string[] args)
+    static int Main(string[] args)
     {
         var listenOption = new Option<string>(
-            name: "--listen",
-            description: "The listening address (e.g., 127.0.0.1:1234)")
-        { IsRequired = true };
+            "--listen",
+            "The listening address (e.g., 127.0.0.1:1234)")
+        { Required = true };
 
         var seedOption = new Option<string>(
-            name: "--seed",
-            description: "The seed node's address for bootstrap (e.g., 127.0.0.1:1234)")
-        { IsRequired = true };
+            "--seed",
+            "The seed node's address for bootstrap (e.g., 127.0.0.1:1234)")
+        { Required = true };
 
-        var rootCommand = new RootCommand("Rapid.NET Standalone Agent")
+        var rootCommand = new RootCommand("Rapid.NET Standalone Agent");
+        rootCommand.Options.Add(listenOption);
+        rootCommand.Options.Add(seedOption);
+
+        rootCommand.SetAction((parseResult) =>
         {
-            listenOption,
-            seedOption
-        };
+            var listen = parseResult.GetValue(listenOption);
+            var seed = parseResult.GetValue(seedOption);
+            RunAgentAsync(listen!, seed!).Wait();
+        });
 
-        rootCommand.SetHandler(async (string listen, string seed) =>
-        {
-            await RunAgentAsync(listen, seed);
-        }, listenOption, seedOption);
-
-        return await rootCommand.InvokeAsync(args);
+        return rootCommand.Parse(args).Invoke();
     }
 
     static async Task RunAgentAsync(string listenAddress, string seedAddress)
