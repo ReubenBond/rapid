@@ -1,0 +1,54 @@
+/*
+ * Copyright © 2016 - 2025 VMware, Inc. All Rights Reserved.
+ */
+
+using Grpc.AspNetCore.Server;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Routing;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.Extensions.DependencyInjection;
+using Rapid.Messaging;
+
+namespace Rapid;
+
+/// <summary>
+/// Extension methods for configuring Rapid with ASP.NET Core hosting.
+/// </summary>
+public static class RapidHostingExtensions
+{
+    /// <summary>
+    /// Configures Kestrel to listen on the Rapid port with HTTP/2.
+    /// Call this when you need to configure the port for Rapid gRPC services.
+    /// </summary>
+    /// <param name="builder">The WebApplicationBuilder.</param>
+    /// <param name="port">The port to listen on.</param>
+    /// <returns>The builder for chaining.</returns>
+    public static WebApplicationBuilder ConfigureRapidKestrel(
+        this WebApplicationBuilder builder,
+        int port)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        builder.WebHost.ConfigureKestrel(options =>
+        {
+            options.ListenAnyIP(port, listenOptions =>
+            {
+                listenOptions.Protocols = HttpProtocols.Http2;
+            });
+        });
+
+        return builder;
+    }
+
+    /// <summary>
+    /// Maps Rapid gRPC endpoints to the application.
+    /// </summary>
+    /// <param name="app">The endpoint route builder (WebApplication or IEndpointRouteBuilder).</param>
+    /// <returns>The gRPC service endpoint convention builder.</returns>
+    public static GrpcServiceEndpointConventionBuilder MapRapidMembershipService(this IEndpointRouteBuilder app)
+    {
+        ArgumentNullException.ThrowIfNull(app);
+        return app.MapGrpcService<MembershipServiceImpl>();
+    }
+}

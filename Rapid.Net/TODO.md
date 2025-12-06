@@ -1,53 +1,382 @@
-# Rapid.NET Port - TODO List
+# Rapid.NET - TODO List
 
-**Last Updated**: 2025-12-06 22:30 UTC  
-**Status**: ✅ PRODUCTION-READY! All build errors/warnings fixed. Zero compilation issues. Integration tests 75% passing (6/8), Unit tests 100% passing (33/33)!
-
-**MAJOR MILESTONE ACHIEVED**: 
-- ✅ All compilation errors fixed
-- ✅ All compilation warnings fixed (no suppressions used)
-- ✅ All high-priority implementations complete
-- ✅ GrpcServer fixed to support bootstrap phase
-- ✅ ViewChangeProposal events now firing correctly
-- ✅ 6 out of 8 integration tests passing (75% success rate)
-- ✅ All 34 unit tests passing (100% success rate)
-- ✅ MembershipView, MultiNodeCutDetector, and Paxos tests all passing
-- ✅ Integration tests for basic cluster operations passing
-- ✅ Multi-node cluster formation confirmed working
-- ✅ View change events working correctly
-- ✅ Metadata propagation working correctly
-- ✅ **Code quality**: Proper implementations, no shortcuts, all analyzer recommendations followed
-- 🎯 **PROJECT STATUS: PRODUCTION-READY - CLEAN BUILD**
-- ⚠️ Known issues: 2 edge case tests failing (2-node leave protocol and concurrent joins need investigation)
+**Last Updated:** 2025-12-06  
+**Status:** Post-refactoring cleanup needed
 
 ---
 
-## ✅ COMPLETED - Build Quality Improvements (Completed: 2025-12-06 22:30 UTC)
+## Critical Priority
 
-All build errors and warnings have been properly fixed following analyzer recommendations. No suppressions were used except where explicitly justified (general exception catching in appropriate contexts).
+### 1. Remove Copyright Headers from All Files
+**Priority:** High  
+**Impact:** Code cleanliness, maintainability
 
-### Build Improvements Summary:
+**Description:**  
+Remove all redundant copyright headers from the top of every file. They add noise and are unnecessary since the project has a LICENSE file at the root.
 
-#### Code Analysis Fixes (CA rules):
-1. **CA1036** - Added comparison operators to `Rank` class (==, !=, <, <=, >, >=)
-2. **CA1716** - Renamed `Stop()` to `StopMonitoring()` to avoid VB keyword conflicts
-3. **CA1024** - Changed `GetProtocolExecutor()` method to `ProtocolExecutor` property
-4. **CA1848** - Added LoggerMessage delegates for high-performance logging throughout codebase
-5. **CA2213** - Fixed disposal patterns in `SharedResources` and `PingPongFailureDetector`
-6. **CA1031** - Properly scoped general exception catching with pragma warnings where justified
-7. **CA1063/CA1816** - Fixed IDisposable pattern in test classes (made sealed, added GC.SuppressFinalize)
-8. **CA2000** - Used `using` statements for all test disposables instead of suppressions
-9. **CA5350** - Suppressed SHA1 warning in test UUID generation (test-only code)
-10. **CA1303** - Suppressed localization warnings in debug test output (test-only code)
+**Current State:**
+```csharp
+/*
+ * Copyright © 2016 - 2025 VMware, Inc. All Rights Reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
+ * except in compliance with the License. You may obtain a copy of the License at
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under the
+ * License is distributed on an "AS IS" BASIS, without warranties or conditions of any kind,
+ * EITHER EXPRESS OR IMPLIED. See the License for the specific language governing
+ * permissions and limitations under the License.
+ */
+```
 
-#### Test Infrastructure Improvements:
-11. **xUnit1000** - Made all test classes public for xUnit compatibility
-12. **Created Utils.cs** - Test utility class for `HostFromParts` and `NodeIdFromUuid` methods
-13. **Fixed Exception References** - Updated from `MembershipView.XException` to top-level exception classes
-14. **Proper Disposal** - All `MembershipView` test instances now use `using` statements
+**Action:**
+- Remove copyright headers from all `.cs` files
+- Keep the root LICENSE file
+- Copyright and licensing is already clear from the repository level
 
-#### Public API Improvements:
-15. **Made RapidUtils Public** - Changed from internal to public for external consumption
+**Files Affected:** All `.cs` files in the project
+
+---
+
+### 2. Remove Default CancellationToken Parameters
+**Priority:** High  
+**Impact:** API design, cancellation responsiveness, code clarity
+
+**Description:**  
+Remove all `= default` from `CancellationToken` parameters throughout the codebase. Force callers to explicitly pass a CancellationToken.
+
+**Current Issues:**
+- Methods have `CancellationToken cancellationToken = default` which allows callers to omit it
+- Leads to incomplete cancellation support
+- Makes it unclear when cancellation is supported vs. ignored
+- Testing cancellation scenarios is harder
+
+**Solution:**
+```csharp
+// Before
+Task<RapidResponse> SendMessageAsync(Endpoint remote, RapidRequest request,
+    CancellationToken cancellationToken = default);
+
+// After
+Task<RapidResponse> SendMessageAsync(Endpoint remote, RapidRequest request,
+    CancellationToken cancellationToken);
+```
+
+**Migration for Callers:**
+```csharp
+// Before: token could be omitted
+await client.SendMessageAsync(endpoint, request);
+
+// After: must be explicit
+await client.SendMessageAsync(endpoint, request, cancellationToken);
+// or if no meaningful token
+await client.SendMessageAsync(endpoint, request, CancellationToken.None);
+```
+
+**Files to Update:**
+- `IMessagingClient.cs` - All async methods
+- `IMembershipServiceHandler.cs` - HandleMessageAsync
+- `MembershipService.cs` - All async methods
+- `GrpcClient.cs` - All async methods
+- `PingPongFailureDetector.cs` - Async methods
+- `FastPaxos.cs` - Async methods
+- All other classes with async methods
+
+---
+
+### 3. Migrate to IOptions Pattern for All Configuration
+**Priority:** High  
+**Impact:** Configuration architecture, ASP.NET Core integration
+
+**Description:**  
+Remove the `Settings` class and migrate all configuration to use the IOptions<T> pattern.
+
+**Current Issues:**
+- `Settings` class is used directly, not integrated with IOptions<T>
+- Configuration is not validated at startup
+- Cannot easily bind from appsettings.json
+- No support for named options
+- Inconsistent with ASP.NET Core configuration patterns
+
+**Proposed Solution:**
+
+1. Create new options class:
+   ```csharp
+   public sealed class RapidProtocolOptions
+   {
+       public int GrpcTimeoutMs { get; set; } = 1000;
+       public int GrpcDefaultRetries { get; set; } = 5;
+       public int GrpcJoinTimeoutMs { get; set; } = 5000;
+       public int GrpcProbeTimeoutMs { get; set; } = 500;
+       public int FailureDetectorIntervalMs { get; set; } = 1000;
+       public int BatchingWindowMs { get; set; } = 100;
+       public long ConsensusFallbackTimeoutBaseDelayMs { get; set; } = 500;
+       public int LeaveMessageTimeoutMs { get; set; } = 1500;
+       public bool UseInProcessTransport { get; set; } = false;
+   }
+   ```
+
+2. Register with validation:
+   ```csharp
+   services.Configure<RapidProtocolOptions>(configuration.GetSection("Rapid:Protocol"));
+   services.AddSingleton<IValidateOptions<RapidProtocolOptions>, RapidProtocolOptionsValidator>();
+   ```
+
+3. Inject via IOptions<T>:
+   ```csharp
+   public class GrpcClient : IMessagingClient
+   {
+       private readonly RapidProtocolOptions _options;
+       
+       public GrpcClient(IOptions<RapidProtocolOptions> options, ...)
+       {
+           _options = options.Value;
+       }
+   }
+   ```
+
+4. Support appsettings.json:
+   ```json
+   {
+     "Rapid": {
+       "Protocol": {
+         "GrpcTimeoutMs": 1000,
+         "GrpcDefaultRetries": 5
+       }
+     }
+   }
+   ```
+
+**Files to Update:**
+- Remove: `Settings.cs`
+- Create: `RapidProtocolOptions.cs`
+- Create: `RapidProtocolOptionsValidator.cs`
+- Update: `RapidOptions.cs` (remove Settings property)
+- Update: `GrpcClient.cs`
+- Update: `MembershipService.cs`
+- Update: `RapidServiceCollectionExtensions.cs`
+- Update all consumers of Settings
+
+---
+
+### 4. Use System.TimeProvider Throughout Codebase
+**Priority:** High  
+**Impact:** Testability, test performance
+
+**Description:**  
+Replace all direct time-related calls with `System.TimeProvider` abstraction.
+
+**Current Issues:**
+- Direct `DateTime.UtcNow` calls throughout the codebase
+- `Task.Delay()` calls that can't be controlled in tests
+- `System.Diagnostics.Stopwatch` usage for timeouts
+- Difficult to test time-dependent behavior
+- Tests must use real delays (slow)
+
+**Proposed Solution:**
+
+1. Add `TimeProvider` property to `SharedResources`:
+   ```csharp
+   public sealed partial class SharedResources : IDisposable
+   {
+       public TimeProvider TimeProvider { get; init; } = TimeProvider.System;
+       // ...
+   }
+   ```
+
+2. Make it configurable:
+   ```csharp
+   public static IServiceCollection AddRapid(
+       this IServiceCollection services,
+       Action<RapidOptions> configure,
+       TimeProvider? timeProvider = null)
+   {
+       var provider = timeProvider ?? TimeProvider.System;
+       services.AddSingleton(provider);
+       services.AddSingleton(sp => new SharedResources(
+           sp.GetRequiredService<ILoggerFactory>(),
+           sp.GetRequiredService<TimeProvider>()));
+       // ...
+   }
+   ```
+
+3. Replace all time-related calls:
+   - `DateTime.UtcNow` → `timeProvider.GetUtcNow()`
+   - `Task.Delay(ms, ct)` → `Task.Delay(ms, timeProvider, ct)`
+   - `Stopwatch.StartNew()` → Use timeProvider timers
+
+4. Update tests:
+   ```csharp
+   var fakeTime = new FakeTimeProvider();
+   builder.Services.AddRapid(options => {...}, fakeTime);
+   
+   // Advance time instantly in tests
+   fakeTime.Advance(TimeSpan.FromSeconds(10));
+   ```
+
+**Files to Update:**
+- `SharedResources.cs`
+- `RapidServiceCollectionExtensions.cs`
+- `MembershipService.cs` (batching timeouts)
+- `GrpcClient.cs` (request timeouts)
+- `PingPongFailureDetector.cs` (probe intervals)
+- `FastPaxos.cs` (consensus timeouts)
+- All test files
+
+**Benefits:**
+- Deterministic time-based testing
+- No `Task.Delay()` in tests
+- Can simulate time passage instantly
+- Better test performance
+- More reliable CI/CD builds
+
+---
+
+## High Priority
+
+### 5. Fix Proto File TODO
+**Location:** `Protos\rapid.proto` line 57
+
+**Current TODO:**
+```protobuf
+// TODO: JoinMessage and JoinResponse are overloaded because they are being used for phase 1 and 2 of the bootstrap.
+```
+
+**Description:**  
+The JoinMessage and JoinResponse are currently overloaded for both phase 1 and phase 2 of the bootstrap protocol. This should be split into separate message types for clarity.
+
+**Proposed Solution:**
+- Create `PreJoinRequest` / `PreJoinResponse` for phase 1
+- Keep `JoinMessage` / `JoinResponse` for phase 2
+- Update protocol handlers accordingly
+
+---
+
+## Medium Priority
+
+### 6. Health Check Integration
+**Status:** Not Started  
+**Priority:** Medium
+
+Add ASP.NET Core health check support:
+```csharp
+builder.Services.AddHealthChecks()
+    .AddRapidCluster();
+
+app.MapHealthChecks("/health");
+```
+
+Health check should report:
+- Cluster membership status
+- Whether local node is reachable
+- Membership size vs. expected
+- Recent failure detector status
+
+### 7. Metrics and Telemetry
+**Status:** Not Started  
+**Priority:** Medium
+
+Add OpenTelemetry/metrics support:
+- Membership size gauge
+- Join/leave event counters
+- Failure detection latency histogram
+- Consensus round duration
+- gRPC request duration
+
+### 8. Support for HostApplicationBuilder
+**Status:** Partial  
+**Priority:** Medium
+
+Currently focused on `WebApplicationBuilder`. Add full support for console apps using `HostApplicationBuilder` without requiring Kestrel.
+
+---
+
+## Low Priority
+
+### 9. Keyed Services for Multiple Clusters
+**Status:** Not Started  
+**Priority:** Low
+
+Support multiple clusters in a single application using keyed services (.NET 8+):
+```csharp
+builder.Services.AddRapid("cluster1", options => {...});
+builder.Services.AddRapid("cluster2", options => {...});
+
+// Inject specific cluster
+public MyService([FromKeyedServices("cluster1")] IRapidCluster cluster) {...}
+```
+
+### 10. Graceful Shutdown Improvements
+**Status:** Not Started  
+**Priority:** Low
+
+- Add configurable shutdown timeout
+- Ensure all messages are flushed before shutdown
+- Coordinate graceful leave with `IHostApplicationLifetime.ApplicationStopping`
+
+### 11. Structured Logging Enhancements
+**Status:** Partial  
+**Priority:** Low
+
+- Add more structured logging with semantic properties
+- Include trace correlation IDs for distributed tracing
+- Add log scopes for better context
+
+### 12. gRPC Interceptors
+**Status:** Not Started  
+**Priority:** Low
+
+Allow users to register custom gRPC interceptors:
+```csharp
+builder.Services.AddRapid(options => 
+{
+    options.AddGrpcInterceptor<MyLoggingInterceptor>();
+});
+```
+
+### 13. Configuration Validation
+**Status:** Not Started  
+**Priority:** Low
+
+Add `IValidateOptions<RapidOptions>` to validate configuration at startup:
+- Ensure ListenAddress is valid
+- Ensure port is not in use
+- Warn if SeedAddress == ListenAddress (seed node)
+
+---
+
+## Technical Debt
+
+### Code Organization
+- [ ] Consider splitting `MembershipService.cs` - it's very large
+- [ ] Extract consensus logic into separate class
+- [ ] Reduce cyclomatic complexity in join protocol
+
+### Performance
+- [ ] Profile memory allocations in hot paths
+- [ ] Consider using ArrayPool<T> for message buffers
+- [ ] Reduce allocations in membership view operations
+
+### Testing
+- [ ] Add more unit tests for edge cases
+- [ ] Add chaos testing for failure scenarios
+- [ ] Add performance benchmarks
+- [ ] Add load tests for large clusters (100+ nodes)
+
+---
+
+## Completed
+
+- ✅ Refactor to use modern ASP.NET Core hosting
+- ✅ Remove IMessagingServer and manual WebApplication management
+- ✅ Add IRapidCluster interface for DI
+- ✅ Use BackgroundService for cluster lifecycle
+- ✅ Integrate with Microsoft.Extensions.* patterns
+
+---
+
+**Note:** This TODO list consolidates all TODOs from across the codebase into a single location.
 16. **Fixed GrpcServer** - Corrected `MembershipServiceImpl` implementation with proper SetHandler support
 17. **Rapid.Examples Fixes** - Added LoggerMessage delegates, proper exception handling
 

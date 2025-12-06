@@ -12,11 +12,14 @@
  */
 
 using System.CommandLine;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Rapid;
 
 /// <summary>
-/// Rapid Cluster example application.
+/// Rapid Cluster example application using modern ASP.NET hosting.
 /// </summary>
 internal sealed partial class Program
 {
@@ -35,12 +38,6 @@ internal sealed partial class Program
     [LoggerMessage(Level = LogLevel.Information, Message = "Current membership size: {Size}")]
     private static partial void LogMembershipSize(ILogger logger, int Size);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Membership size hasn't stabilized after {MaxTries} attempts")]
-    private static partial void LogStabilizationWarning(ILogger logger, int MaxTries);
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "Press Ctrl+C to shut down")]
-    private static partial void LogPressCtrlC(ILogger logger);
-
     [LoggerMessage(Level = LogLevel.Information, Message = "Proposal detected: {Change}")]
     private static partial void LogProposalDetected(ILogger logger, ClusterStatusChange Change);
 
@@ -50,10 +47,7 @@ internal sealed partial class Program
     [LoggerMessage(Level = LogLevel.Warning, Message = "Kicked from cluster: {Change}")]
     private static partial void LogKicked(ILogger logger, ClusterStatusChange Change);
 
-    [LoggerMessage(Level = LogLevel.Error, Message = "Error running agent")]
-    private static partial void LogError(ILogger logger, Exception ex);
-
-    static int Main(string[] args)
+    static async Task<int> Main(string[] args)
     {
         var listenOption = new Option<string>(
             "--listen",
@@ -76,63 +70,102 @@ internal sealed partial class Program
             RunAgentAsync(listen!, seed!).Wait();
         });
 
-        return rootCommand.Parse(args).Invoke();
+        return rootCommand.Parse(args).InvokeAsync().GetAwaiter().GetResult();
     }
 
     static async Task RunAgentAsync(string listenAddress, string seedAddress)
     {
-        using var loggerFactory = LoggerFactory.Create(builder => builder
-                .AddConsole()
-                .SetMinimumLevel(LogLevel.Information));
+        var builder = WebApplication.CreateBuilder();
 
-        var logger = loggerFactory.CreateLogger<Program>();
+        // Configure logging
+        builder.Logging.ClearProviders();
+        builder.Logging.AddConsole();
+        builder.Logging.SetMinimumLevel(LogLevel.Information);
 
-#pragma warning disable CA1031 // Do not catch general exception types
-        try
+        var listen = RapidUtils.HostFromString(listenAddress);
+        var seed = RapidUtils.HostFromString(seedAddress);
+
+        // Configure Kestrel for gRPC
+        builder.ConfigureRapidKestrel(listen.Port);
+
+        // Add Rapid services
+        builder.Services.AddRapid(options =>
         {
-            var listen = RapidUtils.HostFromString(listenAddress);
-            var seed = RapidUtils.HostFromString(seedAddress);
+            options.ListenAddress = listen;
+            options.SeedAddress = seed;
+        });
 
-            LogStarting(logger, listenAddress);
+        // Add background service to monitor cluster
+        builder.Services.AddHostedService<ClusterMonitorService>();
 
-            // Build and start/join cluster
-            var builder = new Cluster.ClusterBuilder(listen)
-                .UseLoggerFactory(loggerFactory);
+        var app = builder.Build();
 
-            Cluster cluster;
-            if (listen.Equals(seed))
-            {
-                LogClusterStarted(logger, listenAddress);
-                cluster = await builder.StartAsync().ConfigureAwait(false);
-            }
-            else
-            {
-                LogClusterJoined(logger, seedAddress);
-                cluster = await builder.JoinAsync(seed).ConfigureAwait(false);
-            }
+        // Map Rapid gRPC endpoints
+        app.MapRapidMembershipService();
 
-            // Register event handlers
-            cluster.RegisterSubscription(ClusterEvents.ViewChangeProposal, change => LogProposalDetected(logger, change));
+        LogStarting(app.Logger, listenAddress);
 
-            cluster.RegisterSubscription(ClusterEvents.ViewChange, change => LogViewChange(logger, change.ConfigurationId, change.Membership.Count));
+        if (listen.Equals(seed))
+        {
+            LogClusterStarted(app.Logger, listenAddress);
+        }
+        else
+        {
+            LogClusterJoined(app.Logger, seedAddress);
+        }
 
-            cluster.RegisterSubscription(ClusterEvents.Kicked, change => LogKicked(logger, change));
+        await app.RunAsync();
+    }
+
+    /// <summary>
+    /// Background service to monitor the cluster and subscribe to events.
+    /// </summary>
+#pragma warning disable CA1812 // Avoid uninstantiated internal classes - Instantiated by DI
+    private sealed class ClusterMonitorService : BackgroundService
+#pragma warning restore CA1812
+    {
+        private readonly IRapidCluster _cluster;
+        private readonly ILogger<ClusterMonitorService> _logger;
+        private readonly IHostApplicationLifetime _lifetime;
+
+        public ClusterMonitorService(
+            IRapidCluster cluster,
+            ILogger<ClusterMonitorService> logger,
+            IHostApplicationLifetime lifetime)
+        {
+            _cluster = cluster;
+            _logger = logger;
+            _lifetime = lifetime;
+
+            // Register event subscriptions
+            _cluster.RegisterSubscription(ClusterEvents.ViewChangeProposal, change =>
+                LogProposalDetected(logger, change));
+
+            _cluster.RegisterSubscription(ClusterEvents.ViewChange, change =>
+                LogViewChange(logger, change.ConfigurationId, change.Membership.Count));
+
+            _cluster.RegisterSubscription(ClusterEvents.Kicked, change =>
+                LogKicked(logger, change));
+        }
+
+        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+        {
+            // Wait a bit for the cluster to initialize
+            await Task.Delay(2000, stoppingToken);
 
             // Periodically print membership
-            for (var i = 0; i < MaxTries; i++)
+            for (var i = 0; i < MaxTries && !stoppingToken.IsCancellationRequested; i++)
             {
-                var size = cluster.GetMembershipSize();
-                LogMembershipSize(logger, size);
-                await Task.Delay(SleepIntervalMs).ConfigureAwait(false);
+                var size = _cluster.GetMembershipSize();
+                LogMembershipSize(_logger, size);
+                await Task.Delay(SleepIntervalMs, stoppingToken);
             }
 
-            await cluster.LeaveGracefullyAsync().ConfigureAwait(false);
+            // Leave gracefully
+            await _cluster.LeaveGracefullyAsync();
+
+            // Signal shutdown
+            _lifetime.StopApplication();
         }
-        catch (Exception ex)
-        {
-            LogError(logger, ex);
-            return;
-        }
-#pragma warning restore CA1031
     }
 }
