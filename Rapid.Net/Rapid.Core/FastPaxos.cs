@@ -30,7 +30,7 @@ internal sealed class FastPaxos
     private readonly long _membershipSize;
     private readonly Action<List<Endpoint>> _onDecidedWrapped;
     private readonly IBroadcaster _broadcaster;
-    private readonly Dictionary<List<Endpoint>, int> _votesPerProposal = new(new ListEndpointComparer());
+    private readonly Dictionary<List<Endpoint>, int> _votesPerProposal = new(ListEndpointComparer.Instance);
     private readonly HashSet<Endpoint> _votesReceived = [];
     private readonly Paxos _paxos;
     private readonly Lock _paxosLock = new();

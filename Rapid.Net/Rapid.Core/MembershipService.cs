@@ -25,8 +25,6 @@ namespace Rapid;
 /// </summary>
 internal sealed class MembershipService : IMembershipServiceHandler
 {
-    private const int LeaveMessageTimeoutMs = 1500;
-
     private readonly ILogger<MembershipService> _logger;
     private readonly MembershipView _membershipView;
     private readonly MultiNodeCutDetector _cutDetection;
@@ -41,7 +39,6 @@ internal sealed class MembershipService : IMembershipServiceHandler
     private FastPaxos? _fastPaxosInstance;
 
     // Fields used by batching logic
-    private long _lastEnqueueTimestamp = -1;
     private readonly Channel<AlertMessage> _sendQueue;
     private readonly Lock _batchSchedulerLock = new();
     private readonly SharedResources _sharedResources;
@@ -436,7 +433,7 @@ internal sealed class MembershipService : IMembershipServiceHandler
             var tasks = observers.Select(endpoint => 
                 _messagingClient.SendMessageBestEffortAsync(endpoint, leave, CancellationToken.None));
 
-            using var timeoutCts = new CancellationTokenSource(LeaveMessageTimeoutMs);
+            using var timeoutCts = new CancellationTokenSource(_settings.LeaveMessageTimeoutMs);
             try
             {
                 await Task.WhenAll(tasks).WaitAsync(timeoutCts.Token);
@@ -460,7 +457,6 @@ internal sealed class MembershipService : IMembershipServiceHandler
     {
         lock (_batchSchedulerLock)
         {
-            _lastEnqueueTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             _sendQueue.Writer.TryWrite(msg);
         }
     }

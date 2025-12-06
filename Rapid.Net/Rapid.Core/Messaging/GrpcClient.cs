@@ -17,6 +17,7 @@ public sealed class GrpcClient(Endpoint localEndpoint, SharedResources sharedRes
                  ILoggerFactory? loggerFactory = null) : IMessagingClient
 {
     private readonly Endpoint _localEndpoint = localEndpoint;
+    private readonly SharedResources _sharedResources = sharedResources; // Reserved for future use
     private readonly Settings _settings = settings;
     private readonly ILogger<GrpcClient> _logger = (loggerFactory ?? Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance)
             .CreateLogger<GrpcClient>();
