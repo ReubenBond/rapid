@@ -23,7 +23,7 @@ namespace Rapid.Tests.Integration;
 /// </summary>
 public class ClusterIntegrationTests : IDisposable
 {
-    private readonly List<Cluster> _clusters = new();
+    private readonly List<Cluster> _clusters = [];
     private readonly ILoggerFactory _loggerFactory;
     private int _nextPort = 9000;
 

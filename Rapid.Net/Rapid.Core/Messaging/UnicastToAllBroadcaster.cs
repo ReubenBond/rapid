@@ -6,15 +6,10 @@ using Rapid.Pb;
 
 namespace Rapid.Messaging;
 
-public sealed class UnicastToAllBroadcaster : IBroadcaster
+public sealed class UnicastToAllBroadcaster(IMessagingClient client) : IBroadcaster
 {
-    private readonly IMessagingClient _client;
+    private readonly IMessagingClient _client = client;
     private IReadOnlyList<Endpoint> _membership = Array.Empty<Endpoint>();
-
-    public UnicastToAllBroadcaster(IMessagingClient client)
-    {
-        _client = client;
-    }
 
     public void SetMembership(IReadOnlyList<Endpoint> membership)
     {

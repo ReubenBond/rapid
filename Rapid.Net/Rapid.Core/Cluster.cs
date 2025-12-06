@@ -20,8 +20,6 @@ public sealed class Cluster : IDisposable
     private const int K = 10;
     private const int H = 9;
     private const int L = 4;
-    private const int Retries = 5;
-
     private readonly IMessagingServer _rpcServer;
     private readonly MembershipService? _membershipService;
     private readonly SharedResources _sharedResources;
@@ -48,7 +46,7 @@ public sealed class Cluster : IDisposable
         if (_hasShutdown)
             throw new InvalidOperationException("Can't access the memberlist after having shut down");
         
-        return _membershipService?.GetMembershipView() ?? new List<Endpoint>();
+        return _membershipService?.GetMembershipView() ?? [];
     }
 
     /// <summary>
@@ -70,7 +68,7 @@ public sealed class Cluster : IDisposable
         if (_hasShutdown)
             throw new InvalidOperationException("Can't access metadata after having shut down");
         
-        return _membershipService?.GetMetadata() ?? new Dictionary<Endpoint, Metadata>();
+        return _membershipService?.GetMetadata() ?? [];
     }
 
     /// <summary>
@@ -115,21 +113,16 @@ public sealed class Cluster : IDisposable
     /// <summary>
     /// Builder for creating Cluster instances.
     /// </summary>
-    public sealed class ClusterBuilder
+    public sealed class ClusterBuilder(Endpoint listenAddress)
     {
-        private readonly Endpoint _listenAddress;
+        private readonly Endpoint _listenAddress = listenAddress;
         private IEdgeFailureDetectorFactory? _edgeFailureDetector;
         private Metadata _metadata = new();
         private Settings _settings = new();
-        private readonly Dictionary<ClusterEvents, List<Action<ClusterStatusChange>>> _subscriptions = new();
+        private readonly Dictionary<ClusterEvents, List<Action<ClusterStatusChange>>> _subscriptions = [];
         private IMessagingClient? _messagingClient;
         private IMessagingServer? _messagingServer;
         private ILoggerFactory? _loggerFactory;
-
-        public ClusterBuilder(Endpoint listenAddress)
-        {
-            _listenAddress = listenAddress;
-        }
 
         public ClusterBuilder(string hostname, int port)
             : this(Utils.HostFromParts(hostname, port))
@@ -155,7 +148,7 @@ public sealed class Cluster : IDisposable
         public ClusterBuilder AddSubscription(ClusterEvents eventType, Action<ClusterStatusChange> callback)
         {
             if (!_subscriptions.ContainsKey(eventType))
-                _subscriptions[eventType] = new List<Action<ClusterStatusChange>>();
+                _subscriptions[eventType] = [];
             
             _subscriptions[eventType].Add(callback);
             return this;
@@ -185,7 +178,7 @@ public sealed class Cluster : IDisposable
         /// </summary>
         public async Task<Cluster> StartAsync()
         {
-            var sharedResources = new SharedResources(_listenAddress, _loggerFactory);
+            var sharedResources = new SharedResources(_loggerFactory);
             var currentIdentifier = Utils.NodeIdFromUuid(Guid.NewGuid());
             
             // Create messaging infrastructure
@@ -193,8 +186,8 @@ public sealed class Cluster : IDisposable
             _messagingServer ??= new GrpcServer(_listenAddress, sharedResources, _settings, _loggerFactory);
             
             // Create membership view with just this node
-            var membershipView = new MembershipView(K, new List<NodeId> { currentIdentifier }, 
-                                                    new List<Endpoint> { _listenAddress });
+            var membershipView = new MembershipView(K, [currentIdentifier], 
+                                                    [_listenAddress]);
             
             // Create cut detector
             var cutDetector = new MultiNodeCutDetector(K, H, L);
@@ -227,7 +220,7 @@ public sealed class Cluster : IDisposable
         /// </summary>
         public async Task<Cluster> JoinAsync(Endpoint seedAddress)
         {
-            var sharedResources = new SharedResources(_listenAddress, _loggerFactory);
+            var sharedResources = new SharedResources(_loggerFactory);
             var currentIdentifier = Utils.NodeIdFromUuid(Guid.NewGuid());
             
             // Create messaging infrastructure
@@ -268,7 +261,7 @@ public sealed class Cluster : IDisposable
                 var observer = observers[ringNumber];
                 if (!ringNumbersPerObserver.ContainsKey(observer))
                 {
-                    ringNumbersPerObserver[observer] = new List<int>();
+                    ringNumbersPerObserver[observer] = [];
                 }
                 ringNumbersPerObserver[observer].Add(ringNumber);
             }
@@ -338,8 +331,7 @@ public sealed class Cluster : IDisposable
         }
     }
 
-    public class JoinException : Exception
+    public class JoinException(string message) : Exception(message)
     {
-        public JoinException(string message) : base(message) { }
     }
 }

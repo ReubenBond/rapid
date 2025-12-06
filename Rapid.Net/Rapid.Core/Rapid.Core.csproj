@@ -1,35 +1,36 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
-  <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-    <LangVersion>latest</LangVersion>
-    <Authors>Rapid Team</Authors>
-    <Description>Rapid - A distributed membership service for .NET</Description>
-    <Copyright>Copyright © 2016-2025 VMware, Inc. All Rights Reserved.</Copyright>
-    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
-  </PropertyGroup>
+	<PropertyGroup>
+		<TargetFramework>net10.0</TargetFramework>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+		<LangVersion>latest</LangVersion>
+		<Authors>Rapid Team</Authors>
+		<Description>Rapid - A distributed membership service for .NET</Description>
+		<Copyright>Copyright © 2016-2025 VMware, Inc. All Rights Reserved.</Copyright>
+		<PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+		<RootNamespace>Rapid</RootNamespace>
+	</PropertyGroup>
 
-  <ItemGroup>
-    <InternalsVisibleTo Include="Rapid.Tests" />
-  </ItemGroup>
+	<ItemGroup>
+		<InternalsVisibleTo Include="Rapid.Tests" />
+	</ItemGroup>
 
-  <ItemGroup>
-    <PackageReference Include="Google.Protobuf" Version="3.33.2" />
-    <PackageReference Include="Grpc.Net.Client" Version="2.71.0" />
-    <PackageReference Include="Grpc.AspNetCore" Version="2.71.0" />
-    <PackageReference Include="Grpc.Core" Version="2.46.6" />
-    <PackageReference Include="Grpc.Tools" Version="2.76.0">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-    </PackageReference>
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
-    <PackageReference Include="System.IO.Hashing" Version="10.0.0" />
-  </ItemGroup>
+	<ItemGroup>
+		<PackageReference Include="Google.Protobuf" Version="3.33.2" />
+		<PackageReference Include="Grpc.Net.Client" Version="2.71.0" />
+		<PackageReference Include="Grpc.AspNetCore" Version="2.71.0" />
+		<PackageReference Include="Grpc.Core" Version="2.46.6" />
+		<PackageReference Include="Grpc.Tools" Version="2.76.0">
+			<PrivateAssets>all</PrivateAssets>
+			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+		</PackageReference>
+		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
+		<PackageReference Include="System.IO.Hashing" Version="10.0.0" />
+	</ItemGroup>
 
-  <ItemGroup>
-    <Protobuf Include="Protos\rapid.proto" GrpcServices="Both" />
-  </ItemGroup>
+	<ItemGroup>
+		<Protobuf Include="Protos\rapid.proto" GrpcServices="Both" />
+	</ItemGroup>
 
 </Project>

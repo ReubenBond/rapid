@@ -15,21 +15,27 @@ using Rapid.Pb;
 
 namespace Rapid;
 
-/// <summary>
-/// Represents a cluster membership status change.
-/// </summary>
-public sealed class ClusterStatusChange(
-    long configurationId,
-    IReadOnlyList<Endpoint> membership,
-    IReadOnlyList<NodeStatusChange> delta)
+internal sealed class ListEndpointComparer : IEqualityComparer<List<Endpoint>>
 {
-    public long ConfigurationId { get; } = configurationId;
-    public IReadOnlyList<Endpoint> Membership { get; } = membership;
-    public IReadOnlyList<NodeStatusChange> Delta { get; } = delta;
+    public static readonly ListEndpointComparer Instance = new();
 
-    public override string ToString()
+    private ListEndpointComparer() { }
+
+    public bool Equals(List<Endpoint>? x, List<Endpoint>? y)
     {
-        return $"ClusterStatusChange{{configurationId={ConfigurationId}, " +
-               $"membership={string.Join(",", Membership)}, delta={string.Join(",", Delta)}}}";
+        if (x == null && y == null) return true;
+        if (x == null || y == null) return false;
+        return x.SequenceEqual(y);
+    }
+
+    public int GetHashCode(List<Endpoint> obj)
+    {
+        var hash = new HashCode();
+        foreach (var endpoint in obj)
+        {
+            hash.Add(endpoint.GetHashCode());
+        }
+        return hash.ToHashCode();
     }
 }
+

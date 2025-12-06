@@ -29,8 +29,8 @@ internal sealed class MembershipView
     private readonly List<AddressComparator> _addressComparators;
     private readonly List<SortedSet<Endpoint>> _rings;
     private readonly SortedSet<NodeId> _identifiersSeen;
-    private readonly Dictionary<Endpoint, List<Endpoint>> _cachedObservers = new();
-    private readonly HashSet<Endpoint> _allNodes = new();
+    private readonly Dictionary<Endpoint, List<Endpoint>> _cachedObservers = [];
+    private readonly HashSet<Endpoint> _allNodes = [];
     private long _currentConfigurationId = -1;
     private Configuration _currentConfiguration;
     private bool _shouldUpdateConfigurationId = true;
@@ -233,7 +233,7 @@ internal sealed class MembershipView
 
         if (_rings[0].Count <= 1)
         {
-            return new List<Endpoint>();
+            return [];
         }
 
         var observers = new List<Endpoint>();
@@ -268,7 +268,7 @@ internal sealed class MembershipView
 
             if (_rings[0].Count <= 1)
             {
-                return new List<Endpoint>();
+                return [];
             }
             
             return GetPredecessorsOf(node);
@@ -288,7 +288,7 @@ internal sealed class MembershipView
         {
             if (_rings[0].Count == 0)
             {
-                return new List<Endpoint>();
+                return [];
             }
             return GetPredecessorsOf(node);
         }
@@ -368,7 +368,7 @@ internal sealed class MembershipView
         try
         {
             if (k < 0) throw new ArgumentOutOfRangeException(nameof(k));
-            return new List<Endpoint>(_rings[k]);
+            return [.. _rings[k]];
         }
         finally
         {
@@ -384,7 +384,7 @@ internal sealed class MembershipView
             var subjects = GetSubjectsOf(observer);
             if (subjects.Count == 0)
             {
-                return new List<int>();
+                return [];
             }
 
             var ringIndexes = new List<int>();
@@ -465,32 +465,22 @@ internal sealed class MembershipView
         return set.GetViewBetween(value, max).Where(e => !e.Equals(value)).FirstOrDefault();
     }
 
-    public sealed class NodeAlreadyInRingException : Exception
+    public sealed class NodeAlreadyInRingException(Endpoint node) : Exception(node.ToString())
     {
-        public NodeAlreadyInRingException(Endpoint node) : base(node.ToString()) { }
     }
 
-    public sealed class NodeNotInRingException : Exception
+    public sealed class NodeNotInRingException(Endpoint node) : Exception(node.ToString())
     {
-        public NodeNotInRingException(Endpoint node) : base(node.ToString()) { }
     }
 
-    public sealed class UuidAlreadySeenException : Exception
+    public sealed class UuidAlreadySeenException(Endpoint node, NodeId nodeId) : Exception($"Endpoint add attempt with identifier already seen: {{host: {node}, identifier: {nodeId}}}")
     {
-        public UuidAlreadySeenException(Endpoint node, NodeId nodeId)
-            : base($"Endpoint add attempt with identifier already seen: {{host: {node}, identifier: {nodeId}}}") { }
     }
 
-    public sealed class Configuration
+    public sealed class Configuration(IEnumerable<NodeId> nodeIds, IEnumerable<Endpoint> endpoints)
     {
-        public List<NodeId> NodeIds { get; }
-        public List<Endpoint> Endpoints { get; }
-
-        public Configuration(IEnumerable<NodeId> nodeIds, IEnumerable<Endpoint> endpoints)
-        {
-            NodeIds = new List<NodeId>(nodeIds);
-            Endpoints = new List<Endpoint>(endpoints);
-        }
+        public List<NodeId> NodeIds { get; } = [.. nodeIds];
+        public List<Endpoint> Endpoints { get; } = [.. endpoints];
 
         public long GetConfigurationId()
         {
@@ -514,15 +504,10 @@ internal sealed class MembershipView
         }
     }
 
-    public sealed class AddressComparator : IComparer<Endpoint>
+    public sealed class AddressComparator(int seed) : IComparer<Endpoint>
     {
-        private readonly int _seed;
+        private readonly int _seed = seed;
         private readonly ConcurrentDictionary<Endpoint, long> _hashCache = new();
-
-        public AddressComparator(int seed)
-        {
-            _seed = seed;
-        }
 
         public int Compare(Endpoint? x, Endpoint? y)
         {

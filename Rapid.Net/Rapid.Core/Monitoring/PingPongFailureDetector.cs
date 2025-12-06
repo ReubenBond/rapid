@@ -11,47 +11,30 @@ namespace Rapid.Monitoring;
 /// <summary>
 /// Simple ping-pong failure detector factory.
 /// </summary>
-public sealed class PingPongFailureDetectorFactory : IEdgeFailureDetectorFactory
+public sealed class PingPongFailureDetectorFactory(Endpoint localEndpoint, IMessagingClient client,
+    ILoggerFactory? loggerFactory) : IEdgeFailureDetectorFactory
 {
-    private readonly Endpoint _localEndpoint;
-    private readonly IMessagingClient _client;
-    private readonly ILoggerFactory? _loggerFactory;
-
-    public PingPongFailureDetectorFactory(Endpoint localEndpoint, IMessagingClient client, 
-        ILoggerFactory? loggerFactory)
-    {
-        _localEndpoint = localEndpoint;
-        _client = client;
-        _loggerFactory = loggerFactory;
-    }
+    private readonly Endpoint _localEndpoint = localEndpoint;
+    private readonly IMessagingClient _client = client;
+    private readonly ILoggerFactory? _loggerFactory = loggerFactory;
 
     public IEdgeFailureDetector CreateInstance(Endpoint subject, Action notifier)
     {
         return new PingPongFailureDetector(subject, _localEndpoint, _client, notifier, _loggerFactory);
     }
 
-    private class PingPongFailureDetector : IEdgeFailureDetector
+    private class PingPongFailureDetector(Endpoint subject, Endpoint observer, IMessagingClient client,
+        Action notifier, ILoggerFactory? loggerFactory) : IEdgeFailureDetector
     {
-        private readonly Endpoint _subject;
-        private readonly Endpoint _observer;
-        private readonly IMessagingClient _client;
-        private readonly Action _notifier;
-        private readonly ILogger _logger;
-        private readonly CancellationTokenSource _cts = new();
-        private readonly PeriodicTimer _timer;
-        private Task? _probeTask;
-
-        public PingPongFailureDetector(Endpoint subject, Endpoint observer, IMessagingClient client,
-            Action notifier, ILoggerFactory? loggerFactory)
-        {
-            _subject = subject;
-            _observer = observer;
-            _client = client;
-            _notifier = notifier;
-            _logger = loggerFactory?.CreateLogger<PingPongFailureDetector>() 
+        private readonly Endpoint _subject = subject;
+        private readonly Endpoint _observer = observer;
+        private readonly IMessagingClient _client = client;
+        private readonly Action _notifier = notifier;
+        private readonly ILogger _logger = loggerFactory?.CreateLogger<PingPongFailureDetector>()
                 ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<PingPongFailureDetector>.Instance;
-            _timer = new PeriodicTimer(TimeSpan.FromMilliseconds(1000));
-        }
+        private readonly CancellationTokenSource _cts = new();
+        private readonly PeriodicTimer _timer = new PeriodicTimer(TimeSpan.FromMilliseconds(1000));
+        private Task? _probeTask;
 
         public void Start()
         {

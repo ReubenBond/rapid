@@ -23,7 +23,6 @@ namespace Rapid;
 /// </summary>
 internal sealed class FastPaxos
 {
-    private const long BaseDelay = 1000;
     private readonly ILogger<FastPaxos> _logger;
     private readonly double _jitterRate;
     private readonly Endpoint _myAddr;
@@ -32,9 +31,9 @@ internal sealed class FastPaxos
     private readonly Action<List<Endpoint>> _onDecidedWrapped;
     private readonly IBroadcaster _broadcaster;
     private readonly Dictionary<List<Endpoint>, int> _votesPerProposal = new(new ListEndpointComparer());
-    private readonly HashSet<Endpoint> _votesReceived = new();
+    private readonly HashSet<Endpoint> _votesReceived = [];
     private readonly Paxos _paxos;
-    private readonly object _paxosLock = new();
+    private readonly Lock _paxosLock = new();
     private bool _decided = false;
     private CancellationTokenSource? _scheduledClassicRoundCts;
     private readonly Settings _settings;
@@ -202,30 +201,5 @@ internal sealed class FastPaxos
     {
         var jitter = (long)(-1000 * Math.Log(1 - Random.Shared.NextDouble()) / _jitterRate);
         return jitter + _settings.ConsensusFallbackTimeoutBaseDelayMs;
-    }
-
-    private class ListEndpointComparer : IEqualityComparer<List<Endpoint>>
-    {
-        public bool Equals(List<Endpoint>? x, List<Endpoint>? y)
-        {
-            if (x == null && y == null) return true;
-            if (x == null || y == null) return false;
-            if (x.Count != y.Count) return false;
-            for (int i = 0; i < x.Count; i++)
-            {
-                if (!x[i].Equals(y[i])) return false;
-            }
-            return true;
-        }
-
-        public int GetHashCode(List<Endpoint> obj)
-        {
-            var hash = new HashCode();
-            foreach (var endpoint in obj)
-            {
-                hash.Add(endpoint.GetHashCode());
-            }
-            return hash.ToHashCode();
-        }
     }
 }

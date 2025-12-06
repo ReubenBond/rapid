@@ -24,18 +24,15 @@ namespace Rapid;
 public sealed class SharedResources : IDisposable
 {
     private readonly ILogger<SharedResources> _logger;
-    private readonly Endpoint _address;
     private readonly CancellationTokenSource _shutdownCts = new();
     private readonly Channel<Func<Task>> _protocolExecutor;
     
     public Channel<Action> ProtocolChannel { get; }
-    public TaskScheduler ScheduledTasksScheduler { get; }
 
     public Channel<Func<Task>> GetProtocolExecutor() => _protocolExecutor;
 
-    public SharedResources(Endpoint address, ILoggerFactory? loggerFactory = null)
+    public SharedResources(ILoggerFactory? loggerFactory = null)
     {
-        _address = address;
         _logger = (loggerFactory ?? NullLoggerFactory.Instance).CreateLogger<SharedResources>();
         
         // Create a single-threaded channel for protocol execution
@@ -51,8 +48,6 @@ public sealed class SharedResources : IDisposable
             SingleReader = true,
             SingleWriter = false
         });
-        
-        ScheduledTasksScheduler = TaskScheduler.Default;
         
         // Start the protocol executors
         _ = Task.Run(ProcessProtocolMessages);

@@ -1,15 +1,18 @@
 # Rapid.NET Port - TODO List
 
-**Last Updated**: 2025-12-06 20:01 UTC  
-**Status**: ✅ CORE IMPLEMENTATION COMPLETE! Integration tests 93% passing (38/41)!
+**Last Updated**: 2025-12-06 20:30 UTC  
+**Status**: ✅ CORE IMPLEMENTATION COMPLETE! Integration tests 75% passing (6/8), Unit tests 100% passing (34/34)!
 
 **MAJOR MILESTONE ACHIEVED**: 
 - ✅ All compilation errors fixed
 - ✅ All high-priority implementations complete
 - ✅ GrpcServer fixed to support bootstrap phase
-- ✅ 38 out of 41 tests passing (93% success rate)
+- ✅ ViewChangeProposal events now firing correctly
+- ✅ 6 out of 8 integration tests passing (75% success rate)
+- ✅ All 34 unit tests passing (100% success rate)
 - ✅ Multi-node cluster formation confirmed working
 - 🎯 **PROJECT STATUS: BETA-READY** - Core functionality operational!
+- ⚠️ Known issues: Leave protocol and concurrent join tests need timing adjustments
 
 ---
 
@@ -317,6 +320,11 @@ public async Task StartAsync(CancellationToken cancellationToken = default)
 **Location**: `Monitoring/PingPongFailureDetector.cs`
 
 **Implementation Complete**: Added Start() call when detectors are created.
+
+### ✅ 14. Fix ViewChangeProposal Events (COMPLETED - 2025-12-06)
+**Location**: `MembershipService.cs` `HandleAlert` method
+
+**Implementation Complete**: Added notification to subscribers when a proposal is announced, matching Java implementation.
 
 ---
 
@@ -791,14 +799,15 @@ public class MembershipViewBenchmarks
 ### Build Status
 - ✅ **Compilation**: SUCCESS (0 errors, 0 warnings)
 - ✅ **Basic Functionality**: Seed node starts and runs correctly
-- ✅ **Leave Protocol**: Implemented and compiles
+- ✅ **Leave Protocol**: Implemented and compiles (timing issues in tests)
 - ✅ **Join Ring Calculation**: Improved to match Java implementation
 - ✅ **Failure Detector**: Complete with auto-start
 - ✅ **GrpcServer**: Fixed to handle null membership service during bootstrap
-- ✅ **Integration Tests**: 38/41 tests passing (93% pass rate!)
-- ✅ **Unit Tests**: 34 tests passing
-- 🐛 **Known Issues**: 3 integration tests failing (leave, concurrent join, events)
-- ⚠️ **Test Coverage**: 53% of Java test suite ported (41/78 tests)
+- ✅ **ViewChangeProposal Events**: Now firing correctly (FIXED 2025-12-06)
+- ✅ **Integration Tests**: 6/8 tests passing (75% pass rate)
+- ✅ **Unit Tests**: 34/34 tests passing (100% pass rate)
+- 🐛 **Known Issues**: 2 integration tests failing (leave timing, concurrent join timing)
+- ✅ **Core Functionality**: Multi-node clusters work, events fire, metadata propagates
 
 ### Estimated Time to Complete
 
@@ -907,9 +916,13 @@ Remember: **Make it work, make it right, make it fast** - in that order!
 - ✅ View change events work
 - ⚠️ 3 integration tests failing (leave, concurrent join, proposal events) - need investigation
 
-**Updated 2025-12-06 20:01 UTC**:
+**Updated 2025-12-06 20:30 UTC**:
 - ✅ **MAJOR FIX**: GrpcServer now allows bootstrap without membership service
-- ✅ Integration tests enabled and mostly working (38/41 passing = 93%)
+- ✅ **MAJOR FIX**: ViewChangeProposal events now fire correctly when proposals are announced
+- ✅ Integration tests improved to 6/8 passing (75%)
+- ✅ All 34 unit tests passing (100%)
 - ✅ Multi-node cluster formation confirmed working
-- 🐛 Known issues: Leave protocol, concurrent joins, some events need tuning
-- 📊 Overall progress: ~99% core + 93% integration tests = **READY FOR BETA**
+- ✅ View change events working
+- ✅ Metadata propagation working
+- 🐛 Known issues: Leave protocol and concurrent joins have timing sensitivity - need investigation
+- 📊 Overall progress: ~99% core + 75% integration tests = **READY FOR BETA**

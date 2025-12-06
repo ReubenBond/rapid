@@ -15,6 +15,8 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Rapid.Messaging;
 using Rapid.Pb;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
 
 namespace Rapid;
 
@@ -34,21 +36,21 @@ internal sealed class Paxos
     private readonly long _configurationId;
     private readonly Endpoint _myAddr;
     private readonly int _n;
-    
+
     private Rank _rnd;
     private Rank _vrnd;
-    private List<Endpoint> _vval = new();
-    private readonly List<Phase1bMessage> _phase1bMessages = new();
-    private readonly Dictionary<Rank, Dictionary<Endpoint, Phase2bMessage>> _acceptResponses = new();
-    
+    private List<Endpoint> _vval = [];
+    private readonly List<Phase1bMessage> _phase1bMessages = [];
+    private readonly Dictionary<Rank, Dictionary<Endpoint, Phase2bMessage>> _acceptResponses = [];
+
     private Rank _crnd;
-    private List<Endpoint> _cval = new();
-    
+    private List<Endpoint> _cval = [];
+
     private readonly Action<List<Endpoint>> _onDecide;
     private bool _decided = false;
-    
+
     // Fast round votes tracking
-    private readonly Dictionary<List<Endpoint>, int> _fastRoundVotes = new(new ListEndpointComparer());
+    private readonly Dictionary<List<Endpoint>, int> _fastRoundVotes = new(ListEndpointComparer.Instance);
 
     public Paxos(Endpoint myAddr, long configurationId, int n, IMessagingClient client,
                  IBroadcaster broadcaster, Action<List<Endpoint>> onDecide, ILoggerFactory? loggerFactory = null)
@@ -60,7 +62,7 @@ internal sealed class Paxos
         _client = client;
         _onDecide = onDecide;
         _logger = (loggerFactory ?? NullLoggerFactory.Instance).CreateLogger<Paxos>();
-        
+
         _crnd = new Rank { Round = 0, NodeIndex = 0 };
         _rnd = new Rank { Round = 0, NodeIndex = 0 };
         _vrnd = new Rank { Round = 0, NodeIndex = 0 };
@@ -81,17 +83,17 @@ internal sealed class Paxos
         {
             return;
         }
-        
+
         _crnd = new Rank { Round = round, NodeIndex = _myAddr.GetHashCode() };
         _logger.LogDebug("Prepare called by {MyAddr} for round {Crnd}", _myAddr, _crnd);
-        
+
         var prepare = new Phase1aMessage
         {
             ConfigurationId = _configurationId,
             Sender = _myAddr,
             Rank = _crnd
         };
-        
+
         var request = Utils.ToRapidRequest(prepare);
         _logger.LogTrace("Broadcasting startPhase1a message");
         _ = _broadcaster.BroadcastAsync(request);
@@ -104,10 +106,10 @@ internal sealed class Paxos
             return;
         }
 
-        if (CompareRanks(phase1aMessage.Rank, _rnd) > 0)
+        if (phase1aMessage.Rank.CompareTo(_rnd) > 0)
         {
             _rnd = phase1aMessage.Rank;
-            
+
             var phase1b = new Phase1bMessage
             {
                 ConfigurationId = _configurationId,
@@ -116,7 +118,7 @@ internal sealed class Paxos
                 Vrnd = _vrnd
             };
             phase1b.Vval.AddRange(_vval);
-            
+
             var request = Utils.ToRapidRequest(phase1b);
             _ = _client.SendMessageAsync(phase1aMessage.Sender, request);
         }
@@ -129,19 +131,19 @@ internal sealed class Paxos
             return;
         }
 
-        if (!CompareRanksEqual(phase1bMessage.Rnd, _crnd))
+        if (!phase1bMessage.Rnd.Equals(_crnd))
         {
             return;
         }
 
         _phase1bMessages.Add(phase1bMessage);
-        
+
         var f = (int)Math.Floor((_n - 1) / 4.0);
         if (_phase1bMessages.Count >= _n - f)
         {
             var chosenValue = ChooseValue(_phase1bMessages, _n);
             _cval = chosenValue;
-            
+
             var phase2a = new Phase2aMessage
             {
                 ConfigurationId = _configurationId,
@@ -149,7 +151,7 @@ internal sealed class Paxos
                 Rnd = _crnd
             };
             phase2a.Vval.AddRange(_cval);
-            
+
             var request = Utils.ToRapidRequest(phase2a);
             _ = _broadcaster.BroadcastAsync(request);
         }
@@ -162,12 +164,12 @@ internal sealed class Paxos
             return;
         }
 
-        if (CompareRanks(phase2aMessage.Rnd, _rnd) >= 0)
+        if (phase2aMessage.Rnd.CompareTo(_rnd) >= 0)
         {
             _rnd = phase2aMessage.Rnd;
             _vrnd = phase2aMessage.Rnd;
-            _vval = new List<Endpoint>(phase2aMessage.Vval);
-            
+            _vval = [.. phase2aMessage.Vval];
+
             var phase2b = new Phase2bMessage
             {
                 ConfigurationId = _configurationId,
@@ -175,7 +177,7 @@ internal sealed class Paxos
                 Rnd = _rnd
             };
             phase2b.Endpoints.AddRange(_vval);
-            
+
             var request = Utils.ToRapidRequest(phase2b);
             _ = _client.SendMessageAsync(phase2aMessage.Sender, request);
         }
@@ -188,18 +190,18 @@ internal sealed class Paxos
             return;
         }
 
-        if (!CompareRanksEqual(phase2bMessage.Rnd, _crnd))
+        if (!phase2bMessage.Rnd.Equals(_crnd))
         {
             return;
         }
 
         if (!_acceptResponses.ContainsKey(_crnd))
         {
-            _acceptResponses[_crnd] = new Dictionary<Endpoint, Phase2bMessage>();
+            _acceptResponses[_crnd] = [];
         }
-        
+
         _acceptResponses[_crnd][phase2bMessage.Sender] = phase2bMessage;
-        
+
         var f = (int)Math.Floor((_n - 1) / 4.0);
         if (_acceptResponses[_crnd].Count >= _n - f && !_decided)
         {
@@ -215,109 +217,42 @@ internal sealed class Paxos
         // Implement Fast Paxos value selection rule
         var valuesByVrnd = phase1bMessages
             .Where(m => m.Vval.Count > 0)
-            .GroupBy(m => m.Vrnd, new RankComparer())
-            .OrderByDescending(g => g.Key, new RankComparer())
+            .GroupBy(m => m.Vrnd, RankComparer.Instance)
+            .OrderByDescending(g => g.Key, RankComparer.Instance)
             .ToList();
 
         if (valuesByVrnd.Count == 0)
         {
-            return new List<Endpoint>();
+            return [];
         }
 
         var maxVrnd = valuesByVrnd.First().Key;
         var valuesWithMaxVrnd = valuesByVrnd.First().Select(m => m.Vval.ToList()).ToList();
-        
+
         // Check if all values are the same
         var firstValue = valuesWithMaxVrnd[0];
-        if (valuesWithMaxVrnd.All(v => AreListsEqual(v, firstValue)))
+        if (valuesWithMaxVrnd.All(v => v.SequenceEqual(firstValue)))
         {
             return firstValue;
         }
 
         // Find the value with the most votes
-        var valueCounts = new Dictionary<List<Endpoint>, int>(new ListEndpointComparer());
+        var valueCounts = new Dictionary<List<Endpoint>, int>(ListEndpointComparer.Instance);
         foreach (var value in valuesWithMaxVrnd)
         {
-            if (!valueCounts.ContainsKey(value))
-            {
-                valueCounts[value] = 0;
-            }
-            valueCounts[value]++;
+            ref var entry = ref CollectionsMarshal.GetValueRefOrAddDefault(valueCounts, value, out var exists);
+            ++entry;
         }
 
         var maxCount = valueCounts.Values.Max();
         var f = (int)Math.Floor((n - 1) / 4.0);
-        
+
         if (maxCount >= (n - f) / 2)
         {
             return valueCounts.First(kv => kv.Value == maxCount).Key;
         }
 
-        return new List<Endpoint>();
-    }
-
-    private static bool AreListsEqual(IList<Endpoint> list1, IList<Endpoint> list2)
-    {
-        if (list1.Count != list2.Count) return false;
-        for (int i = 0; i < list1.Count; i++)
-        {
-            if (!list1[i].Equals(list2[i])) return false;
-        }
-        return true;
-    }
-
-    private static int CompareRanks(Rank r1, Rank r2)
-    {
-        var roundCmp = r1.Round.CompareTo(r2.Round);
-        if (roundCmp != 0) return roundCmp;
-        return r1.NodeIndex.CompareTo(r2.NodeIndex);
-    }
-
-    private static bool CompareRanksEqual(Rank r1, Rank r2)
-    {
-        return r1.Round == r2.Round && r1.NodeIndex == r2.NodeIndex;
-    }
-
-    private class RankComparer : IEqualityComparer<Rank>, IComparer<Rank>
-    {
-        public bool Equals(Rank? x, Rank? y)
-        {
-            if (x == null && y == null) return true;
-            if (x == null || y == null) return false;
-            return CompareRanksEqual(x, y);
-        }
-
-        public int GetHashCode(Rank obj)
-        {
-            return HashCode.Combine(obj.Round, obj.NodeIndex);
-        }
-
-        public int Compare(Rank? x, Rank? y)
-        {
-            if (x == null && y == null) return 0;
-            if (x == null) return -1;
-            if (y == null) return 1;
-            return CompareRanks(x, y);
-        }
-    }
-
-    private class ListEndpointComparer : IEqualityComparer<List<Endpoint>>
-    {
-        public bool Equals(List<Endpoint>? x, List<Endpoint>? y)
-        {
-            if (x == null && y == null) return true;
-            if (x == null || y == null) return false;
-            return AreListsEqual(x, y);
-        }
-
-        public int GetHashCode(List<Endpoint> obj)
-        {
-            var hash = new HashCode();
-            foreach (var endpoint in obj)
-            {
-                hash.Add(endpoint.GetHashCode());
-            }
-            return hash.ToHashCode();
-        }
+        return [];
     }
 }
+

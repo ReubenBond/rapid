@@ -15,21 +15,30 @@ using Rapid.Pb;
 
 namespace Rapid;
 
-/// <summary>
-/// Represents a cluster membership status change.
-/// </summary>
-public sealed class ClusterStatusChange(
-    long configurationId,
-    IReadOnlyList<Endpoint> membership,
-    IReadOnlyList<NodeStatusChange> delta)
+internal sealed class RankComparer : IEqualityComparer<Rank>, IComparer<Rank>
 {
-    public long ConfigurationId { get; } = configurationId;
-    public IReadOnlyList<Endpoint> Membership { get; } = membership;
-    public IReadOnlyList<NodeStatusChange> Delta { get; } = delta;
+    public static readonly RankComparer Instance = new();
 
-    public override string ToString()
+    private RankComparer() { }
+
+    public bool Equals(Rank? x, Rank? y)
     {
-        return $"ClusterStatusChange{{configurationId={ConfigurationId}, " +
-               $"membership={string.Join(",", Membership)}, delta={string.Join(",", Delta)}}}";
+        if (x == null && y == null) return true;
+        if (x == null || y == null) return false;
+        return x.Equals(y);
+    }
+
+    public int GetHashCode(Rank obj)
+    {
+        return HashCode.Combine(obj.Round, obj.NodeIndex);
+    }
+
+    public int Compare(Rank? x, Rank? y)
+    {
+        if (x == null && y == null) return 0;
+        if (x == null) return -1;
+        if (y == null) return 1;
+        return x.CompareTo(y);
     }
 }
+

@@ -25,9 +25,6 @@ namespace Rapid;
 /// </summary>
 internal sealed class MembershipService : IMembershipServiceHandler
 {
-    private const int BatchingWindowMs = 100;
-    private const int DefaultFailureDetectorInitialDelayMs = 0;
-    private const int DefaultFailureDetectorIntervalMs = 1000;
     private const int LeaveMessageTimeoutMs = 1500;
 
     private readonly ILogger<MembershipService> _logger;
@@ -35,9 +32,9 @@ internal sealed class MembershipService : IMembershipServiceHandler
     private readonly MultiNodeCutDetector _cutDetection;
     private readonly Endpoint _myAddr;
     private readonly IBroadcaster _broadcaster;
-    private readonly Dictionary<Endpoint, Channel<TaskCompletionSource<RapidResponse>>> _joinersToRespondTo = new();
-    private readonly Dictionary<Endpoint, NodeId> _joinerUuid = new();
-    private readonly Dictionary<Endpoint, Metadata> _joinerMetadata = new();
+    private readonly Dictionary<Endpoint, Channel<TaskCompletionSource<RapidResponse>>> _joinersToRespondTo = [];
+    private readonly Dictionary<Endpoint, NodeId> _joinerUuid = [];
+    private readonly Dictionary<Endpoint, Metadata> _joinerMetadata = [];
     private readonly IMessagingClient _messagingClient;
     private readonly MetadataManager _metadataManager;
     private readonly Dictionary<ClusterEvents, List<Action<ClusterStatusChange>>> _subscriptions;
@@ -46,23 +43,27 @@ internal sealed class MembershipService : IMembershipServiceHandler
     // Fields used by batching logic
     private long _lastEnqueueTimestamp = -1;
     private readonly Channel<AlertMessage> _sendQueue;
-    private readonly object _batchSchedulerLock = new();
+    private readonly Lock _batchSchedulerLock = new();
     private readonly SharedResources _sharedResources;
     private readonly CancellationTokenSource _shutdownCts = new();
-    private readonly List<IDisposable> _failureDetectors = new();
+    private readonly List<IDisposable> _failureDetectors = [];
     private readonly IEdgeFailureDetectorFactory _fdFactory;
     private bool _announcedProposal = false;
-    private readonly object _membershipUpdateLock = new();
+    private readonly Lock _membershipUpdateLock = new();
     private readonly Settings _settings;
 
-    public MembershipService(Endpoint myAddr, MultiNodeCutDetector cutDetection,
-                            MembershipView membershipView, SharedResources sharedResources,
-                            Settings settings, IMessagingClient messagingClient,
-                            IEdgeFailureDetectorFactory edgeFailureDetector,
-                            ILoggerFactory? loggerFactory = null)
+    public MembershipService(
+        Endpoint myAddr,
+        MultiNodeCutDetector cutDetection,
+        MembershipView membershipView,
+        SharedResources sharedResources,
+        Settings settings,
+        IMessagingClient messagingClient,
+        IEdgeFailureDetectorFactory edgeFailureDetector,
+        ILoggerFactory? loggerFactory = null)
         : this(myAddr, cutDetection, membershipView, sharedResources, settings, messagingClient,
-              edgeFailureDetector, new Dictionary<Endpoint, Metadata>(),
-              new Dictionary<ClusterEvents, List<Action<ClusterStatusChange>>>(), loggerFactory)
+              edgeFailureDetector, [],
+              [], loggerFactory)
     {
     }
 
@@ -93,7 +94,7 @@ internal sealed class MembershipService : IMembershipServiceHandler
         {
             if (!_subscriptions.ContainsKey(evt))
             {
-                _subscriptions[evt] = new List<Action<ClusterStatusChange>>();
+                _subscriptions[evt] = [];
             }
         }
 
@@ -266,6 +267,17 @@ internal sealed class MembershipService : IMembershipServiceHandler
                     _announcedProposal = true;
                     var currentConfigurationId = _membershipView.GetCurrentConfigurationId();
                     _logger.LogDebug("Initiating consensus for {Proposal}", Utils.Loggable(proposals));
+                    
+                    // Notify subscribers about the proposal
+                    var nodeStatusChanges = CreateNodeStatusChangeList(proposals);
+                    var currentMembership = _membershipView.GetRing(0);
+                    var clusterStatusChange = new ClusterStatusChange(currentConfigurationId, currentMembership, nodeStatusChanges);
+                    
+                    foreach (var cb in _subscriptions[ClusterEvents.ViewChangeProposal])
+                    {
+                        cb(clusterStatusChange);
+                    }
+                    
                     _fastPaxosInstance?.Propose(proposals);
                 }
             }

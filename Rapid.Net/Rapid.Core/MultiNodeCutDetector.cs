@@ -28,12 +28,12 @@ internal sealed class MultiNodeCutDetector
     private readonly int _k; // Number of observers per subject and vice versa
     private readonly int _h; // High watermark
     private readonly int _l; // Low watermark
-    private readonly object _lock = new();
+    private readonly Lock _lock = new();
     private int _proposalCount = 0;
     private int _updatesInProgress = 0;
-    private readonly Dictionary<Endpoint, Dictionary<int, Endpoint>> _reportsPerHost = new();
-    private readonly HashSet<Endpoint> _proposal = new();
-    private readonly HashSet<Endpoint> _preProposal = new();
+    private readonly Dictionary<Endpoint, Dictionary<int, Endpoint>> _reportsPerHost = [];
+    private readonly HashSet<Endpoint> _proposal = [];
+    private readonly HashSet<Endpoint> _preProposal = [];
     private bool _seenLinkDownEvents = false;
 
     public MultiNodeCutDetector(int k, int h, int l)
@@ -95,7 +95,7 @@ internal sealed class MultiNodeCutDetector
 
             if (reportsForHost.ContainsKey(ringNumber))
             {
-                return new List<Endpoint>();  // duplicate announcement, ignore.
+                return [];  // duplicate announcement, ignore.
             }
 
             reportsForHost[ringNumber] = linkSrc;
@@ -126,7 +126,7 @@ internal sealed class MultiNodeCutDetector
                 }
             }
 
-            return new List<Endpoint>();
+            return [];
         }
     }
 
@@ -143,7 +143,7 @@ internal sealed class MultiNodeCutDetector
             // Link invalidation is only required when we have failing nodes
             if (!_seenLinkDownEvents)
             {
-                return new List<Endpoint>();
+                return [];
             }
 
             var proposalsToReturn = new List<Endpoint>();

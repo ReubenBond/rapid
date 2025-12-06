@@ -8,8 +8,8 @@ namespace Rapid;
 
 internal sealed class MetadataManager
 {
-    private readonly Dictionary<Endpoint, Metadata> _metadata = new();
-    private readonly object _lock = new();
+    private readonly Dictionary<Endpoint, Metadata> _metadata = [];
+    private readonly Lock _lock = new();
 
     public void Add(Endpoint endpoint, Metadata metadata)
     {

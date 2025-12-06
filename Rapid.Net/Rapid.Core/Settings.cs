@@ -25,6 +25,8 @@ public sealed class Settings
     public const int DefaultFailureDetectorIntervalMs = 1000;
     public const int DefaultBatchingWindowMs = 100;
     public const long DefaultConsensusFallbackTimeoutBaseDelayMs = 500;
+    public const int DefaultLeaveMessageTimeoutMs = 1500;
+
 
     public bool UseInProcessTransport { get; set; } = false;
     public int GrpcTimeoutMs { get; set; } = DefaultGrpcTimeoutMs;
@@ -34,4 +36,5 @@ public sealed class Settings
     public int FailureDetectorIntervalMs { get; set; } = DefaultFailureDetectorIntervalMs;
     public int BatchingWindowMs { get; set; } = DefaultBatchingWindowMs;
     public long ConsensusFallbackTimeoutBaseDelayMs { get; set; } = DefaultConsensusFallbackTimeoutBaseDelayMs;
+    public int LeaveMessageTimeoutMs { get; set; } = DefaultLeaveMessageTimeoutMs;
 }

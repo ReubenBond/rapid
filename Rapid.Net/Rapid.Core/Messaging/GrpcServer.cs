@@ -88,15 +88,10 @@ public sealed class GrpcServer : IMessagingServer
         Shutdown();
     }
 
-    private class MembershipServiceImpl : Pb.MembershipService.MembershipServiceBase
+    private class MembershipServiceImpl(GrpcServer server) : Pb.MembershipService.MembershipServiceBase
     {
-        private readonly GrpcServer _server;
+        private readonly GrpcServer _server = server;
         private IMembershipServiceHandler? _handler;
-
-        public MembershipServiceImpl(GrpcServer server)
-        {
-            _server = server;
-        }
 
         public void SetHandler(IMembershipServiceHandler handler)
         {
