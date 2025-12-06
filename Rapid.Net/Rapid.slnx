@@ -1,0 +1,10 @@
+<Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="Rapid.Core/Rapid.Core.csproj" />
+  <Project Path="Rapid.Examples/Rapid.Examples.csproj" />
+  <Project Path="Rapid.Tests/Rapid.Tests.csproj" />
+</Solution>
