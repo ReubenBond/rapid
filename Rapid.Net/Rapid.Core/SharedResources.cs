@@ -56,12 +56,12 @@ public sealed partial class SharedResources : IDisposable
     {
         try
         {
-            await foreach (var taskFunc in _protocolExecutor.Reader.ReadAllAsync(_shutdownCts.Token))
+            await foreach (var taskFunc in _protocolExecutor.Reader.ReadAllAsync(_shutdownCts.Token).ConfigureAwait(false))
             {
 #pragma warning disable CA1031 // Do not catch general exception types
                 try
                 {
-                    await taskFunc();
+                    await taskFunc().ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
@@ -78,7 +78,7 @@ public sealed partial class SharedResources : IDisposable
 
     public async Task ScheduleAsyncCallback(Func<Task> asyncFunc)
     {
-        await ProtocolExecutor.Writer.WriteAsync(asyncFunc);
+        await ProtocolExecutor.Writer.WriteAsync(asyncFunc).ConfigureAwait(false);
     }
 
     public void ScheduleCallback(Func<Task> asyncFunc)

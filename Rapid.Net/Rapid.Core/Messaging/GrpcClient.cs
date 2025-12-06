@@ -55,7 +55,7 @@ internal sealed partial class GrpcClient(Settings settings, ILoggerFactory? logg
 #pragma warning disable CA1031
         try
         {
-            return await SendMessageAsync(remote, request, cancellationToken);
+            return await SendMessageAsync(remote, request, cancellationToken).ConfigureAwait(false);
         }
         catch
         {

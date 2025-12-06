@@ -20,6 +20,6 @@ public sealed class UnicastToAllBroadcaster(IMessagingClient client) : IBroadcas
     {
         var tasks = _membership.Select(endpoint =>
             _client.SendMessageBestEffortAsync(endpoint, request));
-        await Task.WhenAll(tasks);
+        await Task.WhenAll(tasks).ConfigureAwait(false);
     }
 }

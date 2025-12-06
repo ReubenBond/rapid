@@ -26,23 +26,15 @@ internal sealed partial class GrpcServer : IMessagingServer
     [LoggerMessage(Level = LogLevel.Information, Message = "gRPC server started on {Hostname}:{Port}")]
     private partial void LogServerStarted(string Hostname, int Port);
 
-    private static readonly RapidResponse BootstrappingMessage = new()
-    {
-        ProbeResponse = new ProbeResponse { Status = NodeStatus.Bootstrapping }
-    };
-
-    public GrpcServer(Endpoint listenAddress, SharedResources sharedResources, MembershipService membershipService, Settings settings,
-                     ILoggerFactory? loggerFactory = null)
+    public GrpcServer(
+        Endpoint listenAddress,
+        MembershipService membershipService,
+        ILoggerFactory? loggerFactory = null)
     {
         _listenAddress = listenAddress;
         _loggerFactory = loggerFactory ?? Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance;
         _logger = _loggerFactory.CreateLogger<GrpcServer>();
         _serviceImpl = new MembershipServiceImpl(membershipService);
-    }
-
-    public void SetMembershipService(IMembershipServiceHandler service)
-    {
-        _serviceImpl.SetHandler(service);
     }
 
     public async Task StartAsync(CancellationToken cancellationToken = default)
@@ -53,13 +45,7 @@ internal sealed partial class GrpcServer : IMessagingServer
         var builder = WebApplication.CreateBuilder();
 
         // Configure Kestrel to listen on the specified address and port
-        builder.WebHost.ConfigureKestrel(options =>
-        {
-            options.ListenAnyIP(port, listenOptions =>
-            {
-                listenOptions.Protocols = HttpProtocols.Http2;
-            });
-        });
+        builder.WebHost.ConfigureKestrel(options => options.ListenAnyIP(port, listenOptions => listenOptions.Protocols = HttpProtocols.Http2));
 
         // Configure logging
         builder.Logging.ClearProviders();
@@ -74,7 +60,7 @@ internal sealed partial class GrpcServer : IMessagingServer
         // Map gRPC service
         _app.MapGrpcService<MembershipServiceImpl>();
 
-        await _app.StartAsync(cancellationToken);
+        await _app.StartAsync(cancellationToken).ConfigureAwait(false);
         LogServerStarted(hostname, port);
     }
 
@@ -82,33 +68,21 @@ internal sealed partial class GrpcServer : IMessagingServer
     {
         if (_app != null)
         {
-            await _app.StopAsync(cancellationToken);
-            await _app.DisposeAsync();
+            await _app.StopAsync(cancellationToken).ConfigureAwait(false);
+            await _app.DisposeAsync().ConfigureAwait(false);
         }
     }
 
     public async ValueTask DisposeAsync()
     {
-        await StopAsync();
+        await StopAsync().ConfigureAwait(false);
     }
 
-    private sealed class MembershipServiceImpl : Pb.MembershipService.MembershipServiceBase
+    private sealed class MembershipServiceImpl(IMembershipServiceHandler handler) : Pb.MembershipService.MembershipServiceBase
     {
-        private IMembershipServiceHandler _handler;
-
-        public MembershipServiceImpl(IMembershipServiceHandler handler)
-        {
-            _handler = handler;
-        }
-
-        public void SetHandler(IMembershipServiceHandler handler)
-        {
-            _handler = handler;
-        }
-
         public override async Task<RapidResponse> sendRequest(RapidRequest request, ServerCallContext context)
         {
-            return await _handler.HandleMessageAsync(request, context.CancellationToken);
+            return await handler.HandleMessageAsync(request, context.CancellationToken).ConfigureAwait(false);
         }
     }
 }

@@ -194,21 +194,21 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
     {
         return msg.ContentCase switch
         {
-            RapidRequest.ContentOneofCase.PreJoinMessage => await HandleMessageAsync(msg.PreJoinMessage, cancellationToken),
-            RapidRequest.ContentOneofCase.JoinMessage => await HandleMessageAsync(msg.JoinMessage, cancellationToken),
-            RapidRequest.ContentOneofCase.BatchedAlertMessage => await HandleMessageAsync(msg.BatchedAlertMessage, cancellationToken),
-            RapidRequest.ContentOneofCase.ProbeMessage => await HandleMessageAsync(msg.ProbeMessage, cancellationToken),
+            RapidRequest.ContentOneofCase.PreJoinMessage => await HandlePreJoinMessageAsync(msg.PreJoinMessage, cancellationToken).ConfigureAwait(false),
+            RapidRequest.ContentOneofCase.JoinMessage => await HandleJoinMessageAsync(msg.JoinMessage, cancellationToken).ConfigureAwait(false),
+            RapidRequest.ContentOneofCase.BatchedAlertMessage => await HandleBatchedAlertMessageAsync(msg.BatchedAlertMessage, cancellationToken).ConfigureAwait(false),
+            RapidRequest.ContentOneofCase.ProbeMessage => await HandleProbeMessage(msg.ProbeMessage, cancellationToken).ConfigureAwait(false),
             RapidRequest.ContentOneofCase.FastRoundPhase2BMessage or
             RapidRequest.ContentOneofCase.Phase1AMessage or
             RapidRequest.ContentOneofCase.Phase1BMessage or
             RapidRequest.ContentOneofCase.Phase2AMessage or
-            RapidRequest.ContentOneofCase.Phase2BMessage => await HandleConsensusMessagesAsync(msg, cancellationToken),
-            RapidRequest.ContentOneofCase.LeaveMessage => await HandleLeaveMessageAsync(msg, cancellationToken),
+            RapidRequest.ContentOneofCase.Phase2BMessage => await HandleConsensusMessagesAsync(msg, cancellationToken).ConfigureAwait(false),
+            RapidRequest.ContentOneofCase.LeaveMessage => await HandleLeaveMessageAsync(msg, cancellationToken).ConfigureAwait(false),
             _ => throw new ArgumentException($"Unidentified RapidRequest type {msg.ContentCase}")
         };
     }
 
-    private async Task<RapidResponse> HandleMessageAsync(PreJoinMessage msg, CancellationToken cancellationToken = default)
+    private async Task<RapidResponse> HandlePreJoinMessageAsync(PreJoinMessage msg, CancellationToken cancellationToken = default)
     {
         var tcs = new TaskCompletionSource<RapidResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -232,12 +232,12 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
             }
 
             tcs.SetResult(RapidUtils.ToRapidResponse(builder));
-        });
+        }).ConfigureAwait(false);
 
-        return await tcs.Task;
+        return await tcs.Task.ConfigureAwait(false);
     }
 
-    private async Task<RapidResponse> HandleMessageAsync(JoinMessage joinMessage, CancellationToken cancellationToken = default)
+    private async Task<RapidResponse> HandleJoinMessageAsync(JoinMessage joinMessage, CancellationToken cancellationToken = default)
     {
         var tcs = new TaskCompletionSource<RapidResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -252,7 +252,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
 
                 ref var channel = ref CollectionsMarshal.GetValueRefOrAddDefault(_joinersToRespondTo, joinMessage.Sender, out var _);
                 channel ??= Channel.CreateUnbounded<TaskCompletionSource<RapidResponse>>();
-                await channel.Writer.WriteAsync(tcs);
+                await channel.Writer.WriteAsync(tcs).ConfigureAwait(false);
 
                 var alertMsg = new AlertMessage
                 {
@@ -296,12 +296,12 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
 
                 tcs.SetResult(RapidUtils.ToRapidResponse(responseBuilder));
             }
-        });
+        }).ConfigureAwait(false);
 
-        return await tcs.Task;
+        return await tcs.Task.ConfigureAwait(false);
     }
 
-    private async Task<RapidResponse> HandleMessageAsync(BatchedAlertMessage messageBatch, CancellationToken cancellationToken = default)
+    private async Task<RapidResponse> HandleBatchedAlertMessageAsync(BatchedAlertMessage messageBatch, CancellationToken cancellationToken = default)
     {
         var tcs = new TaskCompletionSource<RapidResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -345,9 +345,9 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
             }
 
             tcs.SetResult(RapidUtils.ToRapidResponse(new ConsensusResponse()));
-        });
+        }).ConfigureAwait(false);
 
-        return await tcs.Task;
+        return await tcs.Task.ConfigureAwait(false);
     }
 
     private Task<RapidResponse> HandleConsensusMessagesAsync(RapidRequest request, CancellationToken cancellationToken = default)
@@ -364,10 +364,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         return RapidUtils.ToRapidResponse(new ConsensusResponse());
     }
 
-    private async Task<RapidResponse> HandleMessageAsync(ProbeMessage probeMessage, CancellationToken cancellationToken = default)
-    {
-        return RapidUtils.ToRapidResponse(new ProbeResponse());
-    }
+    private static async Task<RapidResponse> HandleProbeMessage(ProbeMessage probeMessage, CancellationToken cancellationToken = default) => RapidUtils.ToRapidResponse(new ProbeResponse());
 
     private void DecideViewChange(List<Endpoint> proposal)
     {
@@ -503,7 +500,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
             using var timeoutCts = new CancellationTokenSource(_settings.LeaveMessageTimeoutMs);
             try
             {
-                await Task.WhenAll(tasks).WaitAsync(timeoutCts.Token);
+                await Task.WhenAll(tasks).WaitAsync(timeoutCts.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -538,7 +535,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         {
             try
             {
-                await Task.Delay(_settings.BatchingWindowMs, _shutdownCts.Token);
+                await Task.Delay(_settings.BatchingWindowMs, _shutdownCts.Token).ConfigureAwait(false);
 
                 lock (_batchSchedulerLock)
                 {
@@ -569,7 +566,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         }
     }
 
-    private bool FilterAlertMessages(BatchedAlertMessage batchedAlertMessage, long currentConfigurationId)
+    private static bool FilterAlertMessages(BatchedAlertMessage batchedAlertMessage, long currentConfigurationId)
     {
         return batchedAlertMessage.Messages.Any(m => m.ConfigurationId == currentConfigurationId);
     }
@@ -614,10 +611,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         {
             var subject = subjects[i];
             var ringNumber = i;
-            var fd = _fdFactory.CreateInstance(subject, () =>
-            {
-                EdgeFailureNotification(subject, configurationId);
-            });
+            var fd = _fdFactory.CreateInstance(subject, () => EdgeFailureNotification(subject, configurationId));
 
             fd.Start();
             _failureDetectors.Add(fd);

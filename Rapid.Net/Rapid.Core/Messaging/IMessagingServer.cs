@@ -12,12 +12,6 @@ namespace Rapid.Messaging;
 public interface IMessagingServer : IAsyncDisposable
 {
     /// <summary>
-    /// Sets the membership service handler that will process incoming messages.
-    /// </summary>
-    /// <param name="service">The membership service handler.</param>
-    void SetMembershipService(IMembershipServiceHandler service);
-
-    /// <summary>
     /// Starts the messaging server and begins listening for incoming messages.
     /// </summary>
     /// <param name="cancellationToken">Token to cancel the operation.</param>

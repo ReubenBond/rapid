@@ -81,12 +81,9 @@ internal sealed partial class Program
 
     static async Task RunAgentAsync(string listenAddress, string seedAddress)
     {
-        using var loggerFactory = LoggerFactory.Create(builder =>
-        {
-            builder
+        using var loggerFactory = LoggerFactory.Create(builder => builder
                 .AddConsole()
-                .SetMinimumLevel(LogLevel.Information);
-        });
+                .SetMinimumLevel(LogLevel.Information));
 
         var logger = loggerFactory.CreateLogger<Program>();
 
@@ -106,39 +103,30 @@ internal sealed partial class Program
             if (listen.Equals(seed))
             {
                 LogClusterStarted(logger, listenAddress);
-                cluster = await builder.StartAsync();
+                cluster = await builder.StartAsync().ConfigureAwait(false);
             }
             else
             {
                 LogClusterJoined(logger, seedAddress);
-                cluster = await builder.JoinAsync(seed);
+                cluster = await builder.JoinAsync(seed).ConfigureAwait(false);
             }
 
             // Register event handlers
-            cluster.RegisterSubscription(ClusterEvents.ViewChangeProposal, change =>
-            {
-                LogProposalDetected(logger, change);
-            });
+            cluster.RegisterSubscription(ClusterEvents.ViewChangeProposal, change => LogProposalDetected(logger, change));
 
-            cluster.RegisterSubscription(ClusterEvents.ViewChange, change =>
-            {
-                LogViewChange(logger, change.ConfigurationId, change.Membership.Count);
-            });
+            cluster.RegisterSubscription(ClusterEvents.ViewChange, change => LogViewChange(logger, change.ConfigurationId, change.Membership.Count));
 
-            cluster.RegisterSubscription(ClusterEvents.Kicked, change =>
-            {
-                LogKicked(logger, change);
-            });
+            cluster.RegisterSubscription(ClusterEvents.Kicked, change => LogKicked(logger, change));
 
             // Periodically print membership
             for (var i = 0; i < MaxTries; i++)
             {
                 var size = cluster.GetMembershipSize();
                 LogMembershipSize(logger, size);
-                await Task.Delay(SleepIntervalMs);
+                await Task.Delay(SleepIntervalMs).ConfigureAwait(false);
             }
 
-            await cluster.LeaveGracefullyAsync();
+            await cluster.LeaveGracefullyAsync().ConfigureAwait(false);
         }
         catch (Exception ex)
         {

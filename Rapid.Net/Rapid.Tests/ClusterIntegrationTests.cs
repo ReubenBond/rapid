@@ -27,10 +27,7 @@ public sealed class ClusterIntegrationTests : IDisposable
 
     public ClusterIntegrationTests()
     {
-        _loggerFactory = LoggerFactory.Create(builder =>
-        {
-            builder.SetMinimumLevel(LogLevel.Warning);
-        });
+        _loggerFactory = LoggerFactory.Create(builder => builder.SetMinimumLevel(LogLevel.Warning));
     }
 
     public void Dispose()
@@ -63,7 +60,7 @@ public sealed class ClusterIntegrationTests : IDisposable
 
         var seed = await new Cluster.ClusterBuilder(seedAddress)
             .UseLoggerFactory(_loggerFactory)
-            .StartAsync();
+            .StartAsync().ConfigureAwait(true);
         _clusters.Add(seed);
 
         Assert.Equal(1, seed.GetMembershipSize());
@@ -80,19 +77,19 @@ public sealed class ClusterIntegrationTests : IDisposable
 
         var seed = await new Cluster.ClusterBuilder(seedAddress)
             .UseLoggerFactory(_loggerFactory)
-            .StartAsync();
+            .StartAsync().ConfigureAwait(true);
         _clusters.Add(seed);
 
         Assert.Equal(1, seed.GetMembershipSize());
 
         var joiner = await new Cluster.ClusterBuilder(joinerAddress)
             .UseLoggerFactory(_loggerFactory)
-            .JoinAsync(seedAddress);
+            .JoinAsync(seedAddress).ConfigureAwait(true);
         _clusters.Add(joiner);
 
         // Wait for cluster convergence
-        await WaitForClusterSize(seed, 2, TimeSpan.FromSeconds(10));
-        await WaitForClusterSize(joiner, 2, TimeSpan.FromSeconds(10));
+        await WaitForClusterSize(seed, 2, TimeSpan.FromSeconds(10)).ConfigureAwait(true);
+        await WaitForClusterSize(joiner, 2, TimeSpan.FromSeconds(10)).ConfigureAwait(true);
 
         Assert.Equal(2, seed.GetMembershipSize());
         Assert.Equal(2, joiner.GetMembershipSize());
@@ -110,23 +107,23 @@ public sealed class ClusterIntegrationTests : IDisposable
 
         var seed = await new Cluster.ClusterBuilder(seedAddress)
             .UseLoggerFactory(_loggerFactory)
-            .StartAsync();
+            .StartAsync().ConfigureAwait(true);
         _clusters.Add(seed);
 
         var joiner1 = await new Cluster.ClusterBuilder(joiner1Address)
             .UseLoggerFactory(_loggerFactory)
-            .JoinAsync(seedAddress);
+            .JoinAsync(seedAddress).ConfigureAwait(true);
         _clusters.Add(joiner1);
 
         var joiner2 = await new Cluster.ClusterBuilder(joiner2Address)
             .UseLoggerFactory(_loggerFactory)
-            .JoinAsync(seedAddress);
+            .JoinAsync(seedAddress).ConfigureAwait(true);
         _clusters.Add(joiner2);
 
         // Wait for cluster convergence
-        await WaitForClusterSize(seed, 3, TimeSpan.FromSeconds(10));
-        await WaitForClusterSize(joiner1, 3, TimeSpan.FromSeconds(10));
-        await WaitForClusterSize(joiner2, 3, TimeSpan.FromSeconds(10));
+        await WaitForClusterSize(seed, 3, TimeSpan.FromSeconds(10)).ConfigureAwait(true);
+        await WaitForClusterSize(joiner1, 3, TimeSpan.FromSeconds(10)).ConfigureAwait(true);
+        await WaitForClusterSize(joiner2, 3, TimeSpan.FromSeconds(10)).ConfigureAwait(true);
 
         Assert.Equal(3, seed.GetMembershipSize());
         Assert.Equal(3, joiner1.GetMembershipSize());
@@ -146,21 +143,18 @@ public sealed class ClusterIntegrationTests : IDisposable
 
         var seed = await new Cluster.ClusterBuilder(seedAddress)
             .UseLoggerFactory(_loggerFactory)
-            .StartAsync();
+            .StartAsync().ConfigureAwait(true);
         _clusters.Add(seed);
 
-        seed.RegisterSubscription(ClusterEvents.ViewChange, change =>
-        {
-            viewChanges.Add(change);
-        });
+        seed.RegisterSubscription(ClusterEvents.ViewChange, change => viewChanges.Add(change));
 
         var joiner = await new Cluster.ClusterBuilder(joinerAddress)
             .UseLoggerFactory(_loggerFactory)
-            .JoinAsync(seedAddress);
+            .JoinAsync(seedAddress).ConfigureAwait(true);
         _clusters.Add(joiner);
 
         // Wait for cluster convergence
-        await WaitForClusterSize(seed, 2, TimeSpan.FromSeconds(10));
+        await WaitForClusterSize(seed, 2, TimeSpan.FromSeconds(10)).ConfigureAwait(true);
 
         // Should have received at least one view change event
         Assert.True(viewChanges.Count > 0);
@@ -184,7 +178,7 @@ public sealed class ClusterIntegrationTests : IDisposable
         var seed = await new Cluster.ClusterBuilder(seedAddress)
             .UseLoggerFactory(_loggerFactory)
             .SetMetadata(seedMetadataDict)
-            .StartAsync();
+            .StartAsync().ConfigureAwait(true);
         _clusters.Add(seed);
 
         var joinerMetadataDict = new Dictionary<string, Google.Protobuf.ByteString>
@@ -196,11 +190,11 @@ public sealed class ClusterIntegrationTests : IDisposable
         var joiner = await new Cluster.ClusterBuilder(joinerAddress)
             .UseLoggerFactory(_loggerFactory)
             .SetMetadata(joinerMetadataDict)
-            .JoinAsync(seedAddress);
+            .JoinAsync(seedAddress).ConfigureAwait(true);
         _clusters.Add(joiner);
 
         // Wait for cluster convergence
-        await WaitForClusterSize(seed, 2, TimeSpan.FromSeconds(10));
+        await WaitForClusterSize(seed, 2, TimeSpan.FromSeconds(10)).ConfigureAwait(true);
 
         // Verify metadata is available
         var allMetadata = seed.GetClusterMetadata();
@@ -223,32 +217,32 @@ public sealed class ClusterIntegrationTests : IDisposable
 
         var seed = await new Cluster.ClusterBuilder(seedAddress)
             .UseLoggerFactory(_loggerFactory)
-            .StartAsync();
+            .StartAsync().ConfigureAwait(true);
         _clusters.Add(seed);
 
         var joiner1 = await new Cluster.ClusterBuilder(joiner1Address)
             .UseLoggerFactory(_loggerFactory)
-            .JoinAsync(seedAddress);
+            .JoinAsync(seedAddress).ConfigureAwait(true);
         _clusters.Add(joiner1);
 
         var joiner2 = await new Cluster.ClusterBuilder(joiner2Address)
             .UseLoggerFactory(_loggerFactory)
-            .JoinAsync(seedAddress);
+            .JoinAsync(seedAddress).ConfigureAwait(true);
         _clusters.Add(joiner2);
 
         // Wait for cluster convergence
-        await WaitForClusterSize(seed, 3, TimeSpan.FromSeconds(10));
-        await WaitForClusterSize(joiner1, 3, TimeSpan.FromSeconds(10));
-        await WaitForClusterSize(joiner2, 3, TimeSpan.FromSeconds(10));
+        await WaitForClusterSize(seed, 3, TimeSpan.FromSeconds(10)).ConfigureAwait(true);
+        await WaitForClusterSize(joiner1, 3, TimeSpan.FromSeconds(10)).ConfigureAwait(true);
+        await WaitForClusterSize(joiner2, 3, TimeSpan.FromSeconds(10)).ConfigureAwait(true);
 
         Assert.Equal(3, seed.GetMembershipSize());
 
         // Joiner2 leaves gracefully
-        await joiner2.LeaveGracefullyAsync();
+        await joiner2.LeaveGracefullyAsync().ConfigureAwait(true);
 
         // Wait for remaining nodes to detect the leave - increased timeout for consensus
-        await WaitForClusterSize(seed, 2, TimeSpan.FromSeconds(20));
-        await WaitForClusterSize(joiner1, 2, TimeSpan.FromSeconds(20));
+        await WaitForClusterSize(seed, 2, TimeSpan.FromSeconds(20)).ConfigureAwait(true);
+        await WaitForClusterSize(joiner1, 2, TimeSpan.FromSeconds(20)).ConfigureAwait(true);
 
         Assert.Equal(2, seed.GetMembershipSize());
         Assert.Equal(2, joiner1.GetMembershipSize());
@@ -265,7 +259,7 @@ public sealed class ClusterIntegrationTests : IDisposable
 
         var seed = await new Cluster.ClusterBuilder(seedAddress)
             .UseLoggerFactory(_loggerFactory)
-            .StartAsync();
+            .StartAsync().ConfigureAwait(true);
         _clusters.Add(seed);
 
         const int numJoiners = 3;
@@ -280,17 +274,17 @@ public sealed class ClusterIntegrationTests : IDisposable
             joinTasks.Add(joinTask);
         }
 
-        var joiners = await Task.WhenAll(joinTasks);
+        var joiners = await Task.WhenAll(joinTasks).ConfigureAwait(true);
         _clusters.AddRange(joiners);
 
         // Wait for cluster convergence - increased timeout for concurrent joins
-        await WaitForClusterSize(seed, numJoiners + 1, TimeSpan.FromSeconds(30));
+        await WaitForClusterSize(seed, numJoiners + 1, TimeSpan.FromSeconds(30)).ConfigureAwait(true);
 
         Assert.Equal(numJoiners + 1, seed.GetMembershipSize());
 
         foreach (var joiner in joiners)
         {
-            await WaitForClusterSize(joiner, numJoiners + 1, TimeSpan.FromSeconds(30));
+            await WaitForClusterSize(joiner, numJoiners + 1, TimeSpan.FromSeconds(30)).ConfigureAwait(true);
             Assert.Equal(numJoiners + 1, joiner.GetMembershipSize());
         }
     }
@@ -308,21 +302,18 @@ public sealed class ClusterIntegrationTests : IDisposable
 
         var seed = await new Cluster.ClusterBuilder(seedAddress)
             .UseLoggerFactory(_loggerFactory)
-            .StartAsync();
+            .StartAsync().ConfigureAwait(true);
         _clusters.Add(seed);
 
-        seed.RegisterSubscription(ClusterEvents.ViewChangeProposal, change =>
-        {
-            proposals.Add(change);
-        });
+        seed.RegisterSubscription(ClusterEvents.ViewChangeProposal, change => proposals.Add(change));
 
         var joiner = await new Cluster.ClusterBuilder(joinerAddress)
             .UseLoggerFactory(_loggerFactory)
-            .JoinAsync(seedAddress);
+            .JoinAsync(seedAddress).ConfigureAwait(true);
         _clusters.Add(joiner);
 
         // Wait for cluster convergence
-        await WaitForClusterSize(seed, 2, TimeSpan.FromSeconds(10));
+        await WaitForClusterSize(seed, 2, TimeSpan.FromSeconds(10)).ConfigureAwait(true);
 
         // Should have received proposal events
         Assert.True(proposals.Count > 0);
@@ -337,7 +328,7 @@ public sealed class ClusterIntegrationTests : IDisposable
             {
                 return;
             }
-            await Task.Delay(100);
+            await Task.Delay(100).ConfigureAwait(false);
         }
 
         throw new TimeoutException(

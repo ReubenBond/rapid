@@ -55,13 +55,13 @@ public sealed partial class PingPongFailureDetectorFactory(Endpoint localEndpoin
 
         private async Task ProbeAsync()
         {
-            while (await _timer.WaitForNextTickAsync(_cts.Token))
+            while (await _timer.WaitForNextTickAsync(_cts.Token).ConfigureAwait(false))
             {
 #pragma warning disable CA1031
                 try
                 {
                     var request = RapidUtils.ToRapidRequest(new ProbeMessage { Sender = _observer });
-                    var response = await _client.SendMessageAsync(_subject, request, _cts.Token);
+                    var response = await _client.SendMessageAsync(_subject, request, _cts.Token).ConfigureAwait(false);
 
                     if (response.ProbeResponse == null)
                     {

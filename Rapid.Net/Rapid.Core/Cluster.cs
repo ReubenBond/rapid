@@ -92,9 +92,9 @@ public sealed partial class Cluster : IDisposable
         LogLeavingMembership();
         if (_membershipService != null)
         {
-            await _membershipService.LeaveAsync();
+            await _membershipService.LeaveAsync().ConfigureAwait(false);
         }
-        await ShutdownAsync();
+        await ShutdownAsync().ConfigureAwait(false);
     }
 
     /// <summary>
@@ -104,7 +104,7 @@ public sealed partial class Cluster : IDisposable
     {
         LogShuttingDown();
         _membershipService?.Shutdown();
-        await _rpcServer.StopAsync(cancellationToken);
+        await _rpcServer.StopAsync(cancellationToken).ConfigureAwait(false);
         _sharedResources.Dispose();
         _hasShutdown = true;
     }
@@ -228,7 +228,7 @@ public sealed partial class Cluster : IDisposable
             _messagingServer ??= new GrpcServer(_listenAddress, sharedResources, membershipService, _settings, _loggerFactory);
 
             // Start server
-            await _messagingServer.StartAsync();
+            await _messagingServer.StartAsync().ConfigureAwait(false);
 
             var cluster = new Cluster(_messagingServer, membershipService, sharedResources, _loggerFactory);
             return cluster;
@@ -252,7 +252,7 @@ public sealed partial class Cluster : IDisposable
                 NodeId = currentIdentifier
             };
 
-            var preJoinResponse = await _messagingClient.SendMessageAsync(seedAddress, RapidUtils.ToRapidRequest(preJoinMessage));
+            var preJoinResponse = await _messagingClient.SendMessageAsync(seedAddress, RapidUtils.ToRapidRequest(preJoinMessage)).ConfigureAwait(false);
             var joinResponse = preJoinResponse.JoinResponse;
 
             if (joinResponse.StatusCode != JoinStatusCode.SafeToJoin &&
@@ -298,10 +298,10 @@ public sealed partial class Cluster : IDisposable
                     LogSendingJoinP2(logger, new LoggableEndpoint(_listenAddress), new LoggableEndpoint(entry.Key), joinResponse.ConfigurationId);
                 }
 
-                return await _messagingClient.SendMessageAsync(entry.Key, RapidUtils.ToRapidRequest(joinMessageForObserver)).WithDefaultOnException();
+                return await _messagingClient.SendMessageAsync(entry.Key, RapidUtils.ToRapidRequest(joinMessageForObserver)).WithDefaultOnException().ConfigureAwait(false);
             });
 
-            var responses = await Task.WhenAll(tasks);
+            var responses = await Task.WhenAll(tasks).ConfigureAwait(false);
             var successfulResponse = responses.FirstOrDefault(r => r?.JoinResponse?.StatusCode == JoinStatusCode.SafeToJoin)?.JoinResponse;
 
             if (successfulResponse == null)
@@ -328,9 +328,9 @@ public sealed partial class Cluster : IDisposable
                                                          _edgeFailureDetector, metadataMap, _subscriptions,
                                                          _loggerFactory);
 
-            _messagingServer ??= new GrpcServer(_listenAddress, sharedResources, membershipService, _settings, _loggerFactory);
+            _messagingServer ??= new GrpcServer(_listenAddress, membershipService, _loggerFactory);
 
-            await _messagingServer.StartAsync();
+            await _messagingServer.StartAsync().ConfigureAwait(false);
 
             var cluster = new Cluster(_messagingServer, membershipService, sharedResources, _loggerFactory);
             return cluster;
