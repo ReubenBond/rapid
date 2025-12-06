@@ -26,6 +26,7 @@ internal sealed partial class FastPaxos : IDisposable
     private bool _decided;
     private CancellationTokenSource? _scheduledClassicRoundCts;
     private readonly RapidProtocolOptions _options;
+    private readonly SharedResources _sharedResources;
 
     private readonly struct LoggableEndpoints(IEnumerable<Endpoint> endpoints)
     {
@@ -53,6 +54,7 @@ internal sealed partial class FastPaxos : IDisposable
         IBroadcaster broadcaster,
         Action<List<Endpoint>> onDecide,
         IOptions<RapidProtocolOptions> options,
+        SharedResources sharedResources,
         ILoggerFactory? loggerFactory = null)
     {
         _myAddr = myAddr;
@@ -60,6 +62,7 @@ internal sealed partial class FastPaxos : IDisposable
         _membershipSize = membershipSize;
         _broadcaster = broadcaster;
         _options = options.Value;
+        _sharedResources = sharedResources;
         _logger = (loggerFactory ?? NullLoggerFactory.Instance).CreateLogger<FastPaxos>();
 
         // The rate of a random expovariate variable, used to determine a jitter over a base delay to start classic
@@ -102,8 +105,9 @@ internal sealed partial class FastPaxos : IDisposable
 
         LogSchedulingClassicRound(recoveryDelay);
         _scheduledClassicRoundCts = new CancellationTokenSource();
-        _ = Task.Delay(recoveryDelay, _scheduledClassicRoundCts.Token)
+        var classicRoundTask = _sharedResources.TimeProvider.Delay(recoveryDelay, _scheduledClassicRoundCts.Token)
             .ContinueWith(_ => StartClassicPaxosRound(), TaskScheduler.Default);
+        _sharedResources.TrackBackgroundTask(classicRoundTask);
     }
 
     /// <summary>

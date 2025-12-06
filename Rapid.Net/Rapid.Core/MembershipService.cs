@@ -155,8 +155,9 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
             }
         }
 
-        // Start background jobs
-        _ = Task.Run(AlertBatcherAsync, _shutdownCts.Token);
+        // Start background jobs and track them
+        var alertBatcherTask = Task.Run(AlertBatcherAsync, _shutdownCts.Token);
+        _sharedResources.TrackBackgroundTask(alertBatcherTask);
 
         _broadcaster.SetMembership(_membershipView.GetRing(0));
 
@@ -164,7 +165,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         _fastPaxosInstance = new FastPaxos(_myAddr, _membershipView.GetCurrentConfigurationId(),
                                           _membershipView.GetMembershipSize(), _messagingClient,
                                           _broadcaster, DecideViewChange,
-                                          _protocolOptions, loggerFactory);
+                                          _protocolOptions, _sharedResources, loggerFactory);
 
         CreateFailureDetectorsForCurrentConfiguration();
 
@@ -428,7 +429,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
 
         _fastPaxosInstance = new FastPaxos(_myAddr, _membershipView.GetCurrentConfigurationId(),
                                           _membershipView.GetMembershipSize(), _messagingClient,
-                                          _broadcaster, DecideViewChange, _protocolOptions);
+                                          _broadcaster, DecideViewChange, _protocolOptions, _sharedResources);
 
         CreateFailureDetectorsForCurrentConfiguration();
 
@@ -525,7 +526,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         {
             try
             {
-                await Task.Delay(_options.BatchingWindow, _shutdownCts.Token).ConfigureAwait(false);
+                await _sharedResources.TimeProvider.Delay(_options.BatchingWindow, _shutdownCts.Token).ConfigureAwait(false);
 
                 lock (_batchSchedulerLock)
                 {

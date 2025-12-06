@@ -17,11 +17,13 @@ public static class RapidServiceCollectionExtensions
     /// <param name="services">The service collection.</param>
     /// <param name="configure">Configuration action for Rapid options.</param>
     /// <param name="configureProtocol">Optional configuration action for protocol options.</param>
+    /// <param name="timeProvider">Optional TimeProvider for testing and time control.</param>
     /// <returns>The service collection for chaining.</returns>
     public static IServiceCollection AddRapid(
         this IServiceCollection services,
         Action<RapidOptions> configure,
-        Action<RapidProtocolOptions>? configureProtocol = null)
+        Action<RapidProtocolOptions>? configureProtocol = null,
+        TimeProvider? timeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configure);
@@ -42,16 +44,24 @@ public static class RapidServiceCollectionExtensions
         // Add validation
         services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<RapidProtocolOptions>, RapidProtocolOptionsValidator>();
 
+        // Register TimeProvider
+        var provider = timeProvider ?? TimeProvider.System;
+        services.AddSingleton(provider);
+
         // Add core services
         services.AddGrpc();
-        services.AddSingleton<SharedResources>();
+        services.AddSingleton<SharedResources>(sp => 
+            new SharedResources(
+                sp.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>(),
+                sp.GetRequiredService<TimeProvider>()));
         services.AddSingleton<IMessagingClient, GrpcClient>();
         services.AddSingleton<IEdgeFailureDetectorFactory>(sp =>
         {
             var options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<RapidOptions>>().Value;
             var client = sp.GetRequiredService<IMessagingClient>();
+            var sharedResources = sp.GetRequiredService<SharedResources>();
             var loggerFactory = sp.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>();
-            return new PingPongFailureDetectorFactory(options.ListenAddress, client, loggerFactory);
+            return new PingPongFailureDetectorFactory(options.ListenAddress, client, sharedResources, loggerFactory);
         });
 
         // Register the membership service handler
