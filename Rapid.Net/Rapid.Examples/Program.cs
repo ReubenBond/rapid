@@ -18,10 +18,40 @@ using Rapid;
 /// <summary>
 /// Rapid Cluster example application.
 /// </summary>
-internal class Program
+internal sealed partial class Program
 {
     private const int SleepIntervalMs = 1000;
     private const int MaxTries = 400;
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Starting Rapid agent on {Listen}")]
+    private static partial void LogStarting(ILogger logger, string Listen);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Cluster started on {Listen}")]
+    private static partial void LogClusterStarted(ILogger logger, string Listen);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Cluster joined. Seed: {Seed}")]
+    private static partial void LogClusterJoined(ILogger logger, string Seed);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Current membership size: {Size}")]
+    private static partial void LogMembershipSize(ILogger logger, int Size);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Membership size hasn't stabilized after {MaxTries} attempts")]
+    private static partial void LogStabilizationWarning(ILogger logger, int MaxTries);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Press Ctrl+C to shut down")]
+    private static partial void LogPressCtrlC(ILogger logger);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Proposal detected: {Change}")]
+    private static partial void LogProposalDetected(ILogger logger, ClusterStatusChange Change);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "View change: Config={ConfigId}, Members={MemberCount}")]
+    private static partial void LogViewChange(ILogger logger, long ConfigId, int MemberCount);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Kicked from cluster: {Change}")]
+    private static partial void LogKicked(ILogger logger, ClusterStatusChange Change);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Error running agent")]
+    private static partial void LogError(ILogger logger, Exception ex);
 
     static int Main(string[] args)
     {
@@ -60,12 +90,13 @@ internal class Program
 
         var logger = loggerFactory.CreateLogger<Program>();
 
+#pragma warning disable CA1031 // Do not catch general exception types
         try
         {
-            var listen = Utils.HostFromString(listenAddress);
-            var seed = Utils.HostFromString(seedAddress);
+            var listen = RapidUtils.HostFromString(listenAddress);
+            var seed = RapidUtils.HostFromString(seedAddress);
 
-            logger.LogInformation("Starting Rapid agent on {Listen}", listenAddress);
+            LogStarting(logger, listenAddress);
 
             // Build and start/join cluster
             var builder = new Cluster.ClusterBuilder(listen)
@@ -74,37 +105,36 @@ internal class Program
             Cluster cluster;
             if (listen.Equals(seed))
             {
-                logger.LogInformation("Starting as seed node");
+                LogClusterStarted(logger, listenAddress);
                 cluster = await builder.StartAsync();
             }
             else
             {
-                logger.LogInformation("Joining cluster via seed {Seed}", seedAddress);
+                LogClusterJoined(logger, seedAddress);
                 cluster = await builder.JoinAsync(seed);
             }
 
             // Register event handlers
             cluster.RegisterSubscription(ClusterEvents.ViewChangeProposal, change =>
             {
-                logger.LogInformation("Proposal detected: {Change}", change);
+                LogProposalDetected(logger, change);
             });
 
             cluster.RegisterSubscription(ClusterEvents.ViewChange, change =>
             {
-                logger.LogInformation("View change: Config={ConfigId}, Members={MemberCount}",
-                    change.ConfigurationId, change.Membership.Count);
+                LogViewChange(logger, change.ConfigurationId, change.Membership.Count);
             });
 
             cluster.RegisterSubscription(ClusterEvents.Kicked, change =>
             {
-                logger.LogWarning("Kicked from cluster: {Change}", change);
+                LogKicked(logger, change);
             });
 
             // Periodically print membership
-            for (int i = 0; i < MaxTries; i++)
+            for (var i = 0; i < MaxTries; i++)
             {
                 var size = cluster.GetMembershipSize();
-                logger.LogInformation("Node {Listen} -- cluster size {Size}", listenAddress, size);
+                LogMembershipSize(logger, size);
                 await Task.Delay(SleepIntervalMs);
             }
 
@@ -112,8 +142,9 @@ internal class Program
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Exception in Rapid agent");
+            LogError(logger, ex);
             return;
         }
+#pragma warning restore CA1031
     }
 }

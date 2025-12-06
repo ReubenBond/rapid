@@ -155,7 +155,7 @@ internal sealed class MultiNodeCutDetector
                     : view.GetExpectedObserversOf(nodeInFlux); // For joining nodes
 
                 // Account for all edges between nodes that are past the L threshold
-                int ringNumber = 0;
+                var ringNumber = 0;
                 foreach (var observer in observers)
                 {
                     if (_proposal.Contains(observer) || _preProposal.Contains(observer))

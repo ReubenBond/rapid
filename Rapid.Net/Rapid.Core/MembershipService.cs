@@ -24,13 +24,13 @@ namespace Rapid;
 /// <summary>
 /// Membership server class that implements the Rapid protocol.
 /// </summary>
-internal sealed class MembershipService : IMembershipServiceHandler
+internal sealed partial class MembershipService : IMembershipServiceHandler, IDisposable
 {
     private readonly ILogger<MembershipService> _logger;
     private readonly MembershipView _membershipView;
     private readonly MultiNodeCutDetector _cutDetection;
     private readonly Endpoint _myAddr;
-    private readonly IBroadcaster _broadcaster;
+    private readonly UnicastToAllBroadcaster _broadcaster;
     private readonly Dictionary<Endpoint, Channel<TaskCompletionSource<RapidResponse>>> _joinersToRespondTo = [];
     private readonly Dictionary<Endpoint, NodeId> _joinerUuid = [];
     private readonly Dictionary<Endpoint, Metadata> _joinerMetadata = [];
@@ -49,6 +49,75 @@ internal sealed class MembershipService : IMembershipServiceHandler
     private bool _announcedProposal = false;
     private readonly Lock _membershipUpdateLock = new();
     private readonly Settings _settings;
+
+    private readonly struct LoggableEndpoint(Endpoint endpoint)
+    {
+        private readonly Endpoint _endpoint = endpoint;
+        public override readonly string ToString() => RapidUtils.Loggable(_endpoint);
+    }
+
+    private readonly struct LoggableEndpoints(IEnumerable<Endpoint> endpoints)
+    {
+        private readonly IEnumerable<Endpoint> _endpoints = endpoints;
+        public override readonly string ToString() => RapidUtils.Loggable(_endpoints);
+    }
+
+    private readonly struct CurrentConfigId(MembershipView view)
+    {
+        private readonly MembershipView _view = view;
+        public override readonly string ToString() => _view.GetCurrentConfigurationId().ToString();
+    }
+
+    private readonly struct MembershipSize(MembershipView view)
+    {
+        private readonly MembershipView _view = view;
+        public override readonly string ToString() => _view.GetMembershipSize().ToString();
+    }
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Initiating consensus for {Proposal}")]
+    private partial void LogInitiatingConsensus(LoggableEndpoints Proposal);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Received leave message from {Sender} at {MyAddr}")]
+    private partial void LogReceivedLeaveMessage(LoggableEndpoint Sender, LoggableEndpoint MyAddr);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Removing node {Node}")]
+    private partial void LogRemovingNode(LoggableEndpoint Node);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Decided on a node without UUID: {Node}")]
+    private partial void LogDecidedNodeWithoutUuid(LoggableEndpoint Node);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Adding node {Node}")]
+    private partial void LogAddingNode(LoggableEndpoint Node);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Leaving: {MyAddr} has {Count} observers: {Observers}")]
+    private partial void LogLeavingWithObservers(LoggableEndpoint MyAddr, int Count, LoggableEndpoints Observers);
+
+    [LoggerMessage(Level = LogLevel.Trace, Message = "Timeout while leaving")]
+    private partial void LogTimeoutWhileLeaving();
+
+    [LoggerMessage(Level = LogLevel.Trace, Message = "Exception while leaving")]
+    private partial void LogExceptionWhileLeaving(Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Trace, Message = "Node was already removed prior to leaving")]
+    private partial void LogNodeAlreadyRemoved();
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Ignoring failure notification from old configuration {Subject}, config: {CurrentConfig}, oldConfiguration: {OldConfig}")]
+    private partial void LogIgnoringOldConfigNotification(LoggableEndpoint Subject, CurrentConfigId CurrentConfig, long OldConfig);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Announcing EdgeFail event {Subject}, observer: {MyAddr}, config: {Config}, size: {Size}")]
+    private partial void LogAnnouncingEdgeFail(LoggableEndpoint Subject, LoggableEndpoint MyAddr, long Config, MembershipSize Size);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Error in EdgeFailureNotification for {Subject}")]
+    private partial void LogErrorInEdgeFailureNotification(Exception ex, LoggableEndpoint Subject);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Join at seed for {{seed:{Seed}, sender:{Sender}, config:{Config}, size:{Size}}}")]
+    private partial void LogJoinAtSeed(LoggableEndpoint Seed, LoggableEndpoint Sender, CurrentConfigId Config, MembershipSize Size);
+
+    [LoggerMessage(Level = LogLevel.Trace, Message = "Enqueuing SAFE_TO_JOIN for {{sender:{Sender}, config:{Config}, size:{Size}}}")]
+    private partial void LogEnqueueingSafeToJoin(LoggableEndpoint Sender, CurrentConfigId Config, MembershipSize Size);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Wrong configuration for {{sender:{Sender}, config:{Config}, myConfig:{MyConfig}, size:{Size}}}")]
+    private partial void LogWrongConfiguration(LoggableEndpoint Sender, long Config, CurrentConfigId MyConfig, MembershipSize Size);
 
     public MembershipService(
         Endpoint myAddr,
@@ -121,29 +190,29 @@ internal sealed class MembershipService : IMembershipServiceHandler
         }
     }
 
-    public async Task<RapidResponse> HandleMessageAsync(RapidRequest msg)
+    public async Task<RapidResponse> HandleMessageAsync(RapidRequest msg, CancellationToken cancellationToken = default)
     {
         return msg.ContentCase switch
         {
-            RapidRequest.ContentOneofCase.PreJoinMessage => await HandleMessageAsync(msg.PreJoinMessage),
-            RapidRequest.ContentOneofCase.JoinMessage => await HandleMessageAsync(msg.JoinMessage),
-            RapidRequest.ContentOneofCase.BatchedAlertMessage => await HandleMessageAsync(msg.BatchedAlertMessage),
-            RapidRequest.ContentOneofCase.ProbeMessage => await HandleMessageAsync(msg.ProbeMessage),
+            RapidRequest.ContentOneofCase.PreJoinMessage => await HandleMessageAsync(msg.PreJoinMessage, cancellationToken),
+            RapidRequest.ContentOneofCase.JoinMessage => await HandleMessageAsync(msg.JoinMessage, cancellationToken),
+            RapidRequest.ContentOneofCase.BatchedAlertMessage => await HandleMessageAsync(msg.BatchedAlertMessage, cancellationToken),
+            RapidRequest.ContentOneofCase.ProbeMessage => await HandleMessageAsync(msg.ProbeMessage, cancellationToken),
             RapidRequest.ContentOneofCase.FastRoundPhase2BMessage or
             RapidRequest.ContentOneofCase.Phase1AMessage or
             RapidRequest.ContentOneofCase.Phase1BMessage or
             RapidRequest.ContentOneofCase.Phase2AMessage or
-            RapidRequest.ContentOneofCase.Phase2BMessage => await HandleConsensusMessagesAsync(msg),
-            RapidRequest.ContentOneofCase.LeaveMessage => await HandleLeaveMessageAsync(msg),
+            RapidRequest.ContentOneofCase.Phase2BMessage => await HandleConsensusMessagesAsync(msg, cancellationToken),
+            RapidRequest.ContentOneofCase.LeaveMessage => await HandleLeaveMessageAsync(msg, cancellationToken),
             _ => throw new ArgumentException($"Unidentified RapidRequest type {msg.ContentCase}")
         };
     }
 
-    private async Task<RapidResponse> HandleMessageAsync(PreJoinMessage msg)
+    private async Task<RapidResponse> HandleMessageAsync(PreJoinMessage msg, CancellationToken cancellationToken = default)
     {
-        var tcs = new TaskCompletionSource<RapidResponse>();
+        var tcs = new TaskCompletionSource<RapidResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        await _sharedResources.GetProtocolExecutor().Writer.WriteAsync(async () =>
+        await _sharedResources.ScheduleAsyncCallback(async () =>
         {
             var joiningEndpoint = msg.Sender;
             var statusCode = _membershipView.IsSafeToJoin(joiningEndpoint, msg.NodeId);
@@ -154,34 +223,32 @@ internal sealed class MembershipService : IMembershipServiceHandler
                 StatusCode = statusCode
             };
 
-            _logger.LogInformation("Join at seed for {{seed:{Seed}, sender:{Sender}, config:{Config}, size:{Size}}}",
-                Utils.Loggable(_myAddr), Utils.Loggable(msg.Sender),
-                _membershipView.GetCurrentConfigurationId(), _membershipView.GetMembershipSize());
+            LogJoinAtSeed(new LoggableEndpoint(_myAddr), new LoggableEndpoint(msg.Sender),
+                new CurrentConfigId(_membershipView), new MembershipSize(_membershipView));
 
             if (statusCode == JoinStatusCode.SafeToJoin || statusCode == JoinStatusCode.HostnameAlreadyInRing)
             {
                 builder.Endpoints.AddRange(_membershipView.GetExpectedObserversOf(joiningEndpoint));
             }
 
-            tcs.SetResult(Utils.ToRapidResponse(builder));
+            tcs.SetResult(RapidUtils.ToRapidResponse(builder));
         });
 
         return await tcs.Task;
     }
 
-    private async Task<RapidResponse> HandleMessageAsync(JoinMessage joinMessage)
+    private async Task<RapidResponse> HandleMessageAsync(JoinMessage joinMessage, CancellationToken cancellationToken = default)
     {
-        var tcs = new TaskCompletionSource<RapidResponse>();
+        var tcs = new TaskCompletionSource<RapidResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        await _sharedResources.GetProtocolExecutor().Writer.WriteAsync(async () =>
+        await _sharedResources.ScheduleAsyncCallback(async () =>
         {
             var currentConfiguration = _membershipView.GetCurrentConfigurationId();
 
             if (currentConfiguration == joinMessage.ConfigurationId)
             {
-                _logger.LogTrace("Enqueuing SAFE_TO_JOIN for {{sender:{Sender}, config:{Config}, size:{Size}}}",
-                    Utils.Loggable(joinMessage.Sender), currentConfiguration,
-                    _membershipView.GetMembershipSize());
+                LogEnqueueingSafeToJoin(new LoggableEndpoint(joinMessage.Sender), new CurrentConfigId(_membershipView),
+                    new MembershipSize(_membershipView));
 
                 ref var channel = ref CollectionsMarshal.GetValueRefOrAddDefault(_joinersToRespondTo, joinMessage.Sender, out var _);
                 channel ??= Channel.CreateUnbounded<TaskCompletionSource<RapidResponse>>();
@@ -203,9 +270,8 @@ internal sealed class MembershipService : IMembershipServiceHandler
             else
             {
                 var configuration = _membershipView.GetConfiguration();
-                _logger.LogInformation("Wrong configuration for {{sender:{Sender}, config:{Config}, myConfig:{MyConfig}, size:{Size}}}",
-                    Utils.Loggable(joinMessage.Sender), joinMessage.ConfigurationId,
-                    currentConfiguration, _membershipView.GetMembershipSize());
+                LogWrongConfiguration(new LoggableEndpoint(joinMessage.Sender), joinMessage.ConfigurationId,
+                    new CurrentConfigId(_membershipView), new MembershipSize(_membershipView));
 
                 var responseBuilder = new JoinResponse
                 {
@@ -228,22 +294,22 @@ internal sealed class MembershipService : IMembershipServiceHandler
                     responseBuilder.StatusCode = JoinStatusCode.ConfigChanged;
                 }
 
-                tcs.SetResult(Utils.ToRapidResponse(responseBuilder));
+                tcs.SetResult(RapidUtils.ToRapidResponse(responseBuilder));
             }
         });
 
         return await tcs.Task;
     }
 
-    private async Task<RapidResponse> HandleMessageAsync(BatchedAlertMessage messageBatch)
+    private async Task<RapidResponse> HandleMessageAsync(BatchedAlertMessage messageBatch, CancellationToken cancellationToken = default)
     {
-        var tcs = new TaskCompletionSource<RapidResponse>();
+        var tcs = new TaskCompletionSource<RapidResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        await _sharedResources.GetProtocolExecutor().Writer.WriteAsync(async () =>
+        await _sharedResources.ScheduleAsyncCallback(async () =>
         {
             if (!FilterAlertMessages(messageBatch, _membershipView.GetCurrentConfigurationId()))
             {
-                tcs.SetResult(Utils.ToRapidResponse(new ConsensusResponse()));
+                tcs.SetResult(RapidUtils.ToRapidResponse(new ConsensusResponse()));
                 return;
             }
 
@@ -262,7 +328,7 @@ internal sealed class MembershipService : IMembershipServiceHandler
                 {
                     _announcedProposal = true;
                     var currentConfigurationId = _membershipView.GetCurrentConfigurationId();
-                    _logger.LogDebug("Initiating consensus for {Proposal}", Utils.Loggable(proposals));
+                    LogInitiatingConsensus(new LoggableEndpoints(proposals));
 
                     // Notify subscribers about the proposal
                     var nodeStatusChanges = CreateNodeStatusChangeList(proposals);
@@ -278,30 +344,29 @@ internal sealed class MembershipService : IMembershipServiceHandler
                 }
             }
 
-            tcs.SetResult(Utils.ToRapidResponse(new ConsensusResponse()));
+            tcs.SetResult(RapidUtils.ToRapidResponse(new ConsensusResponse()));
         });
 
         return await tcs.Task;
     }
 
-    private Task<RapidResponse> HandleConsensusMessagesAsync(RapidRequest request)
+    private Task<RapidResponse> HandleConsensusMessagesAsync(RapidRequest request, CancellationToken cancellationToken = default)
     {
         return Task.Run(() => _fastPaxosInstance?.HandleMessages(request)
-                             ?? Utils.ToRapidResponse(new ConsensusResponse()));
+                             ?? RapidUtils.ToRapidResponse(new ConsensusResponse()));
     }
 
-    private async Task<RapidResponse> HandleLeaveMessageAsync(RapidRequest request)
+    private async Task<RapidResponse> HandleLeaveMessageAsync(RapidRequest request, CancellationToken cancellationToken = default)
     {
         var leaveMessage = request.LeaveMessage;
-        _logger.LogInformation("Received leave message from {Sender} at {MyAddr}",
-            Utils.Loggable(leaveMessage.Sender), Utils.Loggable(_myAddr));
+        LogReceivedLeaveMessage(new LoggableEndpoint(leaveMessage.Sender), new LoggableEndpoint(_myAddr));
         EdgeFailureNotification(leaveMessage.Sender, _membershipView.GetCurrentConfigurationId());
-        return Utils.ToRapidResponse(new ConsensusResponse());
+        return RapidUtils.ToRapidResponse(new ConsensusResponse());
     }
 
-    private async Task<RapidResponse> HandleMessageAsync(ProbeMessage probeMessage)
+    private async Task<RapidResponse> HandleMessageAsync(ProbeMessage probeMessage, CancellationToken cancellationToken = default)
     {
-        return Utils.ToRapidResponse(new ProbeResponse());
+        return RapidUtils.ToRapidResponse(new ProbeResponse());
     }
 
     private void DecideViewChange(List<Endpoint> proposal)
@@ -315,20 +380,20 @@ internal sealed class MembershipService : IMembershipServiceHandler
         {
             if (_membershipView.IsHostPresent(node))
             {
-                _logger.LogDebug("Removing node {Node}", Utils.Loggable(node));
+                LogRemovingNode(new LoggableEndpoint(node));
                 _membershipView.RingDelete(node);
             }
             else
             {
                 if (!_joinerUuid.TryGetValue(node, out var nodeId))
                 {
-                    _logger.LogWarning("Decided on a node without UUID: {Node}", Utils.Loggable(node));
+                    LogDecidedNodeWithoutUuid(new LoggableEndpoint(node));
                     continue;
                 }
 
                 var metadata = _joinerMetadata.GetValueOrDefault(node, new Metadata());
 
-                _logger.LogDebug("Adding node {Node}", Utils.Loggable(node));
+                LogAddingNode(new LoggableEndpoint(node));
                 _membershipView.RingAdd(node, nodeId);
                 _metadataManager.Add(node, metadata);
 
@@ -351,7 +416,7 @@ internal sealed class MembershipService : IMembershipServiceHandler
                     response.MetadataKeys.AddRange(allMetadata.Keys);
                     response.MetadataValues.AddRange(allMetadata.Values);
 
-                    var rapidResponse = Utils.ToRapidResponse(response);
+                    var rapidResponse = RapidUtils.ToRapidResponse(response);
 
                     // Send response to all waiting tasks
                     while (channel.Reader.TryRead(out var tcs))
@@ -425,16 +490,15 @@ internal sealed class MembershipService : IMembershipServiceHandler
     public async Task LeaveAsync()
     {
         var leaveMessage = new LeaveMessage { Sender = _myAddr };
-        var leave = Utils.ToRapidRequest(leaveMessage);
+        var leave = RapidUtils.ToRapidRequest(leaveMessage);
 
         try
         {
             var observers = _membershipView.GetObserversOf(_myAddr);
-            _logger.LogInformation("Leaving: {MyAddr} has {Count} observers: {Observers}",
-                Utils.Loggable(_myAddr), observers.Count, string.Join(", ", observers.Select(Utils.Loggable)));
+            LogLeavingWithObservers(new LoggableEndpoint(_myAddr), observers.Count, new LoggableEndpoints(observers));
 
             var tasks = observers.Select(endpoint =>
-                _messagingClient.SendMessageBestEffortAsync(endpoint, leave, CancellationToken.None));
+                _messagingClient.SendMessageBestEffortAsync(endpoint, leave, CancellationToken.None).WithDefaultOnException());
 
             using var timeoutCts = new CancellationTokenSource(_settings.LeaveMessageTimeoutMs);
             try
@@ -443,16 +507,18 @@ internal sealed class MembershipService : IMembershipServiceHandler
             }
             catch (OperationCanceledException)
             {
-                _logger.LogTrace("Timeout while leaving");
+                LogTimeoutWhileLeaving();
             }
             catch (Exception ex)
             {
-                _logger.LogTrace(ex, "Exception while leaving");
+                LogExceptionWhileLeaving(ex);
+                throw;
             }
         }
-        catch (MembershipView.NodeNotInRingException)
+        catch (Exception)
         {
-            _logger.LogTrace("Node was already removed prior to leaving");
+            LogNodeAlreadyRemoved();
+            throw;
         }
     }
 
@@ -489,7 +555,7 @@ internal sealed class MembershipService : IMembershipServiceHandler
                         };
                         batchedMessage.Messages.AddRange(buffer);
 
-                        var request = Utils.ToRapidRequest(batchedMessage);
+                        var request = RapidUtils.ToRapidRequest(batchedMessage);
                         _ = _broadcaster.BroadcastAsync(request);
 
                         buffer.Clear();
@@ -544,7 +610,7 @@ internal sealed class MembershipService : IMembershipServiceHandler
         var subjects = _membershipView.GetSubjectsOf(_myAddr);
         var configurationId = _membershipView.GetCurrentConfigurationId();
 
-        for (int i = 0; i < subjects.Count; i++)
+        for (var i = 0; i < subjects.Count; i++)
         {
             var subject = subjects[i];
             var ringNumber = i;
@@ -560,19 +626,17 @@ internal sealed class MembershipService : IMembershipServiceHandler
 
     private void EdgeFailureNotification(Endpoint subject, long configurationId)
     {
-        _sharedResources.GetProtocolExecutor().Writer.TryWrite(async () =>
+        _sharedResources.ScheduleCallback(async () =>
         {
             try
             {
                 if (configurationId != _membershipView.GetCurrentConfigurationId())
                 {
-                    _logger.LogInformation("Ignoring failure notification from old configuration {Subject}, config: {CurrentConfig}, oldConfiguration: {OldConfig}",
-                        Utils.Loggable(subject), _membershipView.GetCurrentConfigurationId(), configurationId);
+                    LogIgnoringOldConfigNotification(new LoggableEndpoint(subject), new CurrentConfigId(_membershipView), configurationId);
                     return;
                 }
 
-                _logger.LogDebug("Announcing EdgeFail event {Subject}, observer: {MyAddr}, config: {Config}, size: {Size}",
-                    Utils.Loggable(subject), Utils.Loggable(_myAddr), configurationId, _membershipView.GetMembershipSize());
+                LogAnnouncingEdgeFail(new LoggableEndpoint(subject), new LoggableEndpoint(_myAddr), configurationId, new MembershipSize(_membershipView));
 
                 var ringNumbers = _membershipView.GetRingNumbers(_myAddr, subject);
 
@@ -589,8 +653,20 @@ internal sealed class MembershipService : IMembershipServiceHandler
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error in EdgeFailureNotification for {Subject}", Utils.Loggable(subject));
+                LogErrorInEdgeFailureNotification(ex, new LoggableEndpoint(subject));
+                throw;
             }
         });
+    }
+
+    public void Dispose()
+    {
+        _shutdownCts.Dispose();
+        _membershipView.Dispose();
+        _fastPaxosInstance?.Dispose();
+        foreach (var fd in _failureDetectors)
+        {
+            fd.Dispose();
+        }
     }
 }

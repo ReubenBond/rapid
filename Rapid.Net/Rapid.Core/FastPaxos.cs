@@ -22,7 +22,7 @@ namespace Rapid;
 /// <summary>
 /// Single-decree consensus. We always start with a Fast round.
 /// </summary>
-internal sealed class FastPaxos
+internal sealed partial class FastPaxos : IDisposable
 {
     private readonly ILogger<FastPaxos> _logger;
     private readonly double _jitterRate;
@@ -38,6 +38,24 @@ internal sealed class FastPaxos
     private bool _decided = false;
     private CancellationTokenSource? _scheduledClassicRoundCts;
     private readonly Settings _settings;
+
+    private readonly struct LoggableEndpoints(IEnumerable<Endpoint> endpoints)
+    {
+        private readonly IEnumerable<Endpoint> _endpoints = endpoints;
+        public override readonly string ToString() => string.Join(", ", _endpoints.Select(RapidUtils.Loggable));
+    }
+
+    [LoggerMessage(Level = LogLevel.Trace, Message = "Configuration ID mismatch for proposal: current_config:{CurrentConfig}")]
+    private partial void LogConfigurationMismatch(long CurrentConfig);
+
+    [LoggerMessage(Level = LogLevel.Trace, Message = "Decided on a view change: {Proposal}")]
+    private partial void LogDecidedViewChange(LoggableEndpoints Proposal);
+
+    [LoggerMessage(Level = LogLevel.Trace, Message = "Fast round may not succeed for proposal")]
+    private partial void LogFastRoundMayNotSucceed();
+
+    [LoggerMessage(Level = LogLevel.Trace, Message = "Scheduling classic round with delay: {Delay}")]
+    private partial void LogSchedulingClassicRound(long Delay);
 
     public FastPaxos(Endpoint myAddr, long configurationId, int membershipSize,
                      IMessagingClient client, IBroadcaster broadcaster,
@@ -86,10 +104,10 @@ internal sealed class FastPaxos
         };
         consensusMessage.Endpoints.AddRange(proposal);
 
-        var proposalMessage = Utils.ToRapidRequest(consensusMessage);
+        var proposalMessage = RapidUtils.ToRapidRequest(consensusMessage);
         _ = _broadcaster.BroadcastAsync(proposalMessage);
 
-        _logger.LogTrace("Scheduling classic round with delay: {Delay}", recoveryDelayInMs);
+        LogSchedulingClassicRound(recoveryDelayInMs);
         _scheduledClassicRoundCts = new CancellationTokenSource();
         _ = Task.Delay(TimeSpan.FromMilliseconds(recoveryDelayInMs), _scheduledClassicRoundCts.Token)
             .ContinueWith(_ => StartClassicPaxosRound(), TaskScheduler.Default);
@@ -111,7 +129,7 @@ internal sealed class FastPaxos
     {
         if (proposalMessage.ConfigurationId != _configurationId)
         {
-            _logger.LogTrace("Configuration ID mismatch for proposal: current_config:{CurrentConfig}", _configurationId);
+            LogConfigurationMismatch(_configurationId);
             return;
         }
 
@@ -138,14 +156,14 @@ internal sealed class FastPaxos
         {
             if (count >= _membershipSize - f)
             {
-                _logger.LogTrace("Decided on a view change: {Proposal}", string.Join(", ", proposalList));
+                LogDecidedViewChange(new LoggableEndpoints(proposalList));
                 // We have a successful proposal. Consume it.
                 _onDecidedWrapped(proposalList);
             }
             else
             {
                 // fallback protocol here
-                _logger.LogTrace("Fast round may not succeed for proposal");
+                LogFastRoundMayNotSucceed();
             }
         }
     }
@@ -175,7 +193,7 @@ internal sealed class FastPaxos
             default:
                 throw new ArgumentException($"Unexpected message case: {request.ContentCase}");
         }
-        return Utils.ToRapidResponse(new ConsensusResponse());
+        return RapidUtils.ToRapidResponse(new ConsensusResponse());
     }
 
     /// <summary>
@@ -197,7 +215,14 @@ internal sealed class FastPaxos
     /// </summary>
     private long GetRandomDelayMs()
     {
+#pragma warning disable CA5394 // Do not use insecure randomness. Justification: this is not security-sensitive code.
         var jitter = (long)(-1000 * Math.Log(1 - Random.Shared.NextDouble()) / _jitterRate);
+#pragma warning restore CA5394 // Do not use insecure randomness
         return jitter + _settings.ConsensusFallbackTimeoutBaseDelayMs;
+    }
+
+    public void Dispose()
+    {
+        _scheduledClassicRoundCts?.Dispose();
     }
 }

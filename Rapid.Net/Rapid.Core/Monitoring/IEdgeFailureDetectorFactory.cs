@@ -34,5 +34,5 @@ public interface IEdgeFailureDetector : IDisposable
     /// <summary>
     /// Stops monitoring the subject node.
     /// </summary>
-    void Stop();
+    void StopMonitoring();
 }

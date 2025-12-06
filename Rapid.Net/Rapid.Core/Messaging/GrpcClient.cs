@@ -12,13 +12,22 @@ namespace Rapid.Messaging;
 /// <summary>
 /// gRPC-based messaging client for Rapid.
 /// </summary>
-public sealed class GrpcClient(Settings settings, ILoggerFactory? loggerFactory = null) : IMessagingClient
+internal sealed partial class GrpcClient(Settings settings, ILoggerFactory? loggerFactory = null) : IMessagingClient
 {
     private readonly Settings _settings = settings;
     private readonly ILogger<GrpcClient> _logger = (loggerFactory ?? Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance)
             .CreateLogger<GrpcClient>();
     private readonly ConcurrentDictionary<string, Pb.MembershipService.MembershipServiceClient> _clients = new();
     private bool _disposed;
+
+    private readonly struct LoggableEndpoint(Endpoint endpoint)
+    {
+        private readonly Endpoint _endpoint = endpoint;
+        public override readonly string ToString() => RapidUtils.Loggable(_endpoint);
+    }
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "RPC failed to {Remote}")]
+    private partial void LogRpcFailed(Exception ex, LoggableEndpoint Remote);
 
     public async Task<RapidResponse> SendMessageAsync(Endpoint remote, RapidRequest request,
         CancellationToken cancellationToken = default)
@@ -35,7 +44,7 @@ public sealed class GrpcClient(Settings settings, ILoggerFactory? loggerFactory 
         }
         catch (RpcException ex)
         {
-            _logger.LogError(ex, "RPC failed to {Remote}", Utils.Loggable(remote));
+            LogRpcFailed(ex, new LoggableEndpoint(remote));
             throw;
         }
     }
@@ -43,6 +52,7 @@ public sealed class GrpcClient(Settings settings, ILoggerFactory? loggerFactory 
     public async Task<RapidResponse> SendMessageBestEffortAsync(Endpoint remote, RapidRequest request,
         CancellationToken cancellationToken = default)
     {
+#pragma warning disable CA1031
         try
         {
             return await SendMessageAsync(remote, request, cancellationToken);
@@ -51,6 +61,7 @@ public sealed class GrpcClient(Settings settings, ILoggerFactory? loggerFactory 
         {
             return RapidResponse.Parser.ParseFrom(Array.Empty<byte>());
         }
+#pragma warning restore CA1031
     }
 
     private Pb.MembershipService.MembershipServiceClient GetOrCreateClient(Endpoint remote)

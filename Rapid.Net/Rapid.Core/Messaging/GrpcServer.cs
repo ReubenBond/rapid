@@ -15,7 +15,7 @@ namespace Rapid.Messaging;
 /// <summary>
 /// gRPC-based messaging server for Rapid using ASP.NET Core hosting.
 /// </summary>
-public sealed class GrpcServer : IMessagingServer
+internal sealed partial class GrpcServer : IMessagingServer
 {
     private readonly Endpoint _listenAddress;
     private readonly ILogger<GrpcServer> _logger;
@@ -23,18 +23,21 @@ public sealed class GrpcServer : IMessagingServer
     private readonly MembershipServiceImpl _serviceImpl;
     private WebApplication? _app;
 
+    [LoggerMessage(Level = LogLevel.Information, Message = "gRPC server started on {Hostname}:{Port}")]
+    private partial void LogServerStarted(string Hostname, int Port);
+
     private static readonly RapidResponse BootstrappingMessage = new()
     {
         ProbeResponse = new ProbeResponse { Status = NodeStatus.Bootstrapping }
     };
 
-    public GrpcServer(Endpoint listenAddress, SharedResources sharedResources, Settings settings,
+    public GrpcServer(Endpoint listenAddress, SharedResources sharedResources, MembershipService membershipService, Settings settings,
                      ILoggerFactory? loggerFactory = null)
     {
         _listenAddress = listenAddress;
         _loggerFactory = loggerFactory ?? Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance;
         _logger = _loggerFactory.CreateLogger<GrpcServer>();
-        _serviceImpl = new MembershipServiceImpl(this);
+        _serviceImpl = new MembershipServiceImpl(membershipService);
     }
 
     public void SetMembershipService(IMembershipServiceHandler service)
@@ -72,24 +75,31 @@ public sealed class GrpcServer : IMessagingServer
         _app.MapGrpcService<MembershipServiceImpl>();
 
         await _app.StartAsync(cancellationToken);
-        _logger.LogInformation("gRPC server started on {Hostname}:{Port}", hostname, port);
+        LogServerStarted(hostname, port);
     }
 
-    public void Shutdown()
+    public async Task StopAsync(CancellationToken cancellationToken = default)
     {
-        _app?.StopAsync().Wait();
-        _app?.DisposeAsync().AsTask().Wait();
+        if (_app != null)
+        {
+            await _app.StopAsync(cancellationToken);
+            await _app.DisposeAsync();
+        }
     }
 
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
-        Shutdown();
+        await StopAsync();
     }
 
-    private class MembershipServiceImpl(GrpcServer server) : Pb.MembershipService.MembershipServiceBase
+    private sealed class MembershipServiceImpl : Pb.MembershipService.MembershipServiceBase
     {
-        private readonly GrpcServer _server = server;
-        private IMembershipServiceHandler? _handler;
+        private IMembershipServiceHandler _handler;
+
+        public MembershipServiceImpl(IMembershipServiceHandler handler)
+        {
+            _handler = handler;
+        }
 
         public void SetHandler(IMembershipServiceHandler handler)
         {
@@ -98,21 +108,7 @@ public sealed class GrpcServer : IMessagingServer
 
         public override async Task<RapidResponse> sendRequest(RapidRequest request, ServerCallContext context)
         {
-            if (_handler != null)
-            {
-                return await _handler.HandleMessageAsync(request);
-            }
-            else if (request.ContentCase == RapidRequest.ContentOneofCase.ProbeMessage)
-            {
-                // Special case: Node is bootstrapping. Respond to probe messages
-                // to indicate the node is coming up but not yet ready.
-                return BootstrappingMessage;
-            }
-            else
-            {
-                // No handler yet, return empty response
-                return new RapidResponse();
-            }
+            return await _handler.HandleMessageAsync(request, context.CancellationToken);
         }
     }
 }

@@ -16,7 +16,7 @@ namespace Rapid;
 /// The public API for Rapid. Users create Cluster objects using either StartAsync()
 /// or JoinAsync(), depending on whether starting a new cluster or joining an existing one.
 /// </summary>
-public sealed class Cluster : IDisposable
+public sealed partial class Cluster : IDisposable
 {
     private const int K = 10;
     private const int H = 9;
@@ -24,25 +24,29 @@ public sealed class Cluster : IDisposable
     private readonly IMessagingServer _rpcServer;
     private readonly MembershipService? _membershipService;
     private readonly SharedResources _sharedResources;
-    private readonly Endpoint _listenAddress;
     private readonly ILogger<Cluster> _logger;
     private bool _hasShutdown;
 
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Leaving the membership group and shutting down")]
+    private partial void LogLeavingMembership();
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Shutting down RpcServer and MembershipService")]
+    private partial void LogShuttingDown();
+
     private Cluster(IMessagingServer rpcServer, MembershipService? membershipService,
-        SharedResources sharedResources, Endpoint listenAddress,
+        SharedResources sharedResources,
         ILoggerFactory? loggerFactory = null)
     {
         _rpcServer = rpcServer;
         _membershipService = membershipService;
         _sharedResources = sharedResources;
-        _listenAddress = listenAddress;
         _logger = (loggerFactory ?? NullLoggerFactory.Instance).CreateLogger<Cluster>();
     }
 
     /// <summary>
     /// Returns the list of endpoints currently in the membership set.
     /// </summary>
-    public List<Endpoint> GetMemberlist()
+    public IReadOnlyList<Endpoint> GetMemberlist()
     {
         if (_hasShutdown)
             throw new InvalidOperationException("Can't access the memberlist after having shut down");
@@ -85,24 +89,32 @@ public sealed class Cluster : IDisposable
     /// </summary>
     public async Task LeaveGracefullyAsync()
     {
-        _logger.LogDebug("Leaving the membership group and shutting down");
+        LogLeavingMembership();
         if (_membershipService != null)
         {
             await _membershipService.LeaveAsync();
         }
-        Shutdown();
+        await ShutdownAsync();
     }
 
     /// <summary>
-    /// Shuts down the cluster.
+    /// Shuts down the cluster asynchronously.
+    /// </summary>
+    public async Task ShutdownAsync(CancellationToken cancellationToken = default)
+    {
+        LogShuttingDown();
+        _membershipService?.Shutdown();
+        await _rpcServer.StopAsync(cancellationToken);
+        _sharedResources.Dispose();
+        _hasShutdown = true;
+    }
+
+    /// <summary>
+    /// Shuts down the cluster synchronously (for backward compatibility).
     /// </summary>
     public void Shutdown()
     {
-        _logger.LogDebug("Shutting down RpcServer and MembershipService");
-        _membershipService?.Shutdown();
-        _rpcServer.Shutdown();
-        _sharedResources.Dispose();
-        _hasShutdown = true;
+        ShutdownAsync().GetAwaiter().GetResult();
     }
 
     public void Dispose()
@@ -114,7 +126,7 @@ public sealed class Cluster : IDisposable
     /// <summary>
     /// Builder for creating Cluster instances.
     /// </summary>
-    public sealed class ClusterBuilder(Endpoint listenAddress)
+    public sealed partial class ClusterBuilder(Endpoint listenAddress)
     {
         private readonly Endpoint _listenAddress = listenAddress;
         private IEdgeFailureDetectorFactory? _edgeFailureDetector;
@@ -125,13 +137,23 @@ public sealed class Cluster : IDisposable
         private IMessagingServer? _messagingServer;
         private ILoggerFactory? _loggerFactory;
 
+        private readonly struct LoggableEndpoint(Endpoint endpoint)
+        {
+            private readonly Endpoint _endpoint = endpoint;
+            public override readonly string ToString() => RapidUtils.Loggable(_endpoint);
+        }
+
+        [LoggerMessage(Level = LogLevel.Information, Message = "{Sender} is sending a join-p2 to {Observer} for config {ConfigId}")]
+        private static partial void LogSendingJoinP2(ILogger logger, LoggableEndpoint Sender, LoggableEndpoint Observer, long ConfigId);
+
         public ClusterBuilder(string hostname, int port)
-            : this(Utils.HostFromParts(hostname, port))
+            : this(RapidUtils.HostFromParts(hostname, port))
         {
         }
 
         public ClusterBuilder SetMetadata(Dictionary<string, ByteString> metadata)
         {
+            ArgumentNullException.ThrowIfNull(metadata);
             _metadata = new Metadata();
             foreach (var kvp in metadata)
             {
@@ -179,11 +201,10 @@ public sealed class Cluster : IDisposable
         public async Task<Cluster> StartAsync()
         {
             var sharedResources = new SharedResources(_loggerFactory);
-            var currentIdentifier = Utils.NodeIdFromUuid(Guid.NewGuid());
+            var currentIdentifier = RapidUtils.NodeIdFromUuid(Guid.NewGuid());
 
             // Create messaging infrastructure
             _messagingClient ??= new GrpcClient(_settings, _loggerFactory);
-            _messagingServer ??= new GrpcServer(_listenAddress, sharedResources, _settings, _loggerFactory);
 
             // Create membership view with just this node
             var membershipView = new MembershipView(K, [currentIdentifier],
@@ -204,14 +225,12 @@ public sealed class Cluster : IDisposable
                                                          _edgeFailureDetector, metadataMap, _subscriptions,
                                                          _loggerFactory);
 
-            // Wire up the server to handle messages
-            ((GrpcServer)_messagingServer).SetMembershipService(membershipService);
+            _messagingServer ??= new GrpcServer(_listenAddress, sharedResources, membershipService, _settings, _loggerFactory);
 
             // Start server
             await _messagingServer.StartAsync();
 
-            var cluster = new Cluster(_messagingServer, membershipService, sharedResources,
-                                     _listenAddress, _loggerFactory);
+            var cluster = new Cluster(_messagingServer, membershipService, sharedResources, _loggerFactory);
             return cluster;
         }
 
@@ -221,14 +240,10 @@ public sealed class Cluster : IDisposable
         public async Task<Cluster> JoinAsync(Endpoint seedAddress)
         {
             var sharedResources = new SharedResources(_loggerFactory);
-            var currentIdentifier = Utils.NodeIdFromUuid(Guid.NewGuid());
+            var currentIdentifier = RapidUtils.NodeIdFromUuid(Guid.NewGuid());
 
             // Create messaging infrastructure
             _messagingClient ??= new GrpcClient(_settings, _loggerFactory);
-            _messagingServer ??= new GrpcServer(_listenAddress, sharedResources, _settings, _loggerFactory);
-
-            // Start server first
-            await _messagingServer.StartAsync();
 
             // Phase 1: Contact seed for observers
             var preJoinMessage = new PreJoinMessage
@@ -237,8 +252,7 @@ public sealed class Cluster : IDisposable
                 NodeId = currentIdentifier
             };
 
-            var preJoinResponse = await _messagingClient.SendMessageAsync(seedAddress,
-                                                                         Utils.ToRapidRequest(preJoinMessage));
+            var preJoinResponse = await _messagingClient.SendMessageAsync(seedAddress, RapidUtils.ToRapidRequest(preJoinMessage));
             var joinResponse = preJoinResponse.JoinResponse;
 
             if (joinResponse.StatusCode != JoinStatusCode.SafeToJoin &&
@@ -256,7 +270,7 @@ public sealed class Cluster : IDisposable
             // Phase 2: Contact observers
             // Determine ring numbers - batch together requests to the same node
             var ringNumbersPerObserver = new Dictionary<Endpoint, List<int>>();
-            for (int ringNumber = 0; ringNumber < observers.Count; ringNumber++)
+            for (var ringNumber = 0; ringNumber < observers.Count; ringNumber++)
             {
                 var observer = observers[ringNumber];
                 if (!ringNumbersPerObserver.ContainsKey(observer))
@@ -279,16 +293,12 @@ public sealed class Cluster : IDisposable
                 };
                 joinMessageForObserver.RingNumber.AddRange(entry.Value);
 
-                try
+                if (logger != null)
                 {
-                    logger?.LogInformation("{Sender} is sending a join-p2 to {Observer} for config {ConfigId}",
-                        Utils.Loggable(_listenAddress), Utils.Loggable(entry.Key), joinResponse.ConfigurationId);
-                    return await _messagingClient.SendMessageAsync(entry.Key, Utils.ToRapidRequest(joinMessageForObserver));
+                    LogSendingJoinP2(logger, new LoggableEndpoint(_listenAddress), new LoggableEndpoint(entry.Key), joinResponse.ConfigurationId);
                 }
-                catch
-                {
-                    return null;
-                }
+
+                return await _messagingClient.SendMessageAsync(entry.Key, RapidUtils.ToRapidRequest(joinMessageForObserver)).WithDefaultOnException();
             });
 
             var responses = await Task.WhenAll(tasks);
@@ -306,7 +316,7 @@ public sealed class Cluster : IDisposable
 
             // Build metadata map
             var metadataMap = new Dictionary<Endpoint, Metadata>();
-            for (int i = 0; i < successfulResponse.MetadataKeys.Count && i < successfulResponse.MetadataValues.Count; i++)
+            for (var i = 0; i < successfulResponse.MetadataKeys.Count && i < successfulResponse.MetadataValues.Count; i++)
             {
                 var endpoint = successfulResponse.MetadataKeys[i];
                 var metadata = successfulResponse.MetadataValues[i];
@@ -318,23 +328,17 @@ public sealed class Cluster : IDisposable
                                                          _edgeFailureDetector, metadataMap, _subscriptions,
                                                          _loggerFactory);
 
-            ((GrpcServer)_messagingServer).SetMembershipService(membershipService);
+            _messagingServer ??= new GrpcServer(_listenAddress, sharedResources, membershipService, _settings, _loggerFactory);
 
-            var cluster = new Cluster(_messagingServer, membershipService, sharedResources,
-                                     _listenAddress, _loggerFactory);
+            await _messagingServer.StartAsync();
+
+            var cluster = new Cluster(_messagingServer, membershipService, sharedResources, _loggerFactory);
             return cluster;
         }
 
         public Task<Cluster> JoinAsync(string hostname, int port)
         {
-            return JoinAsync(Utils.HostFromParts(hostname, port));
-        }
-    }
-
-    public class JoinException(string message) : Exception(message)
-    {
-        public JoinException()
-        {
+            return JoinAsync(RapidUtils.HostFromParts(hostname, port));
         }
     }
 }

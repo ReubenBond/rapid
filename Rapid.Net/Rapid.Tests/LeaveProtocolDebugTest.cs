@@ -2,6 +2,8 @@
  * Copyright © 2016 - 2025 VMware, Inc. All Rights Reserved.
  */
 
+#pragma warning disable CA1303 // Do not pass literals as localized parameters - Test code doesn't need localization
+
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 
@@ -10,7 +12,7 @@ namespace Rapid.Tests.Integration;
 /// <summary>
 /// Debug test for leave protocol
 /// </summary>
-internal class LeaveProtocolDebugTest : IDisposable
+public sealed class LeaveProtocolDebugTest : IDisposable
 {
     private readonly List<Cluster> _clusters = [];
     private readonly ILoggerFactory _loggerFactory;
@@ -29,11 +31,14 @@ internal class LeaveProtocolDebugTest : IDisposable
     {
         foreach (var cluster in _clusters)
         {
+#pragma warning disable CA1031
             try { cluster.Dispose(); }
             catch { }
+#pragma warning restore CA1031
         }
         _clusters.Clear();
         _loggerFactory.Dispose();
+        GC.SuppressFinalize(this);
     }
 
     [Fact]

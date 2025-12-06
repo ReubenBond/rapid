@@ -19,7 +19,7 @@ namespace Rapid;
 /// <summary>
 /// Utility methods for Rapid.
 /// </summary>
-public static class Utils
+public static class RapidUtils
 {
     /// <summary>
     /// Converts a UUID to a NodeId.
@@ -37,6 +37,7 @@ public static class Utils
     /// </summary>
     public static Endpoint HostFromString(string hostString)
     {
+        ArgumentNullException.ThrowIfNull(hostString);
         var parts = hostString.Split(':');
         if (parts.Length != 2 || !int.TryParse(parts[1], out var port))
         {
@@ -62,6 +63,7 @@ public static class Utils
     /// </summary>
     public static string Loggable(Endpoint endpoint)
     {
+        ArgumentNullException.ThrowIfNull(endpoint);
         return $"{endpoint.Hostname.ToStringUtf8()}:{endpoint.Port}";
     }
 

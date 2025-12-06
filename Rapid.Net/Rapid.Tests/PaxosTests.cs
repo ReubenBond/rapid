@@ -18,7 +18,7 @@ namespace Rapid.Tests;
 /// <summary>
 /// Tests for Paxos and FastPaxos protocols
 /// </summary>
-internal class PaxosTests
+public class PaxosTests
 {
     /// <summary>
     /// Test rank comparison - higher round wins

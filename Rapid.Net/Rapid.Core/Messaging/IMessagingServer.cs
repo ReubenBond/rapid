@@ -9,7 +9,7 @@ namespace Rapid.Messaging;
 /// <summary>
 /// Interface for receiving messages from remote nodes in the cluster.
 /// </summary>
-public interface IMessagingServer : IDisposable
+public interface IMessagingServer : IAsyncDisposable
 {
     /// <summary>
     /// Sets the membership service handler that will process incoming messages.
@@ -25,9 +25,11 @@ public interface IMessagingServer : IDisposable
     Task StartAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Shuts down the messaging server and releases resources.
+    /// Stops the messaging server and releases resources.
     /// </summary>
-    void Shutdown();
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
+    /// <returns>A task that completes when the server has stopped.</returns>
+    Task StopAsync(CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -39,6 +41,7 @@ public interface IMembershipServiceHandler
     /// Handles an incoming Rapid protocol message and returns a response.
     /// </summary>
     /// <param name="request">The incoming request message.</param>
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
     /// <returns>The response message.</returns>
-    Task<RapidResponse> HandleMessageAsync(RapidRequest request);
+    Task<RapidResponse> HandleMessageAsync(RapidRequest request, CancellationToken cancellationToken = default);
 }

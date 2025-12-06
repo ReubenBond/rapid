@@ -20,26 +20,26 @@ namespace Rapid;
 /// <summary>
 /// Holds all resources that are shared across a single instance of Rapid.
 /// </summary>
-public sealed class SharedResources : IDisposable
+public sealed partial class SharedResources : IDisposable
 {
     private readonly ILogger<SharedResources> _logger;
     private readonly CancellationTokenSource _shutdownCts = new();
     private readonly Channel<Func<Task>> _protocolExecutor;
 
-    public Channel<Action> ProtocolChannel { get; }
+    private Channel<Func<Task>> ProtocolExecutor => _protocolExecutor;
 
-    public Channel<Func<Task>> GetProtocolExecutor() => _protocolExecutor;
+    [LoggerMessage(Level = LogLevel.Error, Message = "Error executing protocol message")]
+    private partial void LogProtocolMessageError(Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Error executing protocol task")]
+    private partial void LogProtocolTaskError(Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to queue protocol action - channel may be closed")]
+    private partial void LogFailedToQueueAction();
 
     public SharedResources(ILoggerFactory? loggerFactory = null)
     {
         _logger = (loggerFactory ?? NullLoggerFactory.Instance).CreateLogger<SharedResources>();
-
-        // Create a single-threaded channel for protocol execution
-        ProtocolChannel = Channel.CreateUnbounded<Action>(new UnboundedChannelOptions
-        {
-            SingleReader = true,
-            SingleWriter = false
-        });
 
         // Create protocol executor channel for async tasks
         _protocolExecutor = Channel.CreateUnbounded<Func<Task>>(new UnboundedChannelOptions
@@ -49,30 +49,7 @@ public sealed class SharedResources : IDisposable
         });
 
         // Start the protocol executors
-        _ = Task.Run(ProcessProtocolMessages);
         _ = Task.Run(ProcessProtocolMessagesAsync);
-    }
-
-    private async Task ProcessProtocolMessages()
-    {
-        try
-        {
-            await foreach (var action in ProtocolChannel.Reader.ReadAllAsync(_shutdownCts.Token))
-            {
-                try
-                {
-                    action();
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Error executing protocol message");
-                }
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            // Expected during shutdown
-        }
     }
 
     private async Task ProcessProtocolMessagesAsync()
@@ -81,14 +58,16 @@ public sealed class SharedResources : IDisposable
         {
             await foreach (var taskFunc in _protocolExecutor.Reader.ReadAllAsync(_shutdownCts.Token))
             {
+#pragma warning disable CA1031 // Do not catch general exception types
                 try
                 {
                     await taskFunc();
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Error executing protocol task");
+                    LogProtocolTaskError(ex);
                 }
+#pragma warning restore CA1031 // Do not catch general exception types
             }
         }
         catch (OperationCanceledException)
@@ -97,36 +76,20 @@ public sealed class SharedResources : IDisposable
         }
     }
 
-    public void ExecuteOnProtocol(Action action)
+    public async Task ScheduleAsyncCallback(Func<Task> asyncFunc)
     {
-        if (!ProtocolChannel.Writer.TryWrite(action))
-        {
-            _logger.LogWarning("Failed to queue protocol action - channel may be closed");
-        }
+        await ProtocolExecutor.Writer.WriteAsync(asyncFunc);
     }
 
-    public Task<T> ExecuteOnProtocolAsync<T>(Func<T> func)
+    public void ScheduleCallback(Func<Task> asyncFunc)
     {
-        var tcs = new TaskCompletionSource<T>();
-        ExecuteOnProtocol(() =>
-        {
-            try
-            {
-                var result = func();
-                tcs.SetResult(result);
-            }
-            catch (Exception ex)
-            {
-                tcs.SetException(ex);
-            }
-        });
-        return tcs.Task;
+        ProtocolExecutor.Writer.TryWrite(asyncFunc);
     }
 
     public void Dispose()
     {
         _shutdownCts.Cancel();
-        ProtocolChannel.Writer.Complete();
         _protocolExecutor.Writer.Complete();
+        _shutdownCts.Dispose();
     }
 }

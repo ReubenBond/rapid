@@ -18,7 +18,7 @@ namespace Rapid.Tests;
 /// <summary>
 /// Tests for a standalone MembershipView object.
 /// </summary>
-internal class MembershipViewTests
+public class MembershipViewTests
 {
     private const int K = 10;
 
@@ -28,12 +28,12 @@ internal class MembershipViewTests
     [Fact]
     public void OneRingAddition()
     {
-        var mview = new MembershipView(K);
+        using var mview = new MembershipView(K);
         var addr = Utils.HostFromParts("127.0.0.1", 123);
 
         mview.RingAdd(addr, Utils.NodeIdFromUuid(Guid.NewGuid()));
 
-        for (int k = 0; k < K; k++)
+        for (var k = 0; k < K; k++)
         {
             var list = mview.GetRing(k);
             Assert.Single(list);
@@ -50,15 +50,15 @@ internal class MembershipViewTests
     [Fact]
     public void MultipleRingAdditions()
     {
-        var mview = new MembershipView(K);
+        using var mview = new MembershipView(K);
         const int numNodes = 10;
 
-        for (int i = 0; i < numNodes; i++)
+        for (var i = 0; i < numNodes; i++)
         {
             mview.RingAdd(Utils.HostFromParts("127.0.0.1", i), Utils.NodeIdFromUuid(Guid.NewGuid()));
         }
 
-        for (int k = 0; k < K; k++)
+        for (var k = 0; k < K; k++)
         {
             var list = mview.GetRing(k);
             Assert.Equal(numNodes, list.Count);
@@ -71,31 +71,31 @@ internal class MembershipViewTests
     [Fact]
     public void RingReAdditions()
     {
-        var mview = new MembershipView(K);
+        using var mview = new MembershipView(K);
         const int numNodes = 10;
         const int startPort = 0;
 
-        for (int i = 0; i < numNodes; i++)
+        for (var i = 0; i < numNodes; i++)
         {
             mview.RingAdd(Utils.HostFromParts("127.0.0.1", startPort + i),
                          Utils.NodeIdFromUuid(Guid.NewGuid()));
         }
 
-        for (int k = 0; k < K; k++)
+        for (var k = 0; k < K; k++)
         {
             var list = mview.GetRing(k);
             Assert.Equal(numNodes, list.Count);
         }
 
-        int numThrows = 0;
-        for (int i = 0; i < numNodes; i++)
+        var numThrows = 0;
+        for (var i = 0; i < numNodes; i++)
         {
             try
             {
                 mview.RingAdd(Utils.HostFromParts("127.0.0.1", startPort + i),
                              Utils.NodeIdFromUuid(Guid.NewGuid()));
             }
-            catch (MembershipView.NodeAlreadyInRingException)
+            catch (NodeAlreadyInRingException)
             {
                 numThrows++;
             }
@@ -110,17 +110,17 @@ internal class MembershipViewTests
     [Fact]
     public void RingDeletionsOnly()
     {
-        var mview = new MembershipView(K);
+        using var mview = new MembershipView(K);
         const int numNodes = 10;
-        int numThrows = 0;
+        var numThrows = 0;
 
-        for (int i = 0; i < numNodes; i++)
+        for (var i = 0; i < numNodes; i++)
         {
             try
             {
                 mview.RingDelete(Utils.HostFromParts("127.0.0.1", i));
             }
-            catch (MembershipView.NodeNotInRingException)
+            catch (NodeNotInRingException)
             {
                 numThrows++;
             }
@@ -135,20 +135,20 @@ internal class MembershipViewTests
     [Fact]
     public void RingAdditionsAndDeletions()
     {
-        var mview = new MembershipView(K);
+        using var mview = new MembershipView(K);
         const int numNodes = 10;
 
-        for (int i = 0; i < numNodes; i++)
+        for (var i = 0; i < numNodes; i++)
         {
             mview.RingAdd(Utils.HostFromParts("127.0.0.1", i), Utils.NodeIdFromUuid(Guid.NewGuid()));
         }
 
-        for (int i = 0; i < numNodes; i++)
+        for (var i = 0; i < numNodes; i++)
         {
             mview.RingDelete(Utils.HostFromParts("127.0.0.1", i));
         }
 
-        for (int k = 0; k < K; k++)
+        for (var k = 0; k < K; k++)
         {
             var list = mview.GetRing(k);
             Assert.Empty(list);
@@ -161,7 +161,7 @@ internal class MembershipViewTests
     [Fact]
     public void MonitoringRelationshipEdge()
     {
-        var mview = new MembershipView(K);
+        using var mview = new MembershipView(K);
         var n1 = Utils.HostFromParts("127.0.0.1", 1);
 
         mview.RingAdd(n1, Utils.NodeIdFromUuid(Guid.NewGuid()));
@@ -170,8 +170,8 @@ internal class MembershipViewTests
 
         var n2 = Utils.HostFromParts("127.0.0.1", 2);
 
-        Assert.Throws<MembershipView.NodeNotInRingException>(() => mview.GetSubjectsOf(n2));
-        Assert.Throws<MembershipView.NodeNotInRingException>(() => mview.GetObserversOf(n2));
+        Assert.Throws<NodeNotInRingException>(() => mview.GetSubjectsOf(n2));
+        Assert.Throws<NodeNotInRingException>(() => mview.GetObserversOf(n2));
     }
 
     /// <summary>
@@ -180,11 +180,11 @@ internal class MembershipViewTests
     [Fact]
     public void MonitoringRelationshipEmpty()
     {
-        var mview = new MembershipView(K);
+        using var mview = new MembershipView(K);
         var n = Utils.HostFromParts("127.0.0.1", 1);
 
-        Assert.Throws<MembershipView.NodeNotInRingException>(() => mview.GetSubjectsOf(n));
-        Assert.Throws<MembershipView.NodeNotInRingException>(() => mview.GetObserversOf(n));
+        Assert.Throws<NodeNotInRingException>(() => mview.GetSubjectsOf(n));
+        Assert.Throws<NodeNotInRingException>(() => mview.GetObserversOf(n));
     }
 
     /// <summary>
@@ -193,7 +193,7 @@ internal class MembershipViewTests
     [Fact]
     public void MonitoringRelationshipTwoNodes()
     {
-        var mview = new MembershipView(K);
+        using var mview = new MembershipView(K);
         var n1 = Utils.HostFromParts("127.0.0.1", 1);
         var n2 = Utils.HostFromParts("127.0.0.1", 2);
 
@@ -212,7 +212,7 @@ internal class MembershipViewTests
     [Fact]
     public void MonitoringRelationshipThreeNodesWithDelete()
     {
-        var mview = new MembershipView(K);
+        using var mview = new MembershipView(K);
         var n1 = Utils.HostFromParts("127.0.0.1", 1);
         var n2 = Utils.HostFromParts("127.0.0.1", 2);
         var n3 = Utils.HostFromParts("127.0.0.1", 3);
@@ -240,7 +240,7 @@ internal class MembershipViewTests
     [Fact]
     public void ConfigurationIdChanges()
     {
-        var mview = new MembershipView(K);
+        using var mview = new MembershipView(K);
         var initialConfig = mview.GetCurrentConfigurationId();
 
         var n1 = Utils.HostFromParts("127.0.0.1", 1);
@@ -267,7 +267,7 @@ internal class MembershipViewTests
     [Fact]
     public void MembershipSize()
     {
-        var mview = new MembershipView(K);
+        using var mview = new MembershipView(K);
         Assert.Equal(0, mview.GetMembershipSize());
 
         var n1 = Utils.HostFromParts("127.0.0.1", 1);
@@ -291,7 +291,7 @@ internal class MembershipViewTests
     [Fact]
     public void HostAndIdentifierPresence()
     {
-        var mview = new MembershipView(K);
+        using var mview = new MembershipView(K);
         var n1 = Utils.HostFromParts("127.0.0.1", 1);
         var nodeId1 = Utils.NodeIdFromUuid(Guid.NewGuid());
 
@@ -316,7 +316,7 @@ internal class MembershipViewTests
     [Fact]
     public void UuidCollisionDetection()
     {
-        var mview = new MembershipView(K);
+        using var mview = new MembershipView(K);
         var n1 = Utils.HostFromParts("127.0.0.1", 1);
         var n2 = Utils.HostFromParts("127.0.0.1", 2);
         var sharedUuid = Utils.NodeIdFromUuid(Guid.NewGuid());
@@ -324,7 +324,7 @@ internal class MembershipViewTests
         mview.RingAdd(n1, sharedUuid);
 
         // Adding a different node with the same UUID should throw
-        Assert.Throws<MembershipView.UuidAlreadySeenException>(() => mview.RingAdd(n2, sharedUuid));
+        Assert.Throws<UuidAlreadySeenException>(() => mview.RingAdd(n2, sharedUuid));
     }
 
     /// <summary>
@@ -333,7 +333,7 @@ internal class MembershipViewTests
     [Fact]
     public void SafeToJoinChecks()
     {
-        var mview = new MembershipView(K);
+        using var mview = new MembershipView(K);
         var n1 = Utils.HostFromParts("127.0.0.1", 1);
         var n2 = Utils.HostFromParts("127.0.0.1", 2);
         var nodeId1 = Utils.NodeIdFromUuid(Guid.NewGuid());
@@ -360,18 +360,18 @@ internal class MembershipViewTests
     [Fact]
     public void MonitoringRelationshipMultipleNodes()
     {
-        var mview = new MembershipView(K);
+        using var mview = new MembershipView(K);
         const int numNodes = 1000;
         var list = new List<Endpoint>();
 
-        for (int i = 0; i < numNodes; i++)
+        for (var i = 0; i < numNodes; i++)
         {
             var n = Utils.HostFromParts("127.0.0.1", i);
             list.Add(n);
             mview.RingAdd(n, Utils.NodeIdFromUuid(Guid.NewGuid()));
         }
 
-        for (int i = 0; i < numNodes; i++)
+        for (var i = 0; i < numNodes; i++)
         {
             var numSubjects = mview.GetSubjectsOf(list[i]).Count;
             var numObservers = mview.GetObserversOf(list[i]).Count;
@@ -386,7 +386,7 @@ internal class MembershipViewTests
     [Fact]
     public void MonitoringRelationshipBootstrap()
     {
-        var mview = new MembershipView(K);
+        using var mview = new MembershipView(K);
         const int serverPort = 1234;
         var n = Utils.HostFromParts("127.0.0.1", serverPort);
         mview.RingAdd(n, Utils.NodeIdFromUuid(Guid.NewGuid()));
@@ -404,13 +404,13 @@ internal class MembershipViewTests
     [Fact]
     public void MonitoringRelationshipBootstrapMultiple()
     {
-        var mview = new MembershipView(K);
+        using var mview = new MembershipView(K);
         const int numNodes = 20;
         const int serverPortBase = 1234;
         var joiningNode = Utils.HostFromParts("127.0.0.1", serverPortBase - 1);
-        int numObservers = 0;
+        var numObservers = 0;
 
-        for (int i = 0; i < numNodes; i++)
+        for (var i = 0; i < numNodes; i++)
         {
             var n = Utils.HostFromParts("127.0.0.1", serverPortBase + i);
             mview.RingAdd(n, Utils.NodeIdFromUuid(Guid.NewGuid()));
@@ -431,8 +431,8 @@ internal class MembershipViewTests
     [Fact]
     public void NodeUniqueIdNoDeletions()
     {
-        var mview = new MembershipView(K);
-        int numExceptions = 0;
+        using var mview = new MembershipView(K);
+        var numExceptions = 0;
         var n1 = Utils.HostFromParts("127.0.0.1", 1);
         var id1 = Utils.NodeIdFromUuid(Guid.NewGuid());
         mview.RingAdd(n1, id1);
@@ -445,7 +445,7 @@ internal class MembershipViewTests
         {
             mview.RingAdd(n2, id2);
         }
-        catch (MembershipView.UuidAlreadySeenException)
+        catch (UuidAlreadySeenException)
         {
             numExceptions++;
         }
@@ -456,7 +456,7 @@ internal class MembershipViewTests
         {
             mview.RingAdd(n2, Utils.NodeIdFromUuid(Guid.NewGuid()));
         }
-        catch (MembershipView.NodeAlreadyInRingException)
+        catch (NodeAlreadyInRingException)
         {
             numExceptions++;
         }
@@ -468,7 +468,7 @@ internal class MembershipViewTests
         {
             mview.RingAdd(n3, id2);
         }
-        catch (MembershipView.UuidAlreadySeenException)
+        catch (UuidAlreadySeenException)
         {
             numExceptions++;
         }
@@ -479,7 +479,7 @@ internal class MembershipViewTests
         {
             mview.RingAdd(n3, Utils.NodeIdFromUuid(Guid.NewGuid()));
         }
-        catch (MembershipView.NodeNotInRingException)
+        catch (NodeNotInRingException)
         {
             numExceptions++;
         }
@@ -496,7 +496,7 @@ internal class MembershipViewTests
     [Fact]
     public void NodeUniqueIdWithDeletions()
     {
-        var mview = new MembershipView(K);
+        using var mview = new MembershipView(K);
         var n1 = Utils.HostFromParts("127.0.0.1", 1);
         var id1 = Utils.NodeIdFromUuid(Guid.NewGuid());
         mview.RingAdd(n1, id1);
@@ -511,13 +511,13 @@ internal class MembershipViewTests
         mview.RingDelete(n2);
         Assert.Single(mview.GetRing(0));
 
-        int numExceptions = 0;
+        var numExceptions = 0;
         // Node rejoins with id2
         try
         {
             mview.RingAdd(n2, id2);
         }
-        catch (MembershipView.UuidAlreadySeenException)
+        catch (UuidAlreadySeenException)
         {
             numExceptions++;
         }
@@ -534,11 +534,11 @@ internal class MembershipViewTests
     [Fact]
     public void NodeConfigurationChange()
     {
-        var mview = new MembershipView(K);
+        using var mview = new MembershipView(K);
         const int numNodes = 1000;
         var set = new HashSet<long>(numNodes);
 
-        for (int i = 0; i < numNodes; i++)
+        for (var i = 0; i < numNodes; i++)
         {
             var n = Utils.HostFromParts("127.0.0.1", i);
             var nameBasedGuid = Utils.NodeIdFromUuid(
@@ -557,13 +557,13 @@ internal class MembershipViewTests
     [Fact]
     public void NodeConfigurationsAcrossMViews()
     {
-        var mview1 = new MembershipView(K);
-        var mview2 = new MembershipView(K);
+        using var mview1 = new MembershipView(K);
+        using var mview2 = new MembershipView(K);
         const int numNodes = 1000;
         var list1 = new List<long>(numNodes);
         var list2 = new List<long>(numNodes);
 
-        for (int i = 0; i < numNodes; i++)
+        for (var i = 0; i < numNodes; i++)
         {
             var n = Utils.HostFromParts("127.0.0.1", i);
             var nameBasedGuid = Utils.NodeIdFromUuid(
@@ -572,7 +572,7 @@ internal class MembershipViewTests
             list1.Add(mview1.GetCurrentConfigurationId());
         }
 
-        for (int i = numNodes - 1; i >= 0; i--)
+        for (var i = numNodes - 1; i >= 0; i--)
         {
             var n = Utils.HostFromParts("127.0.0.1", i);
             var nameBasedGuid = Utils.NodeIdFromUuid(
@@ -585,7 +585,7 @@ internal class MembershipViewTests
         Assert.Equal(numNodes, list2.Count);
 
         // Only the last added elements in the sequence of configurations should have the same value
-        for (int i = 0; i < numNodes - 1; i++)
+        for (var i = 0; i < numNodes - 1; i++)
         {
             Assert.NotEqual(list1[i], list2[i]);
         }
@@ -607,7 +607,9 @@ internal static class GuidUtility
 
         SwapByteOrder(namespaceBytes);
 
+#pragma warning disable CA5350
         var hash = System.Security.Cryptography.SHA1.HashData(namespaceBytes.Concat(nameBytes).ToArray());
+#pragma warning restore CA5350
 
         var newGuid = new byte[16];
         Array.Copy(hash, newGuid, 16);

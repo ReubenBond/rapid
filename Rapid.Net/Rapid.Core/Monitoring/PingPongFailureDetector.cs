@@ -11,7 +11,7 @@ namespace Rapid.Monitoring;
 /// <summary>
 /// Simple ping-pong failure detector factory.
 /// </summary>
-public sealed class PingPongFailureDetectorFactory(Endpoint localEndpoint, IMessagingClient client,
+public sealed partial class PingPongFailureDetectorFactory(Endpoint localEndpoint, IMessagingClient client,
     ILoggerFactory? loggerFactory) : IEdgeFailureDetectorFactory
 {
     private readonly Endpoint _localEndpoint = localEndpoint;
@@ -23,7 +23,7 @@ public sealed class PingPongFailureDetectorFactory(Endpoint localEndpoint, IMess
         return new PingPongFailureDetector(subject, _localEndpoint, _client, notifier, _loggerFactory);
     }
 
-    private class PingPongFailureDetector(Endpoint subject, Endpoint observer, IMessagingClient client,
+    private sealed partial class PingPongFailureDetector(Endpoint subject, Endpoint observer, IMessagingClient client,
         Action notifier, ILoggerFactory? loggerFactory) : IEdgeFailureDetector
     {
         private readonly Endpoint _subject = subject;
@@ -33,6 +33,18 @@ public sealed class PingPongFailureDetectorFactory(Endpoint localEndpoint, IMess
         private readonly ILogger _logger = loggerFactory?.CreateLogger<PingPongFailureDetector>()
                 ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<PingPongFailureDetector>.Instance;
         private readonly CancellationTokenSource _cts = new();
+
+        private readonly struct LoggableEndpoint(Endpoint endpoint)
+        {
+            private readonly Endpoint _endpoint = endpoint;
+            public override readonly string ToString() => RapidUtils.Loggable(_endpoint);
+        }
+
+        [LoggerMessage(Level = LogLevel.Warning, Message = "Probe failed for {Subject}")]
+        private partial void LogProbeFailed(LoggableEndpoint Subject);
+
+        [LoggerMessage(Level = LogLevel.Warning, Message = "Probe exception for {Subject}")]
+        private partial void LogProbeException(Exception ex, LoggableEndpoint Subject);
         private readonly PeriodicTimer _timer = new PeriodicTimer(TimeSpan.FromMilliseconds(1000));
         private Task? _probeTask;
 
@@ -45,37 +57,40 @@ public sealed class PingPongFailureDetectorFactory(Endpoint localEndpoint, IMess
         {
             while (await _timer.WaitForNextTickAsync(_cts.Token))
             {
+#pragma warning disable CA1031
                 try
                 {
-                    var request = Utils.ToRapidRequest(new ProbeMessage { Sender = _observer });
+                    var request = RapidUtils.ToRapidRequest(new ProbeMessage { Sender = _observer });
                     var response = await _client.SendMessageAsync(_subject, request, _cts.Token);
 
                     if (response.ProbeResponse == null)
                     {
-                        _logger.LogWarning("Probe failed for {Subject}", Utils.Loggable(_subject));
+                        LogProbeFailed(new LoggableEndpoint(_subject));
                         _notifier();
                         break;
                     }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Probe exception for {Subject}", Utils.Loggable(_subject));
+                    LogProbeException(ex, new LoggableEndpoint(_subject));
                     _notifier();
                     break;
                 }
+#pragma warning restore CA1031
             }
         }
 
-        public void Stop()
+        public void StopMonitoring()
         {
             _cts.Cancel();
         }
 
         public void Dispose()
         {
-            Stop();
+            StopMonitoring();
             _timer.Dispose();
             _cts.Dispose();
+            _client.Dispose();
         }
     }
 }

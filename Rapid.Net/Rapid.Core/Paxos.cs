@@ -27,7 +27,7 @@ namespace Rapid;
 /// only round that is a fast round. A round is identified by a tuple (rnd-number, nodeId), where nodeId is a unique
 /// identifier per node that initiates phase1.
 /// </summary>
-internal sealed class Paxos
+internal sealed partial class Paxos
 {
     private readonly ILogger<Paxos> _logger;
     private readonly IBroadcaster _broadcaster;
@@ -35,6 +35,21 @@ internal sealed class Paxos
     private readonly long _configurationId;
     private readonly Endpoint _myAddr;
     private readonly int _n;
+
+    private readonly struct LoggableEndpoints(IEnumerable<Endpoint> endpoints)
+    {
+        private readonly IEnumerable<Endpoint> _endpoints = endpoints;
+        public override readonly string ToString() => string.Join(", ", _endpoints.Select(RapidUtils.Loggable));
+    }
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Prepare called by {MyAddr} for round {Crnd}")]
+    private partial void LogPrepareCalled(Endpoint MyAddr, Rank Crnd);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Decided on value: {Value}")]
+    private partial void LogDecidedValue(LoggableEndpoints Value);
+
+    [LoggerMessage(Level = LogLevel.Trace, Message = "Broadcasting startPhase1a message")]
+    private partial void LogBroadcastingPhase1a();
 
     private Rank _rnd;
     private Rank _vrnd;
@@ -81,7 +96,7 @@ internal sealed class Paxos
         }
 
         _crnd = new Rank { Round = round, NodeIndex = _myAddr.GetHashCode() };
-        _logger.LogDebug("Prepare called by {MyAddr} for round {Crnd}", _myAddr, _crnd);
+        LogPrepareCalled(_myAddr, _crnd);
 
         var prepare = new Phase1aMessage
         {
@@ -90,8 +105,8 @@ internal sealed class Paxos
             Rank = _crnd
         };
 
-        var request = Utils.ToRapidRequest(prepare);
-        _logger.LogTrace("Broadcasting startPhase1a message");
+        var request = RapidUtils.ToRapidRequest(prepare);
+        LogBroadcastingPhase1a();
         _ = _broadcaster.BroadcastAsync(request);
     }
 
@@ -115,7 +130,7 @@ internal sealed class Paxos
             };
             phase1b.Vval.AddRange(_vval);
 
-            var request = Utils.ToRapidRequest(phase1b);
+            var request = RapidUtils.ToRapidRequest(phase1b);
             _ = _client.SendMessageAsync(phase1aMessage.Sender, request);
         }
     }
@@ -148,7 +163,7 @@ internal sealed class Paxos
             };
             phase2a.Vval.AddRange(_cval);
 
-            var request = Utils.ToRapidRequest(phase2a);
+            var request = RapidUtils.ToRapidRequest(phase2a);
             _ = _broadcaster.BroadcastAsync(request);
         }
     }
@@ -174,7 +189,7 @@ internal sealed class Paxos
             };
             phase2b.Endpoints.AddRange(_vval);
 
-            var request = Utils.ToRapidRequest(phase2b);
+            var request = RapidUtils.ToRapidRequest(phase2b);
             _ = _client.SendMessageAsync(phase2aMessage.Sender, request);
         }
     }
@@ -203,7 +218,7 @@ internal sealed class Paxos
         {
             _decided = true;
             var endpoints = new List<Endpoint>(phase2bMessage.Endpoints);
-            _logger.LogDebug("Decided on value: {Value}", string.Join(", ", endpoints));
+            LogDecidedValue(new LoggableEndpoints(endpoints));
             _onDecide(endpoints);
         }
     }

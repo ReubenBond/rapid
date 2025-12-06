@@ -19,7 +19,7 @@ namespace Rapid.Tests.Integration;
 /// <summary>
 /// Integration tests for Cluster API
 /// </summary>
-internal class ClusterIntegrationTests : IDisposable
+public sealed class ClusterIntegrationTests : IDisposable
 {
     private readonly List<Cluster> _clusters = [];
     private readonly ILoggerFactory _loggerFactory;
@@ -37,6 +37,7 @@ internal class ClusterIntegrationTests : IDisposable
     {
         foreach (var cluster in _clusters)
         {
+#pragma warning disable CA1031
             try
             {
                 cluster.Dispose();
@@ -45,9 +46,11 @@ internal class ClusterIntegrationTests : IDisposable
             {
                 // Ignore disposal errors in tests
             }
+#pragma warning restore CA1031
         }
         _clusters.Clear();
         _loggerFactory.Dispose();
+        GC.SuppressFinalize(this);
     }
 
     /// <summary>
@@ -268,7 +271,7 @@ internal class ClusterIntegrationTests : IDisposable
         const int numJoiners = 3;
         var joinTasks = new List<Task<Cluster>>();
 
-        for (int i = 0; i < numJoiners; i++)
+        for (var i = 0; i < numJoiners; i++)
         {
             var joinerAddress = Utils.HostFromParts("127.0.0.1", _nextPort++);
             var joinTask = new Cluster.ClusterBuilder(joinerAddress)

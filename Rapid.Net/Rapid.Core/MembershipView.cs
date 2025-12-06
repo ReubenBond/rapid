@@ -21,7 +21,7 @@ namespace Rapid;
 /// Hosts K permutations of the memberlist that represent the monitoring relationship between nodes;
 /// every node (an observer) observers its successor (a subject) on each ring.
 /// </summary>
-internal sealed class MembershipView
+internal sealed class MembershipView : IDisposable
 {
     private readonly int _k;
     private readonly ReaderWriterLockSlim _rwLock = new();
@@ -48,7 +48,7 @@ internal sealed class MembershipView
         _addressComparators = new List<AddressComparator>(k);
         _identifiersSeen = new SortedSet<NodeId>(NodeIdComparer.Instance);
 
-        for (int i = 0; i < k; i++)
+        for (var i = 0; i < k; i++)
         {
             var comparator = new AddressComparator(i);
             _addressComparators.Add(comparator);
@@ -75,7 +75,7 @@ internal sealed class MembershipView
         _addressComparators = new List<AddressComparator>(k);
         _identifiersSeen = new SortedSet<NodeId>(NodeIdComparer.Instance);
 
-        for (int i = 0; i < k; i++)
+        for (var i = 0; i < k; i++)
         {
             var comparator = new AddressComparator(i);
             _addressComparators.Add(comparator);
@@ -155,7 +155,7 @@ internal sealed class MembershipView
 
             var affectedSubjects = new HashSet<Endpoint>();
 
-            for (int k = 0; k < _k; k++)
+            for (var k = 0; k < _k; k++)
             {
                 var endpoints = _rings[k];
                 endpoints.Add(node);
@@ -201,7 +201,7 @@ internal sealed class MembershipView
 
             var affectedSubjects = new HashSet<Endpoint>();
 
-            for (int k = 0; k < _k; k++)
+            for (var k = 0; k < _k; k++)
             {
                 var endpoints = _rings[k];
 
@@ -277,7 +277,7 @@ internal sealed class MembershipView
 
         var observers = new List<Endpoint>();
 
-        for (int k = 0; k < _k; k++)
+        for (var k = 0; k < _k; k++)
         {
             var list = _rings[k];
             var successor = GetHigher(list, node);
@@ -353,7 +353,7 @@ internal sealed class MembershipView
     {
         var subjects = new List<Endpoint>();
 
-        for (int k = 0; k < _k; k++)
+        for (var k = 0; k < _k; k++)
         {
             var list = _rings[k];
             var predecessor = GetLower(list, node);
@@ -466,7 +466,7 @@ internal sealed class MembershipView
             }
 
             var ringIndexes = new List<int>();
-            int ringNumber = 0;
+            var ringNumber = 0;
             foreach (var node in subjects)
             {
                 if (node.Equals(subject))
@@ -546,27 +546,6 @@ internal sealed class MembershipView
         return set.GetViewBetween(value, max).Where(e => !e.Equals(value)).FirstOrDefault();
     }
 
-    public sealed class NodeAlreadyInRingException(Endpoint node) : Exception(node.ToString())
-    {
-        public NodeAlreadyInRingException()
-        {
-        }
-    }
-
-    public sealed class NodeNotInRingException(Endpoint node) : Exception(node.ToString())
-    {
-        public NodeNotInRingException()
-        {
-        }
-    }
-
-    public sealed class UuidAlreadySeenException(Endpoint node, NodeId nodeId) : Exception($"Endpoint add attempt with identifier already seen: {{host: {node}, identifier: {nodeId}}}")
-    {
-        public UuidAlreadySeenException()
-        {
-        }
-    }
-
     public sealed class Configuration(IEnumerable<NodeId> nodeIds, IEnumerable<Endpoint> endpoints)
     {
         public List<NodeId> NodeIds { get; } = [.. nodeIds];
@@ -598,6 +577,7 @@ internal sealed class MembershipView
     {
         private readonly int _seed = seed;
         private readonly Dictionary<Endpoint, long> _hashCache = [];
+        private readonly object _hashCacheLock = new();
 
         public int Compare(Endpoint? x, Endpoint? y)
         {
@@ -619,12 +599,15 @@ internal sealed class MembershipView
 
         public void RemoveEndpoint(Endpoint endpoint)
         {
-            _hashCache.Remove(endpoint, out _);
+            lock (_hashCacheLock)
+            {
+                _hashCache.Remove(endpoint, out _);
+            }
         }
 
         private long GetCachedHash(Endpoint endpoint)
         {
-            lock (this)
+            lock (_hashCacheLock)
             {
                 ref var hash = ref CollectionsMarshal.GetValueRefOrAddDefault(_hashCache, endpoint, out var exists);
                 if (!exists)
@@ -659,4 +642,10 @@ internal sealed class MembershipView
             return 0;
         }
     }
+
+    public void Dispose()
+    {
+        _rwLock.Dispose();
+    }
 }
+
