@@ -361,6 +361,11 @@ var sharedResources = new SharedResources(
 - `Rapid.Tests/Simulation/InMemoryMessagingClient.cs` - In-memory transport
 - `Rapid.Tests/Simulation/SimulationFailureDetector.cs` - Failure detector
 - `Rapid.Tests/Simulation/DeterministicRandom.cs` - Seeded random
+- `Rapid.Tests/Simulation/DeterministicTaskScheduler.cs` - Task scheduler for deterministic execution
+- `Rapid.Tests/Simulation/DeterministicSynchronizationContext.cs` - Routes async continuations to scheduler
+- `Rapid.Tests/Simulation/DeterministicSimulationHarness.cs` - Extended harness for fully deterministic tests
+- `Rapid.Tests/Simulation/InvariantChecker.cs` - Cluster invariant verification
+- `Rapid.Tests/Simulation/ChaosInjector.cs` - Random fault injection
 
 ## TODO: Fully Deterministic Simulation Test Suite
 
@@ -368,23 +373,23 @@ The following tasks are required to implement a fully deterministic simulation t
 
 ### Phase 1: Deterministic Task Scheduler
 
-- [ ] **Create `DeterministicTaskScheduler`** - A custom `TaskScheduler` implementation that queues tasks and only executes them when explicitly stepped
-  - [ ] Maintain a priority queue of pending tasks
-  - [ ] Support `QueueTask`, `TryDequeue`, and `Step(int count)` methods
-  - [ ] Integrate with `FakeTimeProvider` for time-based task ordering
-  - [ ] Handle `TaskCreationOptions.LongRunning` appropriately
+- [x] **Create `DeterministicTaskScheduler`** - A custom `TaskScheduler` implementation that queues tasks and only executes them when explicitly stepped
+  - [x] Maintain a priority queue of pending tasks
+  - [x] Support `QueueTask`, `TryDequeue`, and `Step(int count)` methods
+  - [x] Integrate with `FakeTimeProvider` for time-based task ordering
+  - [x] Handle `TaskCreationOptions.LongRunning` appropriately
 
-- [ ] **Create `DeterministicSynchronizationContext`** - Companion to the scheduler for capturing async continuations
-  - [ ] Ensure `await` continuations are routed through the deterministic scheduler
+- [x] **Create `DeterministicSynchronizationContext`** - Companion to the scheduler for capturing async continuations
+  - [x] Ensure `await` continuations are routed through the deterministic scheduler
 
 ### Phase 2: Remaining Non-Determinism Sources
 
-- [ ] **Audit all `Task.Delay` usages** - Ensure they use `TimeProvider` from `SharedResources`
-  - [ ] Replace `Task.Delay(timespan)` with `TimeProvider.Delay(timespan)`
-  - [ ] Verify `FakeTimeProvider` integration works correctly
+- [x] **Audit all `Task.Delay` usages** - Ensure they use `TimeProvider` from `SharedResources`
+  - [x] Replace `Task.Delay(timespan)` with `TimeProvider.Delay(timespan)` - Already done in codebase
+  - [x] Verify `FakeTimeProvider` integration works correctly
 
-- [ ] **Audit all `CancellationTokenSource` timeout usages** - Ensure they use `TimeProvider`
-  - [ ] Replace `new CancellationTokenSource(timeout)` with `TimeProvider.CreateCancellationTokenSource(timeout)`
+- [x] **Audit all `CancellationTokenSource` timeout usages** - Ensure they use `TimeProvider`
+  - [x] Replace `new CancellationTokenSource(timeout)` with `Task.WaitAsync(timeout, TimeProvider)` pattern in MembershipService
 
 - [ ] **Audit lock contention** - Ensure lock acquisition order is deterministic
   - [ ] Consider using ordered lock acquisition or deterministic lock scheduling
@@ -398,47 +403,47 @@ The following tasks are required to implement a fully deterministic simulation t
   - [ ] Priority queue for pending messages sorted by delivery time
   - [ ] Tie-breaking by sender/receiver addresses and sequence numbers
 
-- [ ] **Deterministic network delay calculation** - Use seeded random for jitter
-  - [ ] Ensure `SimulationNetwork` uses `SharedResources.NextRandomDouble()`
+- [x] **Deterministic network delay calculation** - Use seeded random for jitter
+  - [x] `SimulationNetwork` already uses `DeterministicRandom` for jitter calculation
 
 ### Phase 4: Test Infrastructure
 
-- [ ] **Create `DeterministicSimulationHarness`** - Extended harness for fully deterministic tests
-  - [ ] Wraps `SharedResources` with deterministic scheduler
-  - [ ] Provides `Step()` method to advance simulation by one logical step
-  - [ ] Provides `RunUntil(Func<bool> condition)` for running until a condition is met
+- [x] **Create `DeterministicSimulationHarness`** - Extended harness for fully deterministic tests
+  - [x] Wraps `SharedResources` with deterministic scheduler
+  - [x] Provides `Step()` method to advance simulation by one logical step
+  - [x] Provides `RunUntil(Func<bool> condition)` for running until a condition is met
 
-- [ ] **Event logging and replay** - Record all events for debugging and replay
-  - [ ] Log all message sends/receives with timestamps
-  - [ ] Log all task executions with timestamps
+- [x] **Event logging and replay** - Record all events for debugging and replay
+  - [x] Log all message sends/receives with timestamps (via `SimulationEvent` type)
+  - [x] Log all task executions with timestamps
   - [ ] Support replaying a recorded execution
 
-- [ ] **Seed logging in test failures** - Automatically log the seed when a test fails
-  - [ ] xUnit `ITestOutputHelper` integration
-  - [ ] Clear instructions for reproducing failures
+- [x] **Seed logging in test failures** - Automatically log the seed when a test fails
+  - [x] xUnit `ITestOutputHelper` integration via `DeterministicSimulationHarness`
+  - [x] Clear instructions for reproducing failures via `LogSeedForReproduction()` and `DumpEventLog()`
 
 ### Phase 5: Chaos Testing
 
-- [ ] **Random fault injection** - Automatically inject faults during simulation
-  - [ ] Random node crashes at random times
-  - [ ] Random network partitions
-  - [ ] Random message delays and drops
+- [x] **Random fault injection** - Automatically inject faults during simulation
+  - [x] Random node crashes at random times (via `ChaosInjector.NodeCrashRate`)
+  - [x] Random network partitions (via `ChaosInjector.PartitionRate`)
+  - [x] Random message delays and drops (via `SimulationNetwork.MessageDropRate`)
 
-- [ ] **Invariant checking** - Verify cluster invariants after each step
-  - [ ] Membership consistency across nodes
-  - [ ] No split-brain scenarios
-  - [ ] Consensus safety properties
+- [x] **Invariant checking** - Verify cluster invariants after each step
+  - [x] Membership consistency across nodes (via `InvariantChecker.CheckMembershipConsistency`)
+  - [x] No split-brain scenarios (via `InvariantChecker.CheckNoSplitBrain`)
+  - [x] Consensus safety properties (via `InvariantChecker.CheckConfigurationIdMonotonicity`)
 
 ### Phase 6: Performance and Ergonomics
 
-- [ ] **Fast-forward capability** - Skip time periods with no pending events
-  - [ ] Automatically advance `FakeTimeProvider` to next scheduled event
+- [x] **Fast-forward capability** - Skip time periods with no pending events
+  - [x] Automatically advance `FakeTimeProvider` to next scheduled event (via `FastForwardToNextEvent`)
 
-- [ ] **Parallel test execution** - Ensure deterministic tests can run in parallel
-  - [ ] Each test gets isolated `SharedResources` instance
+- [x] **Parallel test execution** - Ensure deterministic tests can run in parallel
+  - [x] Each test gets isolated `SharedResources` instance (via `DeterministicSimulationHarness`)
 
 - [ ] **Debugging helpers** - Tools for debugging simulation failures
-  - [ ] Visualize cluster state at any point
+  - [x] Visualize cluster state at any point (partial - via `DumpEventLog()`)
   - [ ] Step-by-step execution with breakpoints
   - [ ] Message sequence diagrams
 

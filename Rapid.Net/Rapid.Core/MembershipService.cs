@@ -716,14 +716,13 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
             LogLeavingWithObservers(new LoggableEndpoint(_myAddr), observers.Length, new LoggableEndpoints(observers));
 
             var tasks = observers.Select(endpoint =>
-                _messagingClient.SendMessageBestEffortAsync(endpoint, leave, CancellationToken.None).WithDefaultOnException());
+                _messagingClient.SendMessageBestEffortAsync(endpoint, leave, CancellationToken.None));
 
-            using var timeoutCts = new CancellationTokenSource(_options.LeaveMessageTimeout);
             try
             {
-                await Task.WhenAll(tasks).WaitAsync(timeoutCts.Token).ConfigureAwait(true);
+                await Task.WhenAll(tasks).WaitAsync(_options.LeaveMessageTimeout, _sharedResources.TimeProvider).ConfigureAwait(true);
             }
-            catch (OperationCanceledException)
+            catch (TimeoutException)
             {
                 LogTimeoutWhileLeaving();
             }

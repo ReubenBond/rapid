@@ -48,7 +48,7 @@ public static class RapidServiceCollectionExtensions
 
         // Add core services
         services.AddGrpc();
-        services.AddSingleton<SharedResources>(sp =>
+        services.AddSingleton(sp =>
             new SharedResources(
                 sp.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>(),
                 sp.GetRequiredService<TimeProvider>()));
