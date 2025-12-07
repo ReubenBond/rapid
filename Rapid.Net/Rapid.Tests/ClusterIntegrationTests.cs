@@ -176,9 +176,9 @@ public sealed class ClusterIntegrationTests(ITestOutputHelper outputHelper) : IA
         // Joiner2 leaves gracefully
         await joiner2.LeaveGracefullyAsync().ConfigureAwait(true);
 
-        // Wait for remaining nodes to detect the leave - increased timeout for consensus
-        await TestCluster.WaitForClusterSizeAsync(seed, 2, TimeSpan.FromSeconds(20)).ConfigureAwait(true);
-        await TestCluster.WaitForClusterSizeAsync(joiner1, 2, TimeSpan.FromSeconds(20)).ConfigureAwait(true);
+        // Wait for remaining nodes to detect the leave - use WaitForClusterSizeExactAsync since we're waiting for size to decrease
+        await TestCluster.WaitForClusterSizeExactAsync(seed, 2, TimeSpan.FromSeconds(20)).ConfigureAwait(true);
+        await TestCluster.WaitForClusterSizeExactAsync(joiner1, 2, TimeSpan.FromSeconds(20)).ConfigureAwait(true);
 
         Assert.Equal(2, seed.GetMembershipSize());
         Assert.Equal(2, joiner1.GetMembershipSize());

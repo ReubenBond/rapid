@@ -536,6 +536,9 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
             _announcedProposal = false;
         }
 
+        // Track nodes that were added so we can notify their joiners after ALL nodes are processed
+        var addedNodes = new List<Endpoint>();
+
         foreach (var node in proposal)
         {
             // If the node is already in the ring, remove it. Else, add it.
@@ -563,35 +566,41 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
                 _joinerUuid.Remove(node);
                 _joinerMetadata.Remove(node);
 
-                // Send new configuration to all nodes joining through us
-                if (_joinersToRespondTo.TryGetValue(node, out var channel))
+                // Track this node for later notification
+                addedNodes.Add(node);
+            }
+        }
+
+        // Now that ALL nodes have been added, notify all joiners with the complete configuration
+        foreach (var node in addedNodes)
+        {
+            if (_joinersToRespondTo.TryGetValue(node, out var channel))
+            {
+                var waitingCount = 0;
+                var config = _membershipView.GetConfiguration();
+                var response = new JoinResponse
                 {
-                    var waitingCount = 0;
-                    var config = _membershipView.GetConfiguration();
-                    var response = new JoinResponse
-                    {
-                        Sender = _myAddr,
-                        StatusCode = JoinStatusCode.SafeToJoin,
-                        ConfigurationId = config.GetConfigurationId()
-                    };
-                    response.Endpoints.AddRange(config.Endpoints);
-                    response.Identifiers.AddRange(config.NodeIds);
-                    var allMetadata = _metadataManager.GetAllMetadata();
-                    response.MetadataKeys.AddRange(allMetadata.Keys);
-                    response.MetadataValues.AddRange(allMetadata.Values);
+                    Sender = _myAddr,
+                    StatusCode = JoinStatusCode.SafeToJoin,
+                    ConfigurationId = config.GetConfigurationId()
+                };
+                response.Endpoints.AddRange(config.Endpoints);
+                response.Identifiers.AddRange(config.NodeIds);
+                var allMetadata = _metadataManager.GetAllMetadata();
+                response.MetadataKeys.AddRange(allMetadata.Keys);
+                response.MetadataValues.AddRange(allMetadata.Values);
 
-                    var rapidResponse = RapidUtils.ToRapidResponse(response);
+                var rapidResponse = RapidUtils.ToRapidResponse(response);
 
-                    // Send response to all waiting tasks
-                    while (channel.Reader.TryRead(out var tcs))
-                    {
-                        waitingCount++;
-                        tcs.SetResult(rapidResponse);
-                    }
-
-                    LogNotifyingJoiners(waitingCount, new LoggableEndpoint(node));
-                    _joinersToRespondTo.Remove(node);
+                // Send response to all waiting tasks
+                while (channel.Reader.TryRead(out var tcs))
+                {
+                    waitingCount++;
+                    tcs.SetResult(rapidResponse);
                 }
+
+                LogNotifyingJoiners(waitingCount, new LoggableEndpoint(node));
+                _joinersToRespondTo.Remove(node);
             }
         }
 

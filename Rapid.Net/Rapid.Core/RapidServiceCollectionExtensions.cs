@@ -56,7 +56,11 @@ public static class RapidServiceCollectionExtensions
                 sp.GetRequiredService<TimeProvider>()));
         
         // Register messaging infrastructure
-        services.AddSingleton<IMessagingClient, GrpcClient>();
+        // GrpcClient is registered as a hosted service so it shuts down AFTER RapidClusterService
+        // (hosted services are stopped in reverse registration order)
+        services.AddSingleton<GrpcClient>();
+        services.AddSingleton<IMessagingClient>(sp => sp.GetRequiredService<GrpcClient>());
+        services.AddHostedService(sp => sp.GetRequiredService<GrpcClient>());
         services.AddSingleton<IBroadcasterFactory, UnicastToAllBroadcasterFactory>();
         
         // Register failure detector factory

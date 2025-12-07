@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Grpc.Core;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Rapid.Pb;
@@ -8,12 +9,15 @@ namespace Rapid.Messaging;
 
 /// <summary>
 /// gRPC-based messaging client for Rapid.
+/// Implements IHostedService to ensure proper shutdown ordering.
 /// </summary>
-internal sealed partial class GrpcClient : IMessagingClient
+internal sealed partial class GrpcClient : IMessagingClient, IHostedService
 {
     private readonly RapidProtocolOptions _options;
     private readonly ILogger<GrpcClient> _logger;
     private readonly ConcurrentDictionary<string, Pb.MembershipService.MembershipServiceClient> _clients = new();
+    private readonly ConcurrentDictionary<int, Task> _pendingTasks = new();
+    private int _taskIdCounter;
     private bool _disposed;
 
     public GrpcClient(IOptions<RapidProtocolOptions> options, ILoggerFactory? loggerFactory = null)
@@ -31,6 +35,29 @@ internal sealed partial class GrpcClient : IMessagingClient
 
     [LoggerMessage(Level = LogLevel.Error, Message = "RPC failed to {Remote}")]
     private partial void LogRpcFailed(Exception ex, LoggableEndpoint Remote);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "GrpcClient stopping, waiting for {Count} pending tasks")]
+    private partial void LogStopping(int Count);
+
+    public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public async Task StopAsync(CancellationToken cancellationToken)
+    {
+        // Wait for all pending tasks to complete (with a timeout)
+        var pendingTasks = _pendingTasks.Values.ToArray();
+        if (pendingTasks.Length > 0)
+        {
+            LogStopping(pendingTasks.Length);
+            try
+            {
+                await Task.WhenAll(pendingTasks).WaitAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // Timeout waiting for pending tasks
+            }
+        }
+    }
 
     public async Task<RapidResponse> SendMessageAsync(Endpoint remote, RapidRequest request,
         CancellationToken cancellationToken)
@@ -67,7 +94,14 @@ internal sealed partial class GrpcClient : IMessagingClient
 #pragma warning restore CA1031
     }
 
-    public async void SendOneWayMessage(Endpoint remote, RapidRequest request, CancellationToken cancellationToken)
+    public void SendOneWayMessage(Endpoint remote, RapidRequest request, CancellationToken cancellationToken)
+    {
+        var taskId = Interlocked.Increment(ref _taskIdCounter);
+        var task = SendOneWayMessageInternalAsync(remote, request, taskId, cancellationToken);
+        _pendingTasks.TryAdd(taskId, task);
+    }
+
+    private async Task SendOneWayMessageInternalAsync(Endpoint remote, RapidRequest request, int taskId, CancellationToken cancellationToken)
     {
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         cts.CancelAfter(_options.GrpcTimeout);
@@ -81,6 +115,10 @@ internal sealed partial class GrpcClient : IMessagingClient
         catch
         {
             // Ignore.
+        }
+        finally
+        {
+            _pendingTasks.TryRemove(taskId, out _);
         }
 #pragma warning restore CA1031 // Do not catch general exception types
     }
@@ -101,6 +139,29 @@ internal sealed partial class GrpcClient : IMessagingClient
     {
         if (_disposed) return;
         _disposed = true;
+        _clients.Clear();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_disposed) return;
+        _disposed = true;
+
+        // Wait for all pending tasks to complete (with a timeout)
+        var pendingTasks = _pendingTasks.Values.ToArray();
+        if (pendingTasks.Length > 0)
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            try
+            {
+                await Task.WhenAll(pendingTasks).WaitAsync(cts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // Timeout waiting for pending tasks
+            }
+        }
+
         _clients.Clear();
     }
 }

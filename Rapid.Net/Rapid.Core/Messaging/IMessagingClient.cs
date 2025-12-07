@@ -5,7 +5,7 @@ namespace Rapid.Messaging;
 /// <summary>
 /// Interface for sending messages to remote nodes in the cluster.
 /// </summary>
-public interface IMessagingClient : IDisposable
+public interface IMessagingClient : IDisposable, IAsyncDisposable
 {
     /// <summary>
     /// Sends a message to a remote node without waiting for a response.

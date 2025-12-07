@@ -148,7 +148,7 @@ internal sealed class TestCluster : IAsyncDisposable
     }
 
     /// <summary>
-    /// Waits for a cluster to reach the expected size.
+    /// Waits for a cluster to reach at least the expected size.
     /// </summary>
     public static async Task WaitForClusterSizeAsync(IRapidCluster cluster, int expectedSize, TimeSpan timeout)
     {
@@ -160,6 +160,21 @@ internal sealed class TestCluster : IAsyncDisposable
             await Task.Delay(100).ConfigureAwait(false);
         }
         throw new TimeoutException($"Cluster did not reach expected size {expectedSize} within {timeout}");
+    }
+
+    /// <summary>
+    /// Waits for a cluster to reach exactly the expected size.
+    /// </summary>
+    public static async Task WaitForClusterSizeExactAsync(IRapidCluster cluster, int expectedSize, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            if (cluster.GetMembershipSize() == expectedSize)
+                return;
+            await Task.Delay(100).ConfigureAwait(false);
+        }
+        throw new TimeoutException($"Cluster did not reach expected size {expectedSize} within {timeout}. Current size: {cluster.GetMembershipSize()}");
     }
 
     public async ValueTask DisposeAsync()
