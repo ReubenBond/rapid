@@ -157,7 +157,7 @@ internal sealed class TestCluster : IAsyncDisposable
         {
             if (cluster.GetMembershipSize() >= expectedSize)
                 return;
-            await Task.Delay(100).ConfigureAwait(false);
+            await Task.Delay(10).ConfigureAwait(false);
         }
         throw new TimeoutException($"Cluster did not reach expected size {expectedSize} within {timeout}");
     }
@@ -172,7 +172,7 @@ internal sealed class TestCluster : IAsyncDisposable
         {
             if (cluster.GetMembershipSize() == expectedSize)
                 return;
-            await Task.Delay(100).ConfigureAwait(false);
+            await Task.Delay(10).ConfigureAwait(false);
         }
         throw new TimeoutException($"Cluster did not reach expected size {expectedSize} within {timeout}. Current size: {cluster.GetMembershipSize()}");
     }
