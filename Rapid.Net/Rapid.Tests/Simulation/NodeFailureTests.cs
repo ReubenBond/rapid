@@ -39,7 +39,7 @@ public sealed class NodeFailureTests : IAsyncLifetime
     #region Single Node Failure (FAIL-001 to FAIL-004)
 
     [Fact(Skip = "Requires failure detection timing - slow test")]
-    public async Task Fail001NodeCrashRemovesFromCluster()
+    public async Task NodeCrashRemovesFromCluster()
     {
         var seedNode = _harness.CreateSeedNode();
         var joiner = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
@@ -56,7 +56,7 @@ public sealed class NodeFailureTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Fail002CrashedNodeCannotReceiveMessages()
+    public async Task CrashedNodeCannotReceiveMessages()
     {
         var seedNode = _harness.CreateSeedNode();
         var joiner = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
@@ -69,7 +69,7 @@ public sealed class NodeFailureTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Fail003ClusterContinuesAfterSingleNodeCrash()
+    public async Task ClusterContinuesAfterSingleNodeCrash()
     {
         var seedNode = _harness.CreateSeedNode();
         var joiner1 = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
@@ -86,7 +86,7 @@ public sealed class NodeFailureTests : IAsyncLifetime
     }
 
     [Fact]
-    public void Fail004CrashDuringIdleStateHandledGracefully()
+    public void CrashDuringIdleStateHandledGracefully()
     {
         var seedNode = _harness.CreateSeedNode();
 
@@ -101,7 +101,7 @@ public sealed class NodeFailureTests : IAsyncLifetime
     #region Multiple Node Failures (FAIL-010 to FAIL-013)
 
     [Fact(Skip = "Requires failure detection timing - slow test")]
-    public async Task Fail010TwoNodeFailuresInFiveNodeCluster()
+    public async Task TwoNodeFailuresInFiveNodeCluster()
     {
         var nodes = await _harness.CreateClusterAsync(size: 5, cancellationToken: TestContext.Current.CancellationToken);
 
@@ -118,7 +118,7 @@ public sealed class NodeFailureTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Fail011SequentialFailuresHandled()
+    public async Task SequentialFailuresHandled()
     {
         var seedNode = _harness.CreateSeedNode();
         var joiner1 = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
@@ -135,7 +135,7 @@ public sealed class NodeFailureTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Fail012SimultaneousFailuresHandled()
+    public async Task SimultaneousFailuresHandled()
     {
         var seedNode = _harness.CreateSeedNode();
         var joiner1 = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
@@ -158,7 +158,7 @@ public sealed class NodeFailureTests : IAsyncLifetime
     #region Seed Node Failure (FAIL-020 to FAIL-022)
 
     [Fact]
-    public async Task Fail020SeedNodeCrashDoesNotAffectExistingCluster()
+    public async Task SeedNodeCrashDoesNotAffectExistingCluster()
     {
         var seedNode = _harness.CreateSeedNode();
         var joiner1 = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
@@ -176,7 +176,7 @@ public sealed class NodeFailureTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Fail021NewJoinsFailAfterSeedCrash()
+    public async Task NewJoinsFailAfterSeedCrash()
     {
         var seedNode = _harness.CreateSeedNode();
 
@@ -191,7 +191,7 @@ public sealed class NodeFailureTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Fail022AlternativeSeedAllowsJoin()
+    public async Task AlternativeSeedAllowsJoin()
     {
         var seedNode = _harness.CreateSeedNode();
         var joiner1 = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
@@ -212,7 +212,7 @@ public sealed class NodeFailureTests : IAsyncLifetime
     #region Failure During Operations (FAIL-030 to FAIL-033)
 
     [Fact(Skip = "Complex timing scenario - needs careful implementation")]
-    public async Task Fail030NodeCrashDuringJoinProtocol()
+    public async Task NodeCrashDuringJoinProtocol()
     {
         var seedNode = _harness.CreateSeedNode();
 
@@ -237,7 +237,7 @@ public sealed class NodeFailureTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Fail033NodeCrashDuringLeave()
+    public async Task NodeCrashDuringLeave()
     {
         var seedNode = _harness.CreateSeedNode();
         var joiner = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);

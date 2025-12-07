@@ -39,7 +39,7 @@ public sealed class MessageDeliveryTests : IAsyncLifetime
     #region Message Delays (MSG-001 to MSG-004)
 
     [Fact]
-    public void Msg001DelayConfigurationWorks()
+    public void DelayConfigurationWorks()
     {
         _harness.Network.EnableDelays = true;
         _harness.Network.BaseMessageDelay = TimeSpan.FromMilliseconds(100);
@@ -51,7 +51,7 @@ public sealed class MessageDeliveryTests : IAsyncLifetime
     }
 
     [Fact]
-    public void Msg002MessageDelayIsNonNegative()
+    public void MessageDelayIsNonNegative()
     {
         _harness.Network.EnableDelays = true;
         _harness.Network.BaseMessageDelay = TimeSpan.FromMilliseconds(10);
@@ -67,7 +67,7 @@ public sealed class MessageDeliveryTests : IAsyncLifetime
     }
 
     [Fact]
-    public void Msg003DisabledDelaysReturnZero()
+    public void DisabledDelaysReturnZero()
     {
         _harness.Network.EnableDelays = false;
         _harness.Network.BaseMessageDelay = TimeSpan.FromMilliseconds(100);
@@ -78,7 +78,7 @@ public sealed class MessageDeliveryTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Msg004ClusterFormsWithDelaysEnabled()
+    public async Task ClusterFormsWithDelaysEnabled()
     {
         _harness.Network.EnableDelays = true;
         _harness.Network.BaseMessageDelay = TimeSpan.FromMilliseconds(5);
@@ -96,14 +96,14 @@ public sealed class MessageDeliveryTests : IAsyncLifetime
     #region Message Loss (MSG-010 to MSG-014)
 
     [Fact]
-    public void Msg010MessageDropRateConfiguration()
+    public void MessageDropRateConfiguration()
     {
         _harness.Network.MessageDropRate = 0.05;
         Assert.Equal(0.05, _harness.Network.MessageDropRate);
     }
 
     [Fact]
-    public void Msg011ZeroDropRateNeverDrops()
+    public void ZeroDropRateNeverDrops()
     {
         _harness.Network.MessageDropRate = 0.0;
 
@@ -115,7 +115,7 @@ public sealed class MessageDeliveryTests : IAsyncLifetime
     }
 
     [Fact]
-    public void Msg012HighDropRateSometimesDrops()
+    public void HighDropRateSometimesDrops()
     {
         _harness.Network.MessageDropRate = 0.5; // 50% drop rate
 
@@ -141,7 +141,7 @@ public sealed class MessageDeliveryTests : IAsyncLifetime
     }
 
     [Fact]
-    public void Msg013FullDropRateAlwaysDrops()
+    public void FullDropRateAlwaysDrops()
     {
         _harness.Network.MessageDropRate = 1.0; // 100% drop rate
 
@@ -151,12 +151,79 @@ public sealed class MessageDeliveryTests : IAsyncLifetime
         }
     }
 
+    /// <summary>
+    /// Tests that the join protocol can handle message loss through retry mechanisms.
+    /// When messages are randomly dropped (30% rate), the join operation should still
+    /// eventually succeed by retrying failed communications, ensuring robustness
+    /// against unreliable networks.
+    /// </summary>
+    [Fact(Skip = "Requires timeout-based retry mechanism in join protocol")]
+    public async Task MessageLossDuringJoinRetried()
+    {
+        // Enable moderate message loss
+        _harness.Network.MessageDropRate = 0.3; // 30% loss
+
+        var seedNode = _harness.CreateSeedNode();
+        
+        // Join should eventually succeed despite message loss
+        // This requires the protocol to have retry logic
+        var joiner = await _harness.CreateJoinerNodeAsync(
+            seedNode, 
+            nodeId: 1, 
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        await _harness.WaitForConvergenceAsync(
+            expectedSize: 2, 
+            timeout: TimeSpan.FromSeconds(30), 
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.True(joiner.IsInitialized);
+        Assert.Equal(2, joiner.MembershipSize);
+    }
+
+    /// <summary>
+    /// Verifies that the consensus protocol can tolerate message loss during membership
+    /// changes. With 10% message drop rate, the consensus algorithm should still reach
+    /// agreement through retransmission and timeout mechanisms, ensuring the cluster
+    /// can grow even under adverse network conditions.
+    /// </summary>
+    [Fact(Skip = "Requires consensus retry mechanism")]
+    public async Task MessageLossDuringConsensusRetried()
+    {
+        // Enable low message loss
+        _harness.Network.MessageDropRate = 0.1; // 10% loss
+
+        var seedNode = _harness.CreateSeedNode();
+        var joiner1 = await _harness.CreateJoinerNodeAsync(
+            seedNode, 
+            nodeId: 1, 
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        await _harness.WaitForConvergenceAsync(
+            expectedSize: 2, 
+            timeout: TimeSpan.FromSeconds(10), 
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        // Add another node with message loss active
+        var joiner2 = await _harness.CreateJoinerNodeAsync(
+            seedNode, 
+            nodeId: 2, 
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        await _harness.WaitForConvergenceAsync(
+            expectedSize: 3, 
+            timeout: TimeSpan.FromSeconds(15), 
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.All(_harness.Nodes, n => Assert.Equal(3, n.MembershipSize));
+    }
+
     #endregion
 
     #region Message Ordering (MSG-020 to MSG-022)
 
     [Fact]
-    public void Msg020DeterministicMessageQueueOrdersByDeliveryTime()
+    public void DeterministicMessageQueueOrdersByDeliveryTime()
     {
         var queue = new DeterministicMessageQueue();
         var now = DateTimeOffset.UtcNow;
@@ -177,7 +244,7 @@ public sealed class MessageDeliveryTests : IAsyncLifetime
     }
 
     [Fact]
-    public void Msg021DeterministicMessageQueueTieBreaksConsistently()
+    public void DeterministicMessageQueueTieBreaksConsistently()
     {
         var queue1 = new DeterministicMessageQueue();
         var queue2 = new DeterministicMessageQueue();
@@ -202,7 +269,7 @@ public sealed class MessageDeliveryTests : IAsyncLifetime
     }
 
     [Fact]
-    public void Msg022DeterministicMessageQueueReportsCorrectCount()
+    public void DeterministicMessageQueueReportsCorrectCount()
     {
         var queue = new DeterministicMessageQueue();
         var now = DateTimeOffset.UtcNow;

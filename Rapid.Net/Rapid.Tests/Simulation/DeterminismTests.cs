@@ -39,7 +39,7 @@ public sealed class DeterminismTests : IAsyncLifetime
     #region Reproducibility Tests (DET-001 to DET-004)
 
     [Fact]
-    public async Task Det001SameSeedProducesSameRandomSequence()
+    public async Task SameSeedProducesSameRandomSequence()
     {
         await using var harness1 = new DeterministicSimulationHarness(seed: 11111);
         await using var harness2 = new DeterministicSimulationHarness(seed: 11111);
@@ -51,7 +51,7 @@ public sealed class DeterminismTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Det002DifferentSeedsProduceDifferentSequences()
+    public async Task DifferentSeedsProduceDifferentSequences()
     {
         await using var harness1 = new DeterministicSimulationHarness(seed: 11111);
         await using var harness2 = new DeterministicSimulationHarness(seed: 22222);
@@ -63,7 +63,7 @@ public sealed class DeterminismTests : IAsyncLifetime
     }
 
     [Fact]
-    public void Det003ForkedRandomIsDeterministic()
+    public void ForkedRandomIsDeterministic()
     {
         var random = _harness.Random;
 
@@ -80,7 +80,7 @@ public sealed class DeterminismTests : IAsyncLifetime
     }
 
     [Fact]
-    public void Det004TimeAdvancementIsDeterministic()
+    public void TimeAdvancementIsDeterministic()
     {
         var initialTime = _harness.TimeProvider.GetUtcNow();
 
@@ -95,7 +95,7 @@ public sealed class DeterminismTests : IAsyncLifetime
     #region Scheduler Tests (DET-010 to DET-013)
 
     [Fact]
-    public void Det010StepExecutesExactlyOneTask()
+    public void StepExecutesExactlyOneTask()
     {
         var executionCount = 0;
 
@@ -111,7 +111,7 @@ public sealed class DeterminismTests : IAsyncLifetime
     }
 
     [Fact]
-    public void Det011StepAllExecutesAllPendingTasks()
+    public void StepAllExecutesAllPendingTasks()
     {
         var executionCount = 0;
 
@@ -127,7 +127,7 @@ public sealed class DeterminismTests : IAsyncLifetime
     }
 
     [Fact]
-    public void Det012StepReturnsCorrectCount()
+    public void StepReturnsCorrectCount()
     {
         for (var i = 0; i < 3; i++)
         {
@@ -141,7 +141,7 @@ public sealed class DeterminismTests : IAsyncLifetime
     }
 
     [Fact]
-    public void Det013StepWithZeroTasksReturnsFalse()
+    public void StepWithZeroTasksReturnsFalse()
     {
         var executed = _harness.Step();
         Assert.False(executed);
@@ -152,7 +152,7 @@ public sealed class DeterminismTests : IAsyncLifetime
     #region Event Logging (DET-020 to DET-023)
 
     [Fact]
-    public void Det020EventsAreLoggedWithCorrectLogicalTime()
+    public void EventsAreLoggedWithCorrectLogicalTime()
     {
         var initialLogicalTime = _harness.LogicalTime;
 
@@ -166,7 +166,7 @@ public sealed class DeterminismTests : IAsyncLifetime
     }
 
     [Fact]
-    public void Det021EventsAreLoggedWithCorrectSimulatedTime()
+    public void EventsAreLoggedWithCorrectSimulatedTime()
     {
         var initialTime = _harness.TimeProvider.GetUtcNow();
 
@@ -180,7 +180,7 @@ public sealed class DeterminismTests : IAsyncLifetime
     }
 
     [Fact]
-    public void Det022EventLogIsImmutableCopy()
+    public void EventLogIsImmutableCopy()
     {
         _harness.CreateSeedNode();
 
@@ -192,7 +192,7 @@ public sealed class DeterminismTests : IAsyncLifetime
     }
 
     [Fact]
-    public void Det023HarnessCreatedEventIsFirstEvent()
+    public void HarnessCreatedEventIsFirstEvent()
     {
         var events = _harness.EventLog;
 
@@ -205,13 +205,13 @@ public sealed class DeterminismTests : IAsyncLifetime
     #region Logical Time Tests
 
     [Fact]
-    public void DetLogicalTimeStartsAtZero()
+    public void LogicalTimeStartsAtZero()
     {
         Assert.Equal(0, _harness.LogicalTime);
     }
 
     [Fact]
-    public void DetLogicalTimeIncrementsWithStep()
+    public void LogicalTimeIncrementsWithStep()
     {
         var task = new Task(() => { });
         task.Start(_harness.Scheduler);
@@ -222,7 +222,7 @@ public sealed class DeterminismTests : IAsyncLifetime
     }
 
     [Fact]
-    public void DetLogicalTimeIncrementsWithStepAll()
+    public void LogicalTimeIncrementsWithStepAll()
     {
         for (var i = 0; i < 5; i++)
         {
@@ -236,7 +236,7 @@ public sealed class DeterminismTests : IAsyncLifetime
     }
 
     [Fact]
-    public void DetLogicalTimeNotIncrementedWhenNoTasks()
+    public void LogicalTimeNotIncrementedWhenNoTasks()
     {
         var initialTime = _harness.LogicalTime;
 
@@ -250,7 +250,7 @@ public sealed class DeterminismTests : IAsyncLifetime
     #region RunUntil Tests
 
     [Fact]
-    public void DetRunUntilReturnsWhenConditionMet()
+    public void RunUntilReturnsWhenConditionMet()
     {
         var conditionMet = false;
         var task = new Task(() => conditionMet = true);
@@ -263,7 +263,7 @@ public sealed class DeterminismTests : IAsyncLifetime
     }
 
     [Fact]
-    public void DetRunUntilReturnsFalseWhenMaxStepsReached()
+    public void RunUntilReturnsFalseWhenMaxStepsReached()
     {
         var result = _harness.RunUntil(() => false, maxSteps: 10);
 
@@ -271,7 +271,7 @@ public sealed class DeterminismTests : IAsyncLifetime
     }
 
     [Fact]
-    public void DetRunUntilConvergedWorks()
+    public void RunUntilConvergedWorks()
     {
         _harness.CreateSeedNode();
 
@@ -282,7 +282,7 @@ public sealed class DeterminismTests : IAsyncLifetime
     }
 
     [Fact]
-    public void DetAdvanceTimeAndStepWorks()
+    public void AdvanceTimeAndStepWorks()
     {
         var initialTime = _harness.TimeProvider.GetUtcNow();
 
@@ -298,13 +298,13 @@ public sealed class DeterminismTests : IAsyncLifetime
     #region Seed Access Tests
 
     [Fact]
-    public void DetSeedIsAccessible()
+    public void SeedIsAccessible()
     {
         Assert.Equal(TestSeed, _harness.Seed);
     }
 
     [Fact]
-    public async Task DetRandomSeedHarnessLogsSeed()
+    public async Task RandomSeedHarnessLogsSeed()
     {
         // CreateWithRandomSeed should work without throwing
         await using var randomHarness = DeterministicSimulationHarness.CreateWithRandomSeed();

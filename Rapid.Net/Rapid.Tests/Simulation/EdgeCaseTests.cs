@@ -38,7 +38,7 @@ public sealed class EdgeCaseTests : IAsyncLifetime
     #region Boundary Conditions (EDGE-001 to EDGE-004)
 
     [Fact]
-    public void Edge001ZeroBatchingWindowWorks()
+    public void ZeroBatchingWindowWorks()
     {
         var options = new RapidProtocolOptions { BatchingWindow = TimeSpan.Zero };
         var seedNode = _harness.CreateSeedNode(options: options);
@@ -48,7 +48,7 @@ public sealed class EdgeCaseTests : IAsyncLifetime
     }
 
     [Fact]
-    public void Edge002CustomFailureDetectorIntervalWorks()
+    public void CustomFailureDetectorIntervalWorks()
     {
         var options = new RapidProtocolOptions
         {
@@ -60,7 +60,7 @@ public sealed class EdgeCaseTests : IAsyncLifetime
     }
 
     [Fact]
-    public void Edge003CustomRingCountWorks()
+    public void CustomRingCountWorks()
     {
         // K > H >= L >= 0 constraint: with RingCount=5, HighWaterMark must be < 5
         var options = new RapidProtocolOptions
@@ -75,7 +75,7 @@ public sealed class EdgeCaseTests : IAsyncLifetime
     }
 
     [Fact]
-    public void Edge004CustomHighLowWatermarkWorks()
+    public void CustomHighLowWatermarkWorks()
     {
         // K > H >= L >= 0 constraint: default RingCount=10
         var options = new RapidProtocolOptions
@@ -93,7 +93,7 @@ public sealed class EdgeCaseTests : IAsyncLifetime
     #region Timing Edge Cases (EDGE-010 to EDGE-013)
 
     [Fact]
-    public async Task Edge010BackToBackJoinsSucceed()
+    public async Task BackToBackJoinsSucceed()
     {
         var seedNode = _harness.CreateSeedNode();
 
@@ -106,7 +106,7 @@ public sealed class EdgeCaseTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Edge011LeaveImmediatelyAfterJoin()
+    public async Task LeaveImmediatelyAfterJoin()
     {
         var seedNode = _harness.CreateSeedNode();
         var joiner = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
@@ -116,7 +116,7 @@ public sealed class EdgeCaseTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Edge012CrashImmediatelyAfterJoin()
+    public async Task CrashImmediatelyAfterJoin()
     {
         var seedNode = _harness.CreateSeedNode();
         var joiner = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
@@ -132,7 +132,7 @@ public sealed class EdgeCaseTests : IAsyncLifetime
     #region Resource Edge Cases (EDGE-020 to EDGE-023)
 
     [Fact]
-    public void Edge020DoubleShutdownIsSafe()
+    public void DoubleShutdownIsSafe()
     {
         var seedNode = _harness.CreateSeedNode();
 
@@ -144,7 +144,7 @@ public sealed class EdgeCaseTests : IAsyncLifetime
     }
 
     [Fact]
-    public void Edge021DoubleDisposeIsSafe()
+    public void DoubleDisposeIsSafe()
     {
         var seedNode = _harness.CreateSeedNode();
 
@@ -159,7 +159,7 @@ public sealed class EdgeCaseTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Edge022CancellationDuringJoinHandled()
+    public async Task CancellationDuringJoinHandled()
     {
         var seedNode = _harness.CreateSeedNode();
 
@@ -178,7 +178,7 @@ public sealed class EdgeCaseTests : IAsyncLifetime
     #region Protocol Edge Cases (EDGE-030 to EDGE-033)
 
     [Fact]
-    public void Edge030UninitializedNodeThrowsOnHandleRequest()
+    public void UninitializedNodeThrowsOnHandleRequest()
     {
         var environment = _harness.Environment;
         var node = SimulationNode.Create(environment, nodeId: 99);
@@ -190,7 +190,7 @@ public sealed class EdgeCaseTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Edge031JoinToSelfFails()
+    public async Task JoinToSelfFails()
     {
         var seedNode = _harness.CreateSeedNode();
 
@@ -203,7 +203,7 @@ public sealed class EdgeCaseTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Edge032MultipleNodesWithDifferentOptions()
+    public async Task MultipleNodesWithDifferentOptions()
     {
         var options1 = new RapidProtocolOptions { RingCount = 3 };
         var options2 = new RapidProtocolOptions { RingCount = 3 };
@@ -218,10 +218,57 @@ public sealed class EdgeCaseTests : IAsyncLifetime
 
     #endregion
 
+    #region Maximum Cluster Size Tests (EDGE-002)
+
+    /// <summary>
+    /// Tests that the cluster can scale to a large size (20 nodes) and maintain
+    /// consistency across all members. Verifies that the consensus protocol and
+    /// membership management can handle larger cluster sizes without degradation.
+    /// This is marked as slow due to the time required for all nodes to converge.
+    /// </summary>
+    [Fact(Skip = "Slow test - large cluster formation")]
+    public async Task MaximumClusterSizeHandled()
+    {
+        // Test a large cluster (20 nodes)
+        var nodes = await _harness.CreateClusterAsync(
+            size: 20, 
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        await _harness.WaitForConvergenceAsync(
+            expectedSize: 20, 
+            timeout: TimeSpan.FromMinutes(2), 
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.All(nodes, n => Assert.Equal(20, n.MembershipSize));
+    }
+
+    /// <summary>
+    /// Tests cluster formation with 10 nodes to verify scalability beyond small
+    /// test clusters. This provides a balance between test execution time and
+    /// validating multi-node consensus behavior at a reasonable scale.
+    /// </summary>
+    [Fact]
+    public async Task TenNodeClusterFormation()
+    {
+        var nodes = await _harness.CreateClusterAsync(
+            size: 10, 
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        await _harness.WaitForConvergenceAsync(
+            expectedSize: 10, 
+            timeout: TimeSpan.FromSeconds(60), 
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(10, nodes.Count);
+        Assert.All(nodes, n => Assert.True(n.IsInitialized));
+    }
+
+    #endregion
+
     #region Random and Determinism Edge Cases
 
     [Fact]
-    public void EdgeDeterministicRandomForkProducesDifferentSequences()
+    public void DeterministicRandomForkProducesDifferentSequences()
     {
         var random = _harness.Random;
         var fork1 = random.Fork();
@@ -235,7 +282,7 @@ public sealed class EdgeCaseTests : IAsyncLifetime
     }
 
     [Fact]
-    public void EdgeDeterministicRandomChanceWorks()
+    public void DeterministicRandomChanceWorks()
     {
         var random = _harness.Random;
 
@@ -245,7 +292,7 @@ public sealed class EdgeCaseTests : IAsyncLifetime
     }
 
     [Fact]
-    public void EdgeDeterministicRandomChooseWorks()
+    public void DeterministicRandomChooseWorks()
     {
         var random = _harness.Random;
         var list = new List<int> { 1, 2, 3, 4, 5 };
@@ -256,7 +303,7 @@ public sealed class EdgeCaseTests : IAsyncLifetime
     }
 
     [Fact]
-    public void EdgeDeterministicRandomChooseThrowsOnEmpty()
+    public void DeterministicRandomChooseThrowsOnEmpty()
     {
         var random = _harness.Random;
         var emptyList = new List<int>();
@@ -265,7 +312,7 @@ public sealed class EdgeCaseTests : IAsyncLifetime
     }
 
     [Fact]
-    public void EdgeDeterministicRandomNextBytesWorks()
+    public void DeterministicRandomNextBytesWorks()
     {
         var random = _harness.Random;
         var bytes = new byte[16];
@@ -277,7 +324,7 @@ public sealed class EdgeCaseTests : IAsyncLifetime
     }
 
     [Fact]
-    public void EdgeDeterministicRandomNextTimeSpanWorks()
+    public void DeterministicRandomNextTimeSpanWorks()
     {
         var random = _harness.Random;
         var maxDuration = TimeSpan.FromSeconds(10);

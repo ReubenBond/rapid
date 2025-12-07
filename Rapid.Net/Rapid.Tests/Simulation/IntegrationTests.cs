@@ -39,7 +39,7 @@ public sealed class IntegrationTests : IAsyncLifetime
     #region Complete Cluster Lifecycle (INT-001 to INT-004)
 
     [Fact]
-    public async Task Int001FullClusterLifecycle()
+    public async Task FullClusterLifecycle()
     {
         // Create seed node
         var seedNode = _harness.CreateSeedNode();
@@ -66,7 +66,7 @@ public sealed class IntegrationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Int002ClusterScaleUpAndDown()
+    public async Task ClusterScaleUpAndDown()
     {
         // Start with seed
         var seedNode = _harness.CreateSeedNode();
@@ -87,7 +87,7 @@ public sealed class IntegrationTests : IAsyncLifetime
     }
 
     [Fact]
-    public void Int003EmergencyShutdownAllNodes()
+    public void EmergencyShutdownAllNodes()
     {
         // Create several seed nodes (each is independent)
         for (var i = 0; i < 5; i++)
@@ -108,7 +108,7 @@ public sealed class IntegrationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Int004JoinThroughDifferentSeeds()
+    public async Task JoinThroughDifferentSeeds()
     {
         // Create initial two-node cluster
         var seedNode = _harness.CreateSeedNode();
@@ -130,7 +130,7 @@ public sealed class IntegrationTests : IAsyncLifetime
     #region Recovery Scenarios (INT-010 to INT-013)
 
     [Fact]
-    public async Task Int010RecoveryFromPartitionedState()
+    public async Task RecoveryFromPartitionedState()
     {
         var seedNode = _harness.CreateSeedNode();
         var joiner = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
@@ -151,7 +151,7 @@ public sealed class IntegrationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Int011ClusterContinuesAfterSeedNodeRemoval()
+    public async Task ClusterContinuesAfterSeedNodeRemoval()
     {
         var seedNode = _harness.CreateSeedNode();
         var joiner1 = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
@@ -169,7 +169,7 @@ public sealed class IntegrationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Int012NewJoinsWorkAfterMembershipChange()
+    public async Task NewJoinsWorkAfterMembershipChange()
     {
         var seedNode = _harness.CreateSeedNode();
         var joiner1 = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
@@ -190,7 +190,7 @@ public sealed class IntegrationTests : IAsyncLifetime
     #region View Change Notification (INT-020 to INT-023)
 
     [Fact]
-    public void Int020ViewAccessorInitiallyHasView()
+    public void ViewAccessorInitiallyHasView()
     {
         var seedNode = _harness.CreateSeedNode();
 
@@ -200,7 +200,7 @@ public sealed class IntegrationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Int021ViewAccessorUpdatesOnJoin()
+    public async Task ViewAccessorUpdatesOnJoin()
     {
         var seedNode = _harness.CreateSeedNode();
         var initialConfigId = seedNode.ViewAccessor.CurrentView.ConfigurationId;
@@ -215,7 +215,7 @@ public sealed class IntegrationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Int022JoinerViewAccessorHasCorrectView()
+    public async Task JoinerViewAccessorHasCorrectView()
     {
         var seedNode = _harness.CreateSeedNode();
         var joiner = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
@@ -230,7 +230,7 @@ public sealed class IntegrationTests : IAsyncLifetime
     #region Network Simulation Integration
 
     [Fact]
-    public async Task IntNetworkSimulationBasics()
+    public async Task NetworkSimulationBasics()
     {
         var seedNode = _harness.CreateSeedNode();
         var joiner = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
@@ -251,7 +251,7 @@ public sealed class IntegrationTests : IAsyncLifetime
     }
 
     [Fact]
-    public void IntNetworkHealAllPartitionsWorks()
+    public void NetworkHealAllPartitionsWorks()
     {
         _harness.CreateSeedNode(0);
         _harness.CreateSeedNode(1);
@@ -277,7 +277,7 @@ public sealed class IntegrationTests : IAsyncLifetime
     #region Harness Utilities
 
     [Fact]
-    public void IntHarnessEnvironmentAccessible()
+    public void HarnessEnvironmentAccessible()
     {
         Assert.NotNull(_harness.Environment);
         Assert.NotNull(_harness.Random);
@@ -285,7 +285,7 @@ public sealed class IntegrationTests : IAsyncLifetime
     }
 
     [Fact]
-    public void IntHarnessNodesListIsUpToDate()
+    public void HarnessNodesListIsUpToDate()
     {
         Assert.Empty(_harness.Nodes);
 
@@ -301,7 +301,7 @@ public sealed class IntegrationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task IntWaitForConvergenceTimesOutCorrectly()
+    public async Task WaitForConvergenceTimesOutCorrectly()
     {
         var seedNode = _harness.CreateSeedNode();
 
@@ -313,7 +313,7 @@ public sealed class IntegrationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task IntWaitForNodeSizeTimesOutCorrectly()
+    public async Task WaitForNodeSizeTimesOutCorrectly()
     {
         var seedNode = _harness.CreateSeedNode();
 

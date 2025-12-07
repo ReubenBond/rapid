@@ -39,7 +39,7 @@ public sealed class ClusterBasicTests : IAsyncLifetime
     #region Single Node Operations (BASIC-001 to BASIC-005)
 
     [Fact]
-    public void Basic001SingleNodeClusterInitializes()
+    public void SingleNodeClusterInitializes()
     {
         _output.WriteLine("Creating seed node...");
         var seedNode = _harness.CreateSeedNode();
@@ -51,7 +51,7 @@ public sealed class ClusterBasicTests : IAsyncLifetime
     }
 
     [Fact]
-    public void Basic002SingleNodeHasValidConfigurationId()
+    public void SingleNodeHasValidConfigurationId()
     {
         var seedNode = _harness.CreateSeedNode();
 
@@ -60,7 +60,7 @@ public sealed class ClusterBasicTests : IAsyncLifetime
     }
 
     [Fact]
-    public void Basic003SingleNodeViewContainsSelf()
+    public void SingleNodeViewContainsSelf()
     {
         var seedNode = _harness.CreateSeedNode();
 
@@ -74,7 +74,7 @@ public sealed class ClusterBasicTests : IAsyncLifetime
     }
 
     [Fact]
-    public void Basic004SingleNodeCanShutdownGracefully()
+    public void SingleNodeCanShutdownGracefully()
     {
         var seedNode = _harness.CreateSeedNode();
         Assert.True(seedNode.IsInitialized);
@@ -84,7 +84,7 @@ public sealed class ClusterBasicTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Basic005SingleNodeCanLeaveCluster()
+    public async Task SingleNodeCanLeaveCluster()
     {
         var seedNode = _harness.CreateSeedNode();
         Assert.True(seedNode.IsInitialized);
@@ -98,7 +98,7 @@ public sealed class ClusterBasicTests : IAsyncLifetime
     #region Two-Node Cluster Operations (BASIC-010 to BASIC-015)
 
     [Fact]
-    public async Task Basic010TwoNodeClusterFormation()
+    public async Task TwoNodeClusterFormation()
     {
         var seedNode = _harness.CreateSeedNode();
         var joiner = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
@@ -109,7 +109,7 @@ public sealed class ClusterBasicTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Basic011JoinerSeesCorrectMembership()
+    public async Task JoinerSeesCorrectMembership()
     {
         var seedNode = _harness.CreateSeedNode();
         var joiner = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
@@ -125,7 +125,7 @@ public sealed class ClusterBasicTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Basic012SeedSeesJoinerAfterJoin()
+    public async Task SeedSeesJoinerAfterJoin()
     {
         var seedNode = _harness.CreateSeedNode();
         var joiner = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
@@ -137,7 +137,7 @@ public sealed class ClusterBasicTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Basic013BothNodesHaveSameConfigurationId()
+    public async Task BothNodesHaveSameConfigurationId()
     {
         var seedNode = _harness.CreateSeedNode();
         var joiner = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
@@ -149,7 +149,7 @@ public sealed class ClusterBasicTests : IAsyncLifetime
     }
 
     [Fact(Skip = "Requires failure detection to trigger removal - slow test")]
-    public async Task Basic014JoinerCanLeaveTwoNodeCluster()
+    public async Task JoinerCanLeaveTwoNodeCluster()
     {
         var seedNode = _harness.CreateSeedNode();
         var joiner = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
@@ -166,7 +166,7 @@ public sealed class ClusterBasicTests : IAsyncLifetime
     }
 
     [Fact(Skip = "Requires failure detection to trigger removal - slow test")]
-    public async Task Basic015SeedCanLeaveTwoNodeCluster()
+    public async Task SeedCanLeaveTwoNodeCluster()
     {
         var seedNode = _harness.CreateSeedNode();
         var joiner = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
@@ -187,7 +187,7 @@ public sealed class ClusterBasicTests : IAsyncLifetime
     #region Multi-Node Cluster Operations (BASIC-020 to BASIC-025)
 
     [Fact(Skip = "Slow test - consensus roundtrips with batching delays")]
-    public async Task Basic020ThreeNodeClusterFormation()
+    public async Task ThreeNodeClusterFormation()
     {
         var nodes = await _harness.CreateClusterAsync(size: 3, cancellationToken: TestContext.Current.CancellationToken);
 
@@ -197,7 +197,7 @@ public sealed class ClusterBasicTests : IAsyncLifetime
     }
 
     [Fact(Skip = "Slow test - consensus roundtrips with batching delays")]
-    public async Task Basic021FiveNodeClusterFormation()
+    public async Task FiveNodeClusterFormation()
     {
         var nodes = await _harness.CreateClusterAsync(size: 5, cancellationToken: TestContext.Current.CancellationToken);
 
@@ -207,7 +207,7 @@ public sealed class ClusterBasicTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Basic022SequentialJoinsSucceed()
+    public async Task SequentialJoinsSucceed()
     {
         var seedNode = _harness.CreateSeedNode();
 
@@ -221,7 +221,7 @@ public sealed class ClusterBasicTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Basic023AllNodesConvergeToSameMembership()
+    public async Task AllNodesConvergeToSameMembership()
     {
         var seedNode = _harness.CreateSeedNode();
         var joiner1 = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
@@ -236,7 +236,7 @@ public sealed class ClusterBasicTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Basic024ConfigurationIdIncrementsWithMembershipChanges()
+    public async Task ConfigurationIdIncrementsWithMembershipChanges()
     {
         var seedNode = _harness.CreateSeedNode();
         var initialConfigId = seedNode.CurrentView.ConfigurationId;
@@ -251,7 +251,7 @@ public sealed class ClusterBasicTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Basic025MembershipViewContainsAllNodes()
+    public async Task MembershipViewContainsAllNodes()
     {
         var seedNode = _harness.CreateSeedNode();
         var joiner1 = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
@@ -272,7 +272,7 @@ public sealed class ClusterBasicTests : IAsyncLifetime
     #region Metadata Operations (BASIC-030 to BASIC-032)
 
     [Fact]
-    public async Task Basic030NodeCanJoinWithMetadata()
+    public async Task NodeCanJoinWithMetadata()
     {
         var seedNode = _harness.CreateSeedNode();
 

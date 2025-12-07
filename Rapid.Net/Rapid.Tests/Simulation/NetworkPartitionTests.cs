@@ -39,7 +39,7 @@ public sealed class NetworkPartitionTests : IAsyncLifetime
     #region Simple Partitions (PART-001 to PART-004)
 
     [Fact]
-    public async Task Part001BidirectionalPartitionBlocksMessages()
+    public async Task BidirectionalPartitionBlocksMessages()
     {
         var seedNode = _harness.CreateSeedNode();
         var joiner = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
@@ -58,7 +58,7 @@ public sealed class NetworkPartitionTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Part002UnidirectionalPartitionAllowsOneWay()
+    public async Task UnidirectionalPartitionAllowsOneWay()
     {
         var seedNode = _harness.CreateSeedNode();
         var joiner = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
@@ -74,7 +74,7 @@ public sealed class NetworkPartitionTests : IAsyncLifetime
     }
 
     [Fact(Skip = "Requires failure detection timing - slow test")]
-    public async Task Part003PartitionedNodeEventuallyDetected()
+    public async Task PartitionedNodeEventuallyDetected()
     {
         var seedNode = _harness.CreateSeedNode();
         var joiner1 = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
@@ -92,7 +92,7 @@ public sealed class NetworkPartitionTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Part004PartitionHealRestoresConnectivity()
+    public async Task PartitionHealRestoresConnectivity()
     {
         var seedNode = _harness.CreateSeedNode();
         var joiner = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
@@ -117,7 +117,7 @@ public sealed class NetworkPartitionTests : IAsyncLifetime
     #region Isolation Scenarios (PART-010 to PART-013)
 
     [Fact]
-    public async Task Part010IsolatedNodeCannotCommunicate()
+    public async Task IsolatedNodeCannotCommunicate()
     {
         var seedNode = _harness.CreateSeedNode();
         var joiner1 = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
@@ -140,7 +140,7 @@ public sealed class NetworkPartitionTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Part012ReconnectedNodeRestoresConnectivity()
+    public async Task ReconnectedNodeRestoresConnectivity()
     {
         var seedNode = _harness.CreateSeedNode();
         var joiner = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
@@ -160,7 +160,7 @@ public sealed class NetworkPartitionTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Part013MultipleNodesIsolatedSimultaneously()
+    public async Task MultipleNodesIsolatedSimultaneously()
     {
         var seedNode = _harness.CreateSeedNode();
         var joiner1 = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
@@ -192,7 +192,7 @@ public sealed class NetworkPartitionTests : IAsyncLifetime
     #region Split-Brain Prevention (PART-020 to PART-023)
 
     [Fact]
-    public async Task Part020InvariantCheckerDetectsSplitBrainAttempt()
+    public async Task InvariantCheckerDetectsSplitBrainAttempt()
     {
         await using var deterministicHarness = new DeterministicSimulationHarness(seed: TestSeed);
         var checker = new InvariantChecker(deterministicHarness);
@@ -210,7 +210,7 @@ public sealed class NetworkPartitionTests : IAsyncLifetime
     #region Partition and Heal Sequences (PART-030 to PART-033)
 
     [Fact]
-    public async Task Part030PartitionThenHealBeforeDetection()
+    public async Task PartitionThenHealBeforeDetection()
     {
         var seedNode = _harness.CreateSeedNode();
         var joiner = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
@@ -229,7 +229,7 @@ public sealed class NetworkPartitionTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Part031RepeatedPartitionHealCycles()
+    public async Task RepeatedPartitionHealCycles()
     {
         var seedNode = _harness.CreateSeedNode();
         var joiner = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
@@ -249,7 +249,7 @@ public sealed class NetworkPartitionTests : IAsyncLifetime
     }
 
     [Fact]
-    public void Part032HealAllPartitionsWorks()
+    public void HealAllPartitionsWorks()
     {
         var seedNode = _harness.CreateSeedNode();
 

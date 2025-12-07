@@ -41,7 +41,7 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
     #region Membership Invariants (INV-001 to INV-004)
 
     [Fact]
-    public void Inv001MembershipViewNeverEmptyForInitializedNode()
+    public void MembershipViewNeverEmptyForInitializedNode()
     {
         var seedNode = _harness.CreateSeedNode();
 
@@ -50,7 +50,7 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
     }
 
     [Fact]
-    public void Inv002SelfAlwaysInMembershipView()
+    public void SelfAlwaysInMembershipView()
     {
         var seedNode = _harness.CreateSeedNode();
 
@@ -62,7 +62,7 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Inv003AllNodesInViewAreKnownNodes()
+    public async Task AllNodesInViewAreKnownNodes()
     {
         var seedNode = _harness.InnerHarness.CreateSeedNode();
         var joiner = await _harness.InnerHarness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
@@ -86,7 +86,7 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
     #region Safety Invariants (INV-010 to INV-013)
 
     [Fact]
-    public void Inv010NoSplitBrainWithSingleNode()
+    public void NoSplitBrainWithSingleNode()
     {
         _harness.CreateSeedNode();
 
@@ -97,7 +97,7 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Inv011NoSplitBrainWithTwoNodes()
+    public async Task NoSplitBrainWithTwoNodes()
     {
         var seedNode = _harness.InnerHarness.CreateSeedNode();
         var joiner = await _harness.InnerHarness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
@@ -111,7 +111,7 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
     }
 
     [Fact]
-    public void Inv012ConfigurationIdMonotonicityWithSingleNode()
+    public void ConfigurationIdMonotonicityWithSingleNode()
     {
         _harness.CreateSeedNode();
 
@@ -121,7 +121,7 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Inv013ConfigurationIdMonotonicityAfterJoin()
+    public async Task ConfigurationIdMonotonicityAfterJoin()
     {
         var seedNode = _harness.InnerHarness.CreateSeedNode();
         var initialConfigId = seedNode.CurrentView.ConfigurationId;
@@ -142,14 +142,14 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
     #region Membership Consistency (INV-012 specific tests)
 
     [Fact]
-    public void Inv012A_MembershipConsistencyWithNoNodes()
+    public void MembershipConsistencyWithNoNodes()
     {
         var result = _checker.CheckMembershipConsistency();
         Assert.True(result);
     }
 
     [Fact]
-    public void Inv012B_MembershipConsistencyWithSingleNode()
+    public void MembershipConsistencyWithSingleNode()
     {
         _harness.CreateSeedNode();
 
@@ -158,7 +158,7 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Inv012C_MembershipConsistencyWithConvergedCluster()
+    public async Task MembershipConsistencyWithConvergedCluster()
     {
         var seedNode = _harness.InnerHarness.CreateSeedNode();
         var joiner = await _harness.InnerHarness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
@@ -174,7 +174,7 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
     #region Check All Invariants
 
     [Fact]
-    public void InvCheckAllWithEmptyCluster()
+    public void CheckAllWithEmptyCluster()
     {
         var result = _checker.CheckAll();
         Assert.True(result);
@@ -182,7 +182,7 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
     }
 
     [Fact]
-    public void InvCheckAllWithSingleNode()
+    public void CheckAllWithSingleNode()
     {
         _harness.CreateSeedNode();
 
@@ -192,7 +192,7 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task InvCheckAllWithTwoNodes()
+    public async Task CheckAllWithTwoNodes()
     {
         var seedNode = _harness.InnerHarness.CreateSeedNode();
         var joiner = await _harness.InnerHarness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
@@ -206,10 +206,141 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
 
     #endregion
 
+    #region Liveness Invariants (INV-020 to INV-023)
+
+    /// <summary>
+    /// Verifies that the liveness checker can detect when the system has pending tasks
+    /// and is capable of making progress. This tests the eventual progress guarantee
+    /// that the cluster should maintain under normal operation.
+    /// </summary>
+    [Fact]
+    public void EventualProgressGuaranteeWithPendingTasks()
+    {
+        // Create a task that will allow progress
+        var task = new Task(() => { });
+        task.Start(_harness.Scheduler);
+
+        // CheckLiveness should succeed when there are tasks to execute
+        var result = _checker.CheckLiveness(maxSteps: 100);
+        
+        Assert.True(result);
+        Assert.False(_checker.HasViolations);
+    }
+
+    /// <summary>
+    /// Verifies that the liveness checker correctly identifies deadlock scenarios
+    /// where no progress can be made. Tests the negative case where the system
+    /// has no pending tasks and no scheduled timers, indicating a potential deadlock.
+    /// </summary>
+    [Fact]
+    public void EventualProgressDetectsDeadlock()
+    {
+        // With no pending tasks and no time-based triggers, liveness check should fail
+        var result = _checker.CheckLiveness(maxSteps: 100);
+        
+        // Should fail since no progress can be made
+        Assert.False(result);
+        Assert.True(_checker.HasViolations);
+    }
+
+    /// <summary>
+    /// Tests the liveness property that join operations eventually complete.
+    /// Verifies that a node attempting to join the cluster will finish the join
+    /// protocol within a reasonable timeout, ensuring the system doesn't hang.
+    /// </summary>
+    [Fact(Skip = "Requires timeout-based join completion verification")]
+    public async Task JoinEventuallyCompletes()
+    {
+        var seedNode = _harness.InnerHarness.CreateSeedNode();
+        
+        // Start a join operation
+        var joinTask = _harness.InnerHarness.CreateJoinerNodeAsync(
+            seedNode, 
+            nodeId: 1, 
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        // Join should eventually complete (this is a liveness property)
+        var completed = await Task.WhenAny(joinTask, Task.Delay(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
+        
+        Assert.Equal(joinTask, completed);
+        var joiner = await joinTask;
+        Assert.True(joiner.IsInitialized);
+    }
+
+    /// <summary>
+    /// Tests the liveness property that node failures are eventually detected by the cluster.
+    /// When a node crashes, the failure detection mechanism should identify it within the
+    /// configured timeout period and trigger membership updates.
+    /// </summary>
+    [Fact(Skip = "Requires failure detection monitoring")]
+    public async Task FailureDetectionEventuallyOccurs()
+    {
+        var seedNode = _harness.InnerHarness.CreateSeedNode();
+        var joiner = await _harness.InnerHarness.CreateJoinerNodeAsync(
+            seedNode, 
+            nodeId: 1, 
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        await _harness.InnerHarness.WaitForConvergenceAsync(
+            expectedSize: 2, 
+            timeout: TimeSpan.FromSeconds(5), 
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        // Crash the joiner
+        _harness.InnerHarness.CrashNode(joiner);
+
+        // Failure should eventually be detected
+        // This requires waiting for failure detection interval + processing time
+        await _harness.InnerHarness.WaitForNodeSizeAsync(
+            seedNode, 
+            expectedSize: 1, 
+            timeout: TimeSpan.FromSeconds(30), 
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, seedNode.MembershipSize);
+    }
+
+    /// <summary>
+    /// Verifies that after a network partition is healed, the cluster eventually reconverges
+    /// to a consistent state. This tests the self-healing property where temporary network
+    /// issues don't permanently damage the cluster's ability to reach consensus.
+    /// </summary>
+    [Fact(Skip = "Requires partition heal verification")]
+    public async Task PartitionHealEventuallyConverges()
+    {
+        var seedNode = _harness.InnerHarness.CreateSeedNode();
+        var joiner = await _harness.InnerHarness.CreateJoinerNodeAsync(
+            seedNode, 
+            nodeId: 1, 
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        await _harness.InnerHarness.WaitForConvergenceAsync(
+            expectedSize: 2, 
+            timeout: TimeSpan.FromSeconds(5), 
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        // Create partition
+        _harness.InnerHarness.PartitionNodes(seedNode, joiner);
+
+        // Heal partition
+        _harness.InnerHarness.HealPartition(seedNode, joiner);
+
+        // Nodes should eventually re-converge
+        await _harness.InnerHarness.WaitForConvergenceAsync(
+            expectedSize: 2, 
+            timeout: TimeSpan.FromSeconds(10), 
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, seedNode.MembershipSize);
+        Assert.Equal(2, joiner.MembershipSize);
+    }
+
+    #endregion
+
     #region Violation Management
 
     [Fact]
-    public void InvViolationsClearWorks()
+    public void ViolationsClearWorks()
     {
         // Initially no violations
         Assert.False(_checker.HasViolations);
@@ -223,7 +354,7 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
     }
 
     [Fact]
-    public void InvViolationsListIsImmutableCopy()
+    public void ViolationsListIsImmutableCopy()
     {
         var violations1 = _checker.Violations;
         var violations2 = _checker.Violations;
