@@ -9,7 +9,6 @@ namespace Rapid.Tests.Simulation;
 /// </summary>
 internal sealed class SimulationTestHarness : IAsyncDisposable
 {
-    private readonly SimulationEnvironment _environment;
     private readonly List<SimulationNode> _nodes = [];
 
     /// <summary>
@@ -20,7 +19,7 @@ internal sealed class SimulationTestHarness : IAsyncDisposable
     /// <param name="useFakeTime">Whether to use fake time provider for deterministic time control. Default is false.</param>
     public SimulationTestHarness(int seed, ILoggerFactory? loggerFactory = null, bool useFakeTime = false)
     {
-        _environment = new SimulationEnvironment(seed, loggerFactory, useFakeTime);
+        Environment = new SimulationEnvironment(seed, loggerFactory, useFakeTime);
     }
 
     /// <summary>
@@ -36,22 +35,22 @@ internal sealed class SimulationTestHarness : IAsyncDisposable
     /// <summary>
     /// Gets the simulation environment.
     /// </summary>
-    public SimulationEnvironment Environment => _environment;
+    public SimulationEnvironment Environment { get; }
 
     /// <summary>
     /// Gets the deterministic random number generator.
     /// </summary>
-    public DeterministicRandom Random => _environment.Random;
+    public DeterministicRandom Random => Environment.Random;
 
     /// <summary>
     /// Gets the controllable time provider. Only available when useFakeTime is true.
     /// </summary>
-    public FakeTimeProvider? FakeTimeProvider => _environment.FakeTimeProvider;
+    public FakeTimeProvider? FakeTimeProvider => Environment.FakeTimeProvider;
 
     /// <summary>
     /// Gets the simulated network.
     /// </summary>
-    public SimulationNetwork Network => _environment.Network;
+    public SimulationNetwork Network => Environment.Network;
 
     /// <summary>
     /// Gets all nodes in the simulation.
@@ -61,7 +60,7 @@ internal sealed class SimulationTestHarness : IAsyncDisposable
     /// <summary>
     /// Gets the seed used to initialize this harness.
     /// </summary>
-    public int Seed => _environment.Seed;
+    public int Seed => Environment.Seed;
 
     /// <summary>
     /// Creates and starts a new seed node.
@@ -75,7 +74,7 @@ internal sealed class SimulationTestHarness : IAsyncDisposable
         opts.BatchingWindow = TimeSpan.Zero;
         opts.FailureDetectorInterval = TimeSpan.FromSeconds(1);
 
-        var node = SimulationNode.Create(_environment, nodeId, opts, _environment.LoggerFactory);
+        var node = SimulationNode.Create(Environment, nodeId, opts, Environment.LoggerFactory);
         node.StartCluster();
         _nodes.Add(node);
         return node;
@@ -95,7 +94,7 @@ internal sealed class SimulationTestHarness : IAsyncDisposable
         opts.BatchingWindow = TimeSpan.Zero;
         opts.FailureDetectorInterval = TimeSpan.FromSeconds(1);
 
-        var node = SimulationNode.Create(_environment, nodeId, opts, _environment.LoggerFactory);
+        var node = SimulationNode.Create(Environment, nodeId, opts, Environment.LoggerFactory);
         await node.JoinClusterAsync(seedNode, cancellationToken: cancellationToken).ConfigureAwait(true);
         _nodes.Add(node);
         return node;
@@ -137,7 +136,7 @@ internal sealed class SimulationTestHarness : IAsyncDisposable
     /// </summary>
     public void AdvanceTime(TimeSpan duration)
     {
-        _environment.AdvanceTime(duration);
+        Environment.AdvanceTime(duration);
     }
 
     /// <summary>
@@ -166,9 +165,9 @@ internal sealed class SimulationTestHarness : IAsyncDisposable
             }
 
             // Advance time (for fake time) or delay (for real time)
-            if (_environment.UseFakeTime)
+            if (Environment.UseFakeTime)
             {
-                _environment.AdvanceTime(step);
+                Environment.AdvanceTime(step);
             }
             else
             {
@@ -204,9 +203,9 @@ internal sealed class SimulationTestHarness : IAsyncDisposable
                 return;
             }
 
-            if (_environment.UseFakeTime)
+            if (Environment.UseFakeTime)
             {
-                _environment.AdvanceTime(step);
+                Environment.AdvanceTime(step);
             }
             else
             {
@@ -246,7 +245,7 @@ internal sealed class SimulationTestHarness : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(node);
         var addr = RapidUtils.Loggable(node.Address);
-        _environment.Network.IsolateNode(addr);
+        Environment.Network.IsolateNode(addr);
     }
 
     /// <summary>
@@ -256,7 +255,7 @@ internal sealed class SimulationTestHarness : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(node);
         var addr = RapidUtils.Loggable(node.Address);
-        _environment.Network.ReconnectNode(addr);
+        Environment.Network.ReconnectNode(addr);
     }
 
     /// <summary>
@@ -268,7 +267,7 @@ internal sealed class SimulationTestHarness : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(node2);
         var addr1 = RapidUtils.Loggable(node1.Address);
         var addr2 = RapidUtils.Loggable(node2.Address);
-        _environment.Network.CreateBidirectionalPartition(addr1, addr2);
+        Environment.Network.CreateBidirectionalPartition(addr1, addr2);
     }
 
     /// <summary>
@@ -280,7 +279,7 @@ internal sealed class SimulationTestHarness : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(node2);
         var addr1 = RapidUtils.Loggable(node1.Address);
         var addr2 = RapidUtils.Loggable(node2.Address);
-        _environment.Network.HealBidirectionalPartition(addr1, addr2);
+        Environment.Network.HealBidirectionalPartition(addr1, addr2);
     }
 
     public async ValueTask DisposeAsync()
@@ -291,7 +290,7 @@ internal sealed class SimulationTestHarness : IAsyncDisposable
             node.Dispose();
         }
         _nodes.Clear();
-        _environment.Dispose();
+        Environment.Dispose();
         await Task.CompletedTask.ConfigureAwait(true);
     }
 }

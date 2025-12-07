@@ -17,7 +17,6 @@ internal sealed partial class RapidClusterService : BackgroundService
     private readonly IMembershipServiceFactory _membershipServiceFactory;
     private readonly ILogger<RapidClusterService> _logger;
     private readonly SharedResources _sharedResources;
-    private MembershipService? _membershipService;
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Starting Rapid cluster service on {ListenAddress}")]
     private partial void LogStarting(string ListenAddress);
@@ -45,7 +44,7 @@ internal sealed partial class RapidClusterService : BackgroundService
         _logger = loggerFactory.CreateLogger<RapidClusterService>();
     }
 
-    public MembershipService? MembershipService => _membershipService;
+    public MembershipService? MembershipService { get; private set; }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -86,7 +85,7 @@ internal sealed partial class RapidClusterService : BackgroundService
     {
         var currentIdentifier = RapidUtils.NodeIdFromUuid(_sharedResources.NewGuid());
 
-        _membershipService = _membershipServiceFactory.CreateForNewCluster(
+        MembershipService = _membershipServiceFactory.CreateForNewCluster(
             _options.ListenAddress,
             currentIdentifier,
             _options.Metadata,
@@ -169,7 +168,7 @@ internal sealed partial class RapidClusterService : BackgroundService
             metadataMap[endpoint] = metadata;
         }
 
-        _membershipService = _membershipServiceFactory.CreateForJoin(
+        MembershipService = _membershipServiceFactory.CreateForJoin(
             _options.ListenAddress,
             successfulResponse.Identifiers,
             successfulResponse.Endpoints,
@@ -180,7 +179,7 @@ internal sealed partial class RapidClusterService : BackgroundService
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
         LogStopping();
-        _membershipService?.Shutdown();
+        MembershipService?.Shutdown();
 
         // Wait for background tasks to complete gracefully
         try
@@ -199,7 +198,7 @@ internal sealed partial class RapidClusterService : BackgroundService
 
     public override void Dispose()
     {
-        _membershipService?.Dispose();
+        MembershipService?.Dispose();
         _sharedResources.Dispose();
         base.Dispose();
     }

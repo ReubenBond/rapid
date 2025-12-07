@@ -14,7 +14,6 @@ internal sealed class SimulationNode : IDisposable
 {
     private readonly SimulationEnvironment _environment;
     private readonly SharedResources _sharedResources;
-    private readonly InMemoryMessagingClient _messagingClient;
     private readonly SimulationFailureDetectorFactory _failureDetectorFactory;
     private readonly IFastPaxosFactory _fastPaxosFactory;
     private readonly MembershipViewAccessor _viewAccessor;
@@ -56,7 +55,7 @@ internal sealed class SimulationNode : IDisposable
     /// <summary>
     /// Gets the messaging client for testing purposes.
     /// </summary>
-    internal InMemoryMessagingClient MessagingClient => _messagingClient;
+    internal InMemoryMessagingClient MessagingClient { get; }
 
     private SimulationNode(
         SimulationEnvironment environment,
@@ -80,7 +79,7 @@ internal sealed class SimulationNode : IDisposable
         _sharedResources = new SharedResources(logger, environment.TimeProvider);
 
         // Create in-memory messaging client
-        _messagingClient = new InMemoryMessagingClient(environment, address);
+        MessagingClient = new InMemoryMessagingClient(environment, address);
 
         // Create view accessor
         _viewAccessor = new MembershipViewAccessor();
@@ -88,13 +87,13 @@ internal sealed class SimulationNode : IDisposable
         // Create failure detector factory
         _failureDetectorFactory = new SimulationFailureDetectorFactory(
             address,
-            _messagingClient,
+            MessagingClient,
             _sharedResources,
             logger);
 
         // Create fast paxos factory
         _fastPaxosFactory = new FastPaxosFactory(
-            _messagingClient,
+            MessagingClient,
             _protocolOptions,
             _sharedResources,
             logger ?? Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance);
@@ -147,7 +146,7 @@ internal sealed class SimulationNode : IDisposable
         var membershipView = new MembershipViewBuilder(opts.RingCount, [nodeId], [Address]).Build();
         var cutDetector = new MultiNodeCutDetector(opts.RingCount, opts.HighWaterMark, opts.LowWaterMark);
         var metadataMap = new Dictionary<Endpoint, Metadata> { { Address, actualMetadata } };
-        var broadcaster = new UnicastToAllBroadcaster(_messagingClient);
+        var broadcaster = new UnicastToAllBroadcaster(MessagingClient);
         Dictionary<ClusterEvents, List<Action<ClusterStatusChange>>> subscriptions = [];
 
         _membershipService = new MembershipService(
@@ -156,7 +155,7 @@ internal sealed class SimulationNode : IDisposable
             membershipView,
             _sharedResources,
             _protocolOptions,
-            _messagingClient,
+            MessagingClient,
             broadcaster,
             _failureDetectorFactory,
             _fastPaxosFactory,
@@ -188,7 +187,7 @@ internal sealed class SimulationNode : IDisposable
             NodeId = nodeId
         };
 
-        var preJoinResponse = await _messagingClient.SendMessageAsync(
+        var preJoinResponse = await MessagingClient.SendMessageAsync(
             seedNode.Address,
             RapidUtils.ToRapidRequest(preJoinMessage),
             cancellationToken).ConfigureAwait(true);
@@ -230,7 +229,7 @@ internal sealed class SimulationNode : IDisposable
             };
             joinMessageForObserver.RingNumber.AddRange(entry.Value);
 
-            return await _messagingClient.SendMessageAsync(
+            return await MessagingClient.SendMessageAsync(
                 entry.Key,
                 RapidUtils.ToRapidRequest(joinMessageForObserver),
                 cancellationToken).ConfigureAwait(true);
@@ -259,7 +258,7 @@ internal sealed class SimulationNode : IDisposable
             successfulResponse.Identifiers.ToList(),
             successfulResponse.Endpoints.ToList()).Build();
         var cutDetector = new MultiNodeCutDetector(opts.RingCount, opts.HighWaterMark, opts.LowWaterMark);
-        var broadcaster = new UnicastToAllBroadcaster(_messagingClient);
+        var broadcaster = new UnicastToAllBroadcaster(MessagingClient);
         Dictionary<ClusterEvents, List<Action<ClusterStatusChange>>> subscriptions = [];
 
         _membershipService = new MembershipService(
@@ -268,7 +267,7 @@ internal sealed class SimulationNode : IDisposable
             membershipView,
             _sharedResources,
             _protocolOptions,
-            _messagingClient,
+            MessagingClient,
             broadcaster,
             _failureDetectorFactory,
             _fastPaxosFactory,
@@ -336,7 +335,7 @@ internal sealed class SimulationNode : IDisposable
         _membershipService?.Shutdown();
         _membershipService?.Dispose();
         _sharedResources.Dispose();
-        _messagingClient.Dispose();
+        MessagingClient.Dispose();
         _environment.UnregisterNode(this);
     }
 }

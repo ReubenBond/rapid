@@ -10,14 +10,11 @@ namespace Rapid.Tests.Simulation;
 /// </summary>
 internal sealed class DeterministicSimulationHarness : IAsyncDisposable
 {
-    private readonly SimulationTestHarness _innerHarness;
-    private readonly DeterministicTaskScheduler _scheduler;
     private readonly DeterministicSynchronizationContext _syncContext;
     private readonly SynchronizationContext? _previousSyncContext;
     private readonly List<SimulationEvent> _eventLog = [];
     private readonly Lock _eventLogLock = new();
     private readonly ITestOutputHelper? _testOutput;
-    private long _logicalTime;
 
     /// <summary>
     /// Creates a new deterministic simulation harness.
@@ -31,9 +28,9 @@ internal sealed class DeterministicSimulationHarness : IAsyncDisposable
         ITestOutputHelper? testOutput = null)
     {
         _testOutput = testOutput;
-        _innerHarness = new SimulationTestHarness(seed, loggerFactory, useFakeTime: true);
-        _scheduler = new DeterministicTaskScheduler(_innerHarness.FakeTimeProvider);
-        _syncContext = new DeterministicSynchronizationContext(_scheduler);
+        InnerHarness = new SimulationTestHarness(seed, loggerFactory, useFakeTime: true);
+        Scheduler = new DeterministicTaskScheduler(InnerHarness.FakeTimeProvider);
+        _syncContext = new DeterministicSynchronizationContext(Scheduler);
         _previousSyncContext = _syncContext.Install();
 
         LogEvent(SimulationEventType.HarnessCreated, $"Seed: {seed}");
@@ -54,42 +51,42 @@ internal sealed class DeterministicSimulationHarness : IAsyncDisposable
     /// <summary>
     /// Gets the underlying simulation harness.
     /// </summary>
-    public SimulationTestHarness InnerHarness => _innerHarness;
+    public SimulationTestHarness InnerHarness { get; }
 
     /// <summary>
     /// Gets the deterministic task scheduler.
     /// </summary>
-    public DeterministicTaskScheduler Scheduler => _scheduler;
+    public DeterministicTaskScheduler Scheduler { get; }
 
     /// <summary>
     /// Gets the fake time provider.
     /// </summary>
-    public FakeTimeProvider TimeProvider => _innerHarness.FakeTimeProvider!;
+    public FakeTimeProvider TimeProvider => InnerHarness.FakeTimeProvider!;
 
     /// <summary>
     /// Gets the deterministic random instance.
     /// </summary>
-    public DeterministicRandom Random => _innerHarness.Random;
+    public DeterministicRandom Random => InnerHarness.Random;
 
     /// <summary>
     /// Gets the simulation network.
     /// </summary>
-    public SimulationNetwork Network => _innerHarness.Network;
+    public SimulationNetwork Network => InnerHarness.Network;
 
     /// <summary>
     /// Gets all nodes in the simulation.
     /// </summary>
-    public IReadOnlyList<SimulationNode> Nodes => _innerHarness.Nodes;
+    public IReadOnlyList<SimulationNode> Nodes => InnerHarness.Nodes;
 
     /// <summary>
     /// Gets the seed used for this harness.
     /// </summary>
-    public int Seed => _innerHarness.Seed;
+    public int Seed => InnerHarness.Seed;
 
     /// <summary>
     /// Gets the current logical time (number of steps executed).
     /// </summary>
-    public long LogicalTime => _logicalTime;
+    public long LogicalTime { get; private set; }
 
     /// <summary>
     /// Gets a copy of the event log.
@@ -110,7 +107,7 @@ internal sealed class DeterministicSimulationHarness : IAsyncDisposable
     /// </summary>
     public SimulationNode CreateSeedNode(int nodeId = 0, RapidProtocolOptions? options = null)
     {
-        var node = _innerHarness.CreateSeedNode(nodeId, options);
+        var node = InnerHarness.CreateSeedNode(nodeId, options);
         LogEvent(SimulationEventType.NodeCreated, $"Seed node {nodeId} created");
         return node;
     }
@@ -126,7 +123,7 @@ internal sealed class DeterministicSimulationHarness : IAsyncDisposable
         CancellationToken cancellationToken = default)
     {
         LogEvent(SimulationEventType.NodeJoining, $"Node {nodeId} joining via seed");
-        return _innerHarness.CreateJoinerNodeAsync(seedNode, nodeId, options, cancellationToken);
+        return InnerHarness.CreateJoinerNodeAsync(seedNode, nodeId, options, cancellationToken);
     }
 
     /// <summary>
@@ -135,10 +132,10 @@ internal sealed class DeterministicSimulationHarness : IAsyncDisposable
     /// <returns>True if a task was executed.</returns>
     public bool Step()
     {
-        var result = _scheduler.TryExecuteOne();
+        var result = Scheduler.TryExecuteOne();
         if (result)
         {
-            _logicalTime++;
+            LogicalTime++;
         }
         return result;
     }
@@ -150,8 +147,8 @@ internal sealed class DeterministicSimulationHarness : IAsyncDisposable
     /// <returns>The number of tasks actually executed.</returns>
     public int Step(int count)
     {
-        var executed = _scheduler.Step(count);
-        _logicalTime += executed;
+        var executed = Scheduler.Step(count);
+        LogicalTime += executed;
         return executed;
     }
 
@@ -161,8 +158,8 @@ internal sealed class DeterministicSimulationHarness : IAsyncDisposable
     /// <returns>The number of tasks executed.</returns>
     public int StepAll()
     {
-        var executed = _scheduler.StepAll();
-        _logicalTime += executed;
+        var executed = Scheduler.StepAll();
+        LogicalTime += executed;
         return executed;
     }
 
@@ -191,9 +188,9 @@ internal sealed class DeterministicSimulationHarness : IAsyncDisposable
             }
 
             // Try to execute pending tasks
-            if (_scheduler.TryExecuteOne())
+            if (Scheduler.TryExecuteOne())
             {
-                _logicalTime++;
+                LogicalTime++;
             }
             else
             {
@@ -236,7 +233,7 @@ internal sealed class DeterministicSimulationHarness : IAsyncDisposable
         var max = maxSkip ?? TimeSpan.FromHours(1);
 
         // If there are pending tasks, don't skip
-        if (_scheduler.HasPendingTasks)
+        if (Scheduler.HasPendingTasks)
         {
             return false;
         }
@@ -245,13 +242,13 @@ internal sealed class DeterministicSimulationHarness : IAsyncDisposable
         var elapsed = TimeSpan.Zero;
         var increment = TimeSpan.FromMilliseconds(1);
 
-        while (elapsed < max && !_scheduler.HasPendingTasks)
+        while (elapsed < max && !Scheduler.HasPendingTasks)
         {
             TimeProvider.Advance(increment);
             elapsed += increment;
         }
 
-        if (_scheduler.HasPendingTasks)
+        if (Scheduler.HasPendingTasks)
         {
             LogEvent(SimulationEventType.FastForward, $"Fast-forwarded {elapsed}");
             return true;
@@ -265,7 +262,7 @@ internal sealed class DeterministicSimulationHarness : IAsyncDisposable
     /// </summary>
     public void PartitionNodes(SimulationNode node1, SimulationNode node2)
     {
-        _innerHarness.PartitionNodes(node1, node2);
+        InnerHarness.PartitionNodes(node1, node2);
         LogEvent(SimulationEventType.PartitionCreated, $"Partition between nodes");
     }
 
@@ -274,7 +271,7 @@ internal sealed class DeterministicSimulationHarness : IAsyncDisposable
     /// </summary>
     public void HealPartition(SimulationNode node1, SimulationNode node2)
     {
-        _innerHarness.HealPartition(node1, node2);
+        InnerHarness.HealPartition(node1, node2);
         LogEvent(SimulationEventType.PartitionHealed, $"Partition healed between nodes");
     }
 
@@ -283,7 +280,7 @@ internal sealed class DeterministicSimulationHarness : IAsyncDisposable
     /// </summary>
     public void IsolateNode(SimulationNode node)
     {
-        _innerHarness.IsolateNode(node);
+        InnerHarness.IsolateNode(node);
         LogEvent(SimulationEventType.NodeIsolated, $"Node isolated");
     }
 
@@ -292,7 +289,7 @@ internal sealed class DeterministicSimulationHarness : IAsyncDisposable
     /// </summary>
     public void ReconnectNode(SimulationNode node)
     {
-        _innerHarness.ReconnectNode(node);
+        InnerHarness.ReconnectNode(node);
         LogEvent(SimulationEventType.NodeReconnected, $"Node reconnected");
     }
 
@@ -301,7 +298,7 @@ internal sealed class DeterministicSimulationHarness : IAsyncDisposable
     /// </summary>
     public void CrashNode(SimulationNode node)
     {
-        _innerHarness.CrashNode(node);
+        InnerHarness.CrashNode(node);
         LogEvent(SimulationEventType.NodeCrashed, $"Node crashed");
     }
 
@@ -311,7 +308,7 @@ internal sealed class DeterministicSimulationHarness : IAsyncDisposable
     public Task RemoveNodeGracefullyAsync(SimulationNode node)
     {
         LogEvent(SimulationEventType.NodeLeaving, $"Node leaving gracefully");
-        return _innerHarness.RemoveNodeGracefullyAsync(node);
+        return InnerHarness.RemoveNodeGracefullyAsync(node);
     }
 
     /// <summary>
@@ -343,7 +340,7 @@ internal sealed class DeterministicSimulationHarness : IAsyncDisposable
     private void LogEvent(SimulationEventType type, string description)
     {
         var evt = new SimulationEvent(
-            _logicalTime,
+            LogicalTime,
             TimeProvider.GetUtcNow(),
             type,
             description);
@@ -360,8 +357,8 @@ internal sealed class DeterministicSimulationHarness : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         DeterministicSynchronizationContext.Restore(_previousSyncContext);
-        _scheduler.Clear();
-        await _innerHarness.DisposeAsync().ConfigureAwait(false);
+        Scheduler.Clear();
+        await InnerHarness.DisposeAsync().ConfigureAwait(false);
     }
 }
 

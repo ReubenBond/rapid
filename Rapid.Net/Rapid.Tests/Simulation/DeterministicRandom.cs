@@ -12,7 +12,6 @@ namespace Rapid.Tests.Simulation;
 internal sealed class DeterministicRandom
 {
     private readonly Random _random;
-    private readonly int _seed;
 
     /// <summary>
     /// Creates a new deterministic random with the specified seed.
@@ -20,14 +19,14 @@ internal sealed class DeterministicRandom
     /// <param name="seed">The seed for reproducible random sequences.</param>
     public DeterministicRandom(int seed)
     {
-        _seed = seed;
+        Seed = seed;
         _random = new Random(seed);
     }
 
     /// <summary>
     /// Gets the seed used to initialize this random instance.
     /// </summary>
-    public int Seed => _seed;
+    public int Seed { get; }
 
     /// <summary>
     /// Returns a non-negative random integer.

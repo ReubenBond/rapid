@@ -6,7 +6,6 @@ namespace Rapid.Tests.Simulation;
 /// </summary>
 internal sealed class DeterministicSynchronizationContext : SynchronizationContext
 {
-    private readonly DeterministicTaskScheduler _scheduler;
 
     /// <summary>
     /// Creates a new deterministic synchronization context.
@@ -14,13 +13,13 @@ internal sealed class DeterministicSynchronizationContext : SynchronizationConte
     /// <param name="scheduler">The task scheduler to route continuations through.</param>
     public DeterministicSynchronizationContext(DeterministicTaskScheduler scheduler)
     {
-        _scheduler = scheduler ?? throw new ArgumentNullException(nameof(scheduler));
+        Scheduler = scheduler ?? throw new ArgumentNullException(nameof(scheduler));
     }
 
     /// <summary>
     /// Gets the underlying task scheduler.
     /// </summary>
-    public DeterministicTaskScheduler Scheduler => _scheduler;
+    public DeterministicTaskScheduler Scheduler { get; }
 
     /// <inheritdoc />
     public override void Post(SendOrPostCallback d, object? state)
@@ -29,7 +28,7 @@ internal sealed class DeterministicSynchronizationContext : SynchronizationConte
 
         // Queue the callback as a task on the deterministic scheduler
         var task = new Task(() => d(state));
-        task.Start(_scheduler);
+        task.Start(Scheduler);
     }
 
     /// <inheritdoc />
@@ -45,7 +44,7 @@ internal sealed class DeterministicSynchronizationContext : SynchronizationConte
     /// <inheritdoc />
     public override SynchronizationContext CreateCopy()
     {
-        return new DeterministicSynchronizationContext(_scheduler);
+        return new DeterministicSynchronizationContext(Scheduler);
     }
 
     /// <summary>

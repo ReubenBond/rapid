@@ -10,7 +10,6 @@ namespace Rapid.Tests.Simulation;
 /// </summary>
 internal sealed class SimulationEnvironment : IDisposable
 {
-    private readonly int _seed;
     private readonly ConcurrentDictionary<string, SimulationNode> _nodes = new();
     private readonly Lock _lock = new();
     private bool _disposed;
@@ -23,7 +22,7 @@ internal sealed class SimulationEnvironment : IDisposable
     /// <param name="useFakeTime">Whether to use fake time provider. Default is false for basic tests.</param>
     public SimulationEnvironment(int seed, ILoggerFactory? loggerFactory = null, bool useFakeTime = false)
     {
-        _seed = seed;
+        Seed = seed;
         Random = new DeterministicRandom(seed);
         LoggerFactory = loggerFactory;
         Network = new SimulationNetwork(this);
@@ -75,7 +74,7 @@ internal sealed class SimulationEnvironment : IDisposable
     /// <summary>
     /// Gets the seed used to initialize this environment.
     /// </summary>
-    public int Seed => _seed;
+    public int Seed { get; }
 
     /// <summary>
     /// Gets all nodes currently in the simulation.
