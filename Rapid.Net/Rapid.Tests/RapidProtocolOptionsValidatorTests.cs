@@ -245,6 +245,146 @@ public class RapidProtocolOptionsValidatorTests
 
     #endregion
 
+    #region RingCount Validation
+
+    [Fact]
+    public void ValidateRingCountZeroFails()
+    {
+        var options = CreateValidOptions();
+        options.RingCount = 0;
+
+        var result = _validator.Validate(null, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains("RingCount", result.FailureMessage, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ValidateRingCountNegativeFails()
+    {
+        var options = CreateValidOptions();
+        options.RingCount = -1;
+
+        var result = _validator.Validate(null, options);
+
+        Assert.True(result.Failed);
+    }
+
+    [Fact]
+    public void ValidateRingCountPositiveSucceeds()
+    {
+        var options = CreateValidOptions();
+        options.RingCount = 10;
+
+        var result = _validator.Validate(null, options);
+
+        Assert.True(result.Succeeded);
+    }
+
+    #endregion
+
+    #region HighWaterMark Validation
+
+    [Fact]
+    public void ValidateHighWaterMarkZeroFails()
+    {
+        var options = CreateValidOptions();
+        options.HighWaterMark = 0;
+
+        var result = _validator.Validate(null, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains("HighWaterMark", result.FailureMessage, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ValidateHighWaterMarkNegativeFails()
+    {
+        var options = CreateValidOptions();
+        options.HighWaterMark = -1;
+
+        var result = _validator.Validate(null, options);
+
+        Assert.True(result.Failed);
+    }
+
+    [Fact]
+    public void ValidateHighWaterMarkPositiveSucceeds()
+    {
+        var options = CreateValidOptions();
+        options.HighWaterMark = 9;
+
+        var result = _validator.Validate(null, options);
+
+        Assert.True(result.Succeeded);
+    }
+
+    #endregion
+
+    #region LowWaterMark Validation
+
+    [Fact]
+    public void ValidateLowWaterMarkNegativeFails()
+    {
+        var options = CreateValidOptions();
+        options.LowWaterMark = -1;
+
+        var result = _validator.Validate(null, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains("LowWaterMark", result.FailureMessage, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ValidateLowWaterMarkZeroSucceeds()
+    {
+        var options = CreateValidOptions();
+        options.LowWaterMark = 0;
+
+        var result = _validator.Validate(null, options);
+
+        Assert.True(result.Succeeded);
+    }
+
+    [Fact]
+    public void ValidateLowWaterMarkPositiveSucceeds()
+    {
+        var options = CreateValidOptions();
+        options.LowWaterMark = 4;
+
+        var result = _validator.Validate(null, options);
+
+        Assert.True(result.Succeeded);
+    }
+
+    [Fact]
+    public void ValidateLowWaterMarkEqualToHighWaterMarkFails()
+    {
+        var options = CreateValidOptions();
+        options.LowWaterMark = 9;
+        options.HighWaterMark = 9;
+
+        var result = _validator.Validate(null, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains("LowWaterMark must be less than HighWaterMark", result.FailureMessage, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ValidateLowWaterMarkGreaterThanHighWaterMarkFails()
+    {
+        var options = CreateValidOptions();
+        options.LowWaterMark = 10;
+        options.HighWaterMark = 5;
+
+        var result = _validator.Validate(null, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains("LowWaterMark must be less than HighWaterMark", result.FailureMessage, StringComparison.Ordinal);
+    }
+
+    #endregion
+
     #region Combined Validation
 
     [Fact]

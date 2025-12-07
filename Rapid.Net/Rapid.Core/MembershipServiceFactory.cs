@@ -16,23 +16,19 @@ internal sealed class MembershipServiceFactory(
     IBroadcasterFactory broadcasterFactory,
     IFastPaxosFactory fastPaxosFactory,
     SharedResources sharedResources,
+    MembershipViewAccessor viewAccessor,
     IOptions<RapidProtocolOptions> protocolOptions,
     ILoggerFactory loggerFactory) : IMembershipServiceFactory
 {
-
-    // Constants for cluster configuration
-    private const int RingCount = 10;  // Number of rings
-    private const int HighWaterMark = 9;   // High watermark
-    private const int LowWaterMark = 4;   // Low watermark
-
     public MembershipService CreateForNewCluster(
         Endpoint localEndpoint,
         NodeId nodeId,
         Metadata metadata,
         Dictionary<ClusterEvents, List<Action<ClusterStatusChange>>> subscriptions)
     {
-        var membershipView = new MutableMembershipView(RingCount, [nodeId], [localEndpoint]);
-        var cutDetector = new MultiNodeCutDetector(RingCount, HighWaterMark, LowWaterMark);
+        var opts = protocolOptions.Value;
+        var membershipView = new MembershipViewBuilder(opts.RingCount, [nodeId], [localEndpoint]).Build();
+        var cutDetector = new MultiNodeCutDetector(opts.RingCount, opts.HighWaterMark, opts.LowWaterMark);
         var metadataMap = new Dictionary<Endpoint, Metadata> { { localEndpoint, metadata } };
         var broadcaster = broadcasterFactory.Create();
 
@@ -46,6 +42,7 @@ internal sealed class MembershipServiceFactory(
             broadcaster,
             edgeFailureDetectorFactory,
             fastPaxosFactory,
+            viewAccessor,
             metadataMap,
             subscriptions,
             loggerFactory);
@@ -58,12 +55,13 @@ internal sealed class MembershipServiceFactory(
         Dictionary<Endpoint, Metadata> metadataMap,
         Dictionary<ClusterEvents, List<Action<ClusterStatusChange>>> subscriptions)
     {
-        // Convert to collections as MutableMembershipView requires ICollection
+        // Convert to collections as MembershipViewBuilder requires ICollection
         var nodeIdList = nodeIds.ToList();
         var endpointList = endpoints.ToList();
 
-        var membershipView = new MutableMembershipView(RingCount, nodeIdList, endpointList);
-        var cutDetector = new MultiNodeCutDetector(RingCount, HighWaterMark, LowWaterMark);
+        var opts = protocolOptions.Value;
+        var membershipView = new MembershipViewBuilder(opts.RingCount, nodeIdList, endpointList).Build();
+        var cutDetector = new MultiNodeCutDetector(opts.RingCount, opts.HighWaterMark, opts.LowWaterMark);
         var broadcaster = broadcasterFactory.Create();
 
         return new MembershipService(
@@ -76,6 +74,7 @@ internal sealed class MembershipServiceFactory(
             broadcaster,
             edgeFailureDetectorFactory,
             fastPaxosFactory,
+            viewAccessor,
             metadataMap,
             subscriptions,
             loggerFactory);

@@ -1,34 +1,49 @@
 using System.IO.Hashing;
+using Rapid.Exceptions;
 using Rapid.Pb;
 
 namespace Rapid;
 
 /// <summary>
 /// An immutable snapshot of the cluster membership at a point in time.
-/// Instances are obtained through <see cref="IRapidCluster.GetCurrentView"/> or by subscribing
-/// to view changes via <see cref="IRapidCluster.SubscribeToViewChangesAsync"/>.
+/// Hosts K permutations of the memberlist that represent the monitoring relationship between nodes;
+/// every node (an observer) observes its successor (a subject) on each ring.
+/// Instances are obtained through <see cref="IRapidCluster.ViewAccessor"/>, or via <see cref="MembershipViewBuilder"/>.
 /// </summary>
 public sealed class MembershipView
 {
     /// <summary>
+    /// An empty membership view with no members. Used as the initial state before the cluster is initialized.
+    /// </summary>
+    public static MembershipView Empty { get; } = CreateEmpty(ringCount: 1);
+
+    private readonly IReadOnlyList<IReadOnlyList<Endpoint>> _rings;
+    private readonly HashSet<Endpoint> _allNodes;
+    private readonly HashSet<NodeId> _identifiersSeen;
+
+    /// <summary>
     /// Initializes a new immutable MembershipView instance.
     /// </summary>
-    /// <param name="k">Number of monitoring rings.</param>
+    /// <param name="ringCount">Number of monitoring rings.</param>
     /// <param name="configurationId">The configuration identifier for this view.</param>
-    /// <param name="members">The list of member endpoints.</param>
-    /// <param name="nodeIds">The list of node identifiers seen.</param>
-    internal MembershipView(int k, long configurationId, IReadOnlyList<Endpoint> members, IReadOnlyList<NodeId> nodeIds)
+    /// <param name="rings">The rings of endpoints (each ring is sorted by its comparator).</param>
+    /// <param name="nodeIds">The set of node identifiers seen.</param>
+    internal MembershipView(int ringCount, long configurationId, IReadOnlyList<IReadOnlyList<Endpoint>> rings, IReadOnlyList<NodeId> nodeIds)
     {
-        K = k;
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(ringCount);
+        ArgumentOutOfRangeException.ThrowIfNotEqual(rings.Count, ringCount, "Number of rings does not match ring count");
+        RingCount = ringCount;
         ConfigurationId = configurationId;
-        Members = members;
+        _rings = rings;
         NodeIds = nodeIds;
+        _allNodes = [.. rings[0]];
+        _identifiersSeen = [.. nodeIds];
     }
 
     /// <summary>
     /// Gets the number of monitoring rings (K value).
     /// </summary>
-    public int K { get; }
+    public int RingCount { get; }
 
     /// <summary>
     /// Gets the configuration identifier for this view.
@@ -36,9 +51,9 @@ public sealed class MembershipView
     public long ConfigurationId { get; }
 
     /// <summary>
-    /// Gets the list of member endpoints in the cluster.
+    /// Gets the list of member endpoints in the cluster (from ring 0).
     /// </summary>
-    public IReadOnlyList<Endpoint> Members { get; }
+    public IReadOnlyList<Endpoint> Members => _rings[0];
 
     /// <summary>
     /// Gets the number of members in the cluster.
@@ -51,7 +66,7 @@ public sealed class MembershipView
     public IReadOnlyList<NodeId> NodeIds { get; }
 
     /// <summary>
-    /// Gets the configuration for this view, which can be used to bootstrap a new MutableMembershipView.
+    /// Gets the configuration for this view, which can be used to bootstrap a new MembershipViewBuilder.
     /// </summary>
     public MembershipViewConfiguration Configuration => new(NodeIds, Members);
 
@@ -60,13 +75,239 @@ public sealed class MembershipView
     /// </summary>
     /// <param name="endpoint">The endpoint to check.</param>
     /// <returns>True if the endpoint is a member, false otherwise.</returns>
-    public bool IsMember(Endpoint endpoint) => Members.Contains(endpoint);
+    public bool IsMember(Endpoint endpoint) => _allNodes.Contains(endpoint);
+
+    /// <summary>
+    /// Query if a host is part of the current membership set.
+    /// </summary>
+    /// <param name="address">The host.</param>
+    /// <returns>True if the node is present in the membership view and false otherwise.</returns>
+    public bool IsHostPresent(Endpoint address) => _allNodes.Contains(address);
+
+    /// <summary>
+    /// Query if an identifier has been used by a node already.
+    /// </summary>
+    /// <param name="identifier">The identifier to query for.</param>
+    /// <returns>True if the identifier has been seen before and false otherwise.</returns>
+    public bool IsIdentifierPresent(NodeId identifier) => _identifiersSeen.Contains(identifier);
+
+    /// <summary>
+    /// Queries if a host with a logical identifier is safe to add to the network.
+    /// </summary>
+    /// <param name="node">The joining node.</param>
+    /// <param name="uuid">The joining node's identifier.</param>
+    /// <returns>
+    /// HOSTNAME_ALREADY_IN_RING if the node is already in the ring.
+    /// UUID_ALREADY_IN_RING if the uuid is already seen before.
+    /// SAFE_TO_JOIN otherwise.
+    /// </returns>
+    public JoinStatusCode IsSafeToJoin(Endpoint node, NodeId uuid)
+    {
+        if (_allNodes.Contains(node))
+        {
+            return JoinStatusCode.HostnameAlreadyInRing;
+        }
+
+        if (_identifiersSeen.Contains(uuid))
+        {
+            return JoinStatusCode.UuidAlreadyInRing;
+        }
+
+        return JoinStatusCode.SafeToJoin;
+    }
+
+    /// <summary>
+    /// Get the list of endpoints in the k'th ring.
+    /// </summary>
+    /// <param name="ringIndex">The index of the ring to query.</param>
+    /// <returns>The list of endpoints in the k'th ring.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown if k is out of range.</exception>
+    public IReadOnlyList<Endpoint> GetRing(int ringIndex)
+    {
+        if (ringIndex < 0 || ringIndex >= RingCount) throw new ArgumentOutOfRangeException(nameof(ringIndex));
+        return _rings[ringIndex];
+    }
+
+    /// <summary>
+    /// Returns the set of observers for the given node.
+    /// </summary>
+    /// <param name="node">Input node.</param>
+    /// <returns>The set of observers for the node.</returns>
+    /// <exception cref="NodeNotInRingException">Thrown if the node is not in the ring.</exception>
+    public IReadOnlyList<Endpoint> GetObserversOf(Endpoint node)
+    {
+        ArgumentNullException.ThrowIfNull(node);
+
+        if (!_allNodes.Contains(node))
+        {
+            throw new NodeNotInRingException(node);
+        }
+
+        if (Size <= 1)
+        {
+            return [];
+        }
+
+        var observers = new List<Endpoint>(RingCount);
+        for (var k = 0; k < RingCount; k++)
+        {
+            var ring = _rings[k];
+            var index = FindIndex(ring, node);
+            // Successor wraps around
+            var successorIndex = (index + 1) % ring.Count;
+            observers.Add(ring[successorIndex]);
+        }
+        return observers;
+    }
+
+    /// <summary>
+    /// Returns the set of nodes monitored by the given node.
+    /// </summary>
+    /// <param name="node">Input node.</param>
+    /// <returns>The set of nodes monitored by the node.</returns>
+    /// <exception cref="NodeNotInRingException">Thrown if the node is not in the ring.</exception>
+    public IReadOnlyList<Endpoint> GetSubjectsOf(Endpoint node)
+    {
+        ArgumentNullException.ThrowIfNull(node);
+
+        if (!_allNodes.Contains(node))
+        {
+            throw new NodeNotInRingException(node);
+        }
+
+        if (Size <= 1)
+        {
+            return [];
+        }
+
+        return GetPredecessorsOf(node);
+    }
+
+    /// <summary>
+    /// Returns the expected observers of the node, even before it is
+    /// added to the ring. Used during the bootstrap protocol to identify
+    /// the nodes responsible for gatekeeping a joining peer.
+    /// </summary>
+    /// <param name="node">Input node.</param>
+    /// <returns>The list of expected observers. Empty list if the membership is empty.</returns>
+    public IReadOnlyList<Endpoint> GetExpectedObserversOf(Endpoint node)
+    {
+        ArgumentNullException.ThrowIfNull(node);
+
+        if (Size == 0)
+        {
+            return [];
+        }
+
+        // For a joining node, find where it would be inserted and return predecessors
+        var subjects = new List<Endpoint>(RingCount);
+        for (var k = 0; k < RingCount; k++)
+        {
+            var ring = _rings[k];
+            var insertionPoint = FindInsertionPoint(ring, node, k);
+            // Predecessor wraps around
+            var predecessorIndex = (insertionPoint - 1 + ring.Count) % ring.Count;
+            subjects.Add(ring[predecessorIndex]);
+        }
+        return subjects;
+    }
+
+    /// <summary>
+    /// Get the ring numbers where an observer monitors a given subject.
+    /// </summary>
+    /// <param name="observer">The observer node.</param>
+    /// <param name="subject">The subject node.</param>
+    /// <returns>The indexes k such that observer is a successor of subject on ring[k].</returns>
+    public IReadOnlyList<int> GetRingNumbers(Endpoint observer, Endpoint subject)
+    {
+        var subjects = GetSubjectsOf(observer);
+        if (subjects.Count == 0)
+        {
+            return [];
+        }
+
+        var ringIndexes = new List<int>();
+        for (var ringNumber = 0; ringNumber < subjects.Count; ringNumber++)
+        {
+            if (subjects[ringNumber].Equals(subject))
+            {
+                ringIndexes.Add(ringNumber);
+            }
+        }
+        return ringIndexes;
+    }
+
+    /// <summary>
+    /// Creates a new MembershipViewBuilder initialized from this view.
+    /// </summary>
+    /// <returns>A new MembershipViewBuilder that can be used to create modified views.</returns>
+    internal MembershipViewBuilder ToBuilder() => new(this);
+
+    private List<Endpoint> GetPredecessorsOf(Endpoint node)
+    {
+        var subjects = new List<Endpoint>(RingCount);
+        for (var k = 0; k < RingCount; k++)
+        {
+            var ring = _rings[k];
+            var index = FindIndex(ring, node);
+            // Predecessor wraps around
+            var predecessorIndex = (index - 1 + ring.Count) % ring.Count;
+            subjects.Add(ring[predecessorIndex]);
+        }
+        return subjects;
+    }
+
+    private static int FindIndex(IReadOnlyList<Endpoint> ring, Endpoint node)
+    {
+        for (var i = 0; i < ring.Count; i++)
+        {
+            if (ring[i].Equals(node))
+            {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static int FindInsertionPoint(IReadOnlyList<Endpoint> ring, Endpoint node, int ringIndex)
+    {
+        // Compute hash for the new node
+        var nodeHash = MembershipViewBuilder.ComputeEndpointHash(ringIndex, node);
+        
+        // Binary search for insertion point based on hash
+        var left = 0;
+        var right = ring.Count;
+        while (left < right)
+        {
+            var mid = (left + right) / 2;
+            var midHash = MembershipViewBuilder.ComputeEndpointHash(ringIndex, ring[mid]);
+            if (midHash < nodeHash)
+            {
+                left = mid + 1;
+            }
+            else
+            {
+                right = mid;
+            }
+        }
+        return left;
+    }
+
+    private static MembershipView CreateEmpty(int ringCount)
+    {
+        var emptyRings = new List<IReadOnlyList<Endpoint>>(ringCount);
+        for (var i = 0; i < ringCount; i++)
+        {
+            emptyRings.Add([]);
+        }
+        return new MembershipView(ringCount, 0, emptyRings, []);
+    }
 }
 
 /// <summary>
 /// The MembershipViewConfiguration object contains a list of nodes in the membership view as well as a list of UUIDs.
 /// An instance of this object created from one MembershipView object contains the necessary information
-/// to bootstrap an identical MutableMembershipView object.
+/// to bootstrap an identical MembershipView via MembershipViewBuilder.
 /// </summary>
 public sealed class MembershipViewConfiguration
 {

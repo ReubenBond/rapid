@@ -368,7 +368,7 @@ public class ExtendedMultiNodeCutDetectorTests
     [Fact]
     public void InvalidateFailingEdgesNoDownEventsReturnsEmpty()
     {
-        var mView = new MutableMembershipView(K);
+        var view = new MembershipViewBuilder(K).Build();
         var detector = new MultiNodeCutDetector(K, H, L);
 
         var dst = Utils.HostFromParts("127.0.0.2", 2);
@@ -378,7 +378,7 @@ public class ExtendedMultiNodeCutDetectorTests
                 Utils.HostFromParts("127.0.0.1", i + 1), dst, EdgeStatus.Up, ConfigurationId, i));
         }
 
-        var result = detector.InvalidateFailingEdges(mView);
+        var result = detector.InvalidateFailingEdges(view);
 
         Assert.Empty(result);
     }
@@ -386,7 +386,7 @@ public class ExtendedMultiNodeCutDetectorTests
     [Fact]
     public void InvalidateFailingEdgesEmptyMembershipViewReturnsEmpty()
     {
-        var mView = new MutableMembershipView(K);
+        var view = new MembershipViewBuilder(K).Build();
         var detector = new MultiNodeCutDetector(K, H, L);
 
         var dst = Utils.HostFromParts("127.0.0.2", 2);
@@ -396,7 +396,7 @@ public class ExtendedMultiNodeCutDetectorTests
                 Utils.HostFromParts("127.0.0.1", i + 1), dst, EdgeStatus.Down, ConfigurationId, i));
         }
 
-        var result = detector.InvalidateFailingEdges(mView);
+        var result = detector.InvalidateFailingEdges(view);
 
         Assert.NotNull(result);
     }

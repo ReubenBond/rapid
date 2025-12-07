@@ -51,6 +51,10 @@ internal sealed class TestCluster : IAsyncDisposable
         _apps.Add(app);
         
         var cluster = app.Services.GetRequiredService<IRapidCluster>();
+        
+        // Wait for the cluster to be initialized
+        await WaitForClusterInitializedAsync(cluster, cancellationToken).ConfigureAwait(false);
+        
         return (app, cluster);
     }
 
@@ -81,6 +85,10 @@ internal sealed class TestCluster : IAsyncDisposable
         _apps.Add(app);
         
         var cluster = app.Services.GetRequiredService<IRapidCluster>();
+        
+        // Wait for the cluster to be initialized
+        await WaitForClusterInitializedAsync(cluster, cancellationToken).ConfigureAwait(false);
+        
         return (app, cluster);
     }
 
@@ -110,6 +118,10 @@ internal sealed class TestCluster : IAsyncDisposable
         _apps.Add(app);
         
         var cluster = app.Services.GetRequiredService<IRapidCluster>();
+        
+        // Wait for the cluster to be initialized
+        await WaitForClusterInitializedAsync(cluster, cancellationToken).ConfigureAwait(false);
+        
         return (app, cluster);
     }
 
@@ -141,7 +153,22 @@ internal sealed class TestCluster : IAsyncDisposable
         _apps.Add(app);
         
         var cluster = app.Services.GetRequiredService<IRapidCluster>();
+        
+        // Wait for the cluster to be initialized
+        await WaitForClusterInitializedAsync(cluster, cancellationToken).ConfigureAwait(false);
+        
         return (app, cluster);
+    }
+
+    /// <summary>
+    /// Waits for a cluster to be initialized (has at least one member).
+    /// </summary>
+    private static async Task WaitForClusterInitializedAsync(IRapidCluster cluster, CancellationToken cancellationToken)
+    {
+        while (cluster.ViewAccessor.CurrentView.Size == 0)
+        {
+            await Task.Delay(10, cancellationToken).ConfigureAwait(false);
+        }
     }
 
     /// <summary>

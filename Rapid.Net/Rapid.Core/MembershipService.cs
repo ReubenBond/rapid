@@ -1,4 +1,3 @@
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
@@ -19,7 +18,7 @@ namespace Rapid;
 internal sealed partial class MembershipService : IMembershipServiceHandler, IDisposable
 {
     private readonly ILogger<MembershipService> _logger;
-    private readonly MutableMembershipView _membershipView;
+    private MembershipView _membershipView;
     private readonly MultiNodeCutDetector _cutDetection;
     private readonly Endpoint _myAddr;
     private readonly IBroadcaster _broadcaster;
@@ -51,9 +50,8 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
     private readonly Lock _membershipUpdateLock = new();
     private readonly RapidProtocolOptions _options;
 
-    // View change subscription support
-    private readonly Channel<MembershipView> _viewChangeChannel;
-    private MembershipView _currentImmutableView;
+    // View change accessor for publishing updates
+    private readonly MembershipViewAccessor _viewAccessor;
 
     private readonly struct LoggableEndpoint(Endpoint endpoint)
     {
@@ -67,16 +65,16 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         public override readonly string ToString() => RapidUtils.Loggable(_endpoints);
     }
 
-    private readonly struct CurrentConfigId(MutableMembershipView view)
+    private readonly struct CurrentConfigId(MembershipView view)
     {
-        private readonly MutableMembershipView _view = view;
-        public override readonly string ToString() => _view.GetCurrentConfigurationId().ToString();
+        private readonly MembershipView _view = view;
+        public override readonly string ToString() => _view.ConfigurationId.ToString();
     }
 
-    private readonly struct MembershipSize(MutableMembershipView view)
+    private readonly struct MembershipSize(MembershipView view)
     {
-        private readonly MutableMembershipView _view = view;
-        public override readonly string ToString() => _view.GetMembershipSize().ToString();
+        private readonly MembershipView _view = view;
+        public override readonly string ToString() => _view.Size.ToString();
     }
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Initiating consensus for {Proposal}")]
@@ -214,26 +212,28 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
     public MembershipService(
         Endpoint myAddr,
         MultiNodeCutDetector cutDetection,
-        MutableMembershipView membershipView,
+        MembershipView membershipView,
         SharedResources sharedResources,
         IOptions<RapidProtocolOptions> options,
         IMessagingClient messagingClient,
         IBroadcaster broadcaster,
         IEdgeFailureDetectorFactory edgeFailureDetector,
         IFastPaxosFactory fastPaxosFactory,
+        MembershipViewAccessor viewAccessor,
         ILoggerFactory? loggerFactory = null)
         : this(myAddr, cutDetection, membershipView, sharedResources, options, messagingClient,
-              broadcaster, edgeFailureDetector, fastPaxosFactory, [],
+              broadcaster, edgeFailureDetector, fastPaxosFactory, viewAccessor, [],
               [], loggerFactory)
     {
     }
 
     public MembershipService(Endpoint myAddr, MultiNodeCutDetector cutDetection,
-                            MutableMembershipView membershipView, SharedResources sharedResources,
+                            MembershipView membershipView, SharedResources sharedResources,
                             IOptions<RapidProtocolOptions> options, IMessagingClient messagingClient,
                             IBroadcaster broadcaster,
                             IEdgeFailureDetectorFactory edgeFailureDetector,
                             IFastPaxosFactory fastPaxosFactory,
+                            MembershipViewAccessor viewAccessor,
                             Dictionary<Endpoint, Metadata> metadataMap,
                             Dictionary<ClusterEvents, List<Action<ClusterStatusChange>>> subscriptions,
                             ILoggerFactory? loggerFactory = null)
@@ -250,16 +250,9 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         _subscriptions = subscriptions;
         _fdFactory = edgeFailureDetector;
         _fastPaxosFactory = fastPaxosFactory;
+        _viewAccessor = viewAccessor;
         _logger = (loggerFactory ?? NullLoggerFactory.Instance).CreateLogger<MembershipService>();
         _sendQueue = Channel.CreateUnbounded<AlertMessage>();
-
-        // Initialize view change subscription channel
-        _viewChangeChannel = Channel.CreateUnbounded<MembershipView>(new UnboundedChannelOptions
-        {
-            SingleReader = false,
-            SingleWriter = true
-        });
-        _currentImmutableView = _membershipView.ToImmutableView();
 
         // Make sure there is an empty list for every enum type
         foreach (var evt in Enum.GetValues<ClusterEvents>())
@@ -274,27 +267,30 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         var alertBatcherTask = Task.Run(AlertBatcherAsync, _shutdownCts.Token);
         _sharedResources.TrackBackgroundTask(alertBatcherTask);
 
-        _broadcaster.SetMembership(_membershipView.GetRing(0));
+        _broadcaster.SetMembership([.. _membershipView.GetRing(0)]);
         // this::edgeFailureNotification is invoked by the failure detector whenever an edge
         // to an observer is marked faulty.
 
         // Prepare consensus instance
-        _fastPaxosInstance = _fastPaxosFactory.Create(_myAddr, _membershipView.GetCurrentConfigurationId(),
-                                          _membershipView.GetMembershipSize(), _broadcaster);
+        _fastPaxosInstance = _fastPaxosFactory.Create(_myAddr, _membershipView.ConfigurationId,
+                                          _membershipView.Size, _broadcaster);
         _fastPaxosInstance.Decided.ContinueWith(t => DecideViewChange(t.Result), scheduler: TaskScheduler.Default);
 
         CreateFailureDetectorsForCurrentConfiguration();
 
         // Execute all VIEW_CHANGE callbacks. This informs applications that a start/join has successfully completed.
-        var configurationId = _membershipView.GetCurrentConfigurationId();
+        var configurationId = _membershipView.ConfigurationId;
         var currentMembership = _membershipView.GetRing(0);
         var nodeStatusChanges = GetInitialViewChange();
-        var clusterStatusChange = new ClusterStatusChange(configurationId, currentMembership, nodeStatusChanges);
+        var clusterStatusChange = new ClusterStatusChange(configurationId, [.. currentMembership], nodeStatusChanges);
 
         foreach (var cb in _subscriptions[ClusterEvents.ViewChange])
         {
             cb(clusterStatusChange);
         }
+
+        // Publish the initial view to the accessor
+        _viewAccessor.PublishView(_membershipView);
 
         LogMembershipServiceInitialized(new LoggableEndpoint(myAddr), new CurrentConfigId(_membershipView), new MembershipSize(_membershipView));
     }
@@ -336,7 +332,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
             var builder = new JoinResponse
             {
                 Sender = _myAddr,
-                ConfigurationId = _membershipView.GetCurrentConfigurationId(),
+                ConfigurationId = _membershipView.ConfigurationId,
                 StatusCode = statusCode
             };
 
@@ -371,7 +367,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
 
         lock (_membershipUpdateLock)
         {
-            var currentConfiguration = _membershipView.GetCurrentConfigurationId();
+            var currentConfiguration = _membershipView.ConfigurationId;
 
             if (currentConfiguration == joinMessage.ConfigurationId)
             {
@@ -399,7 +395,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
             {
                 // This handles the corner case where the configuration changed between phase 1 and phase 2
                 // of the joining node's bootstrap. It should attempt to rejoin the network.
-                var configuration = _currentImmutableView.Configuration;
+                var configuration = _membershipView.Configuration;
                 LogWrongConfiguration(new LoggableEndpoint(joinMessage.Sender), joinMessage.ConfigurationId,
                     new CurrentConfigId(_membershipView), new MembershipSize(_membershipView));
 
@@ -450,7 +446,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
 
         lock (_membershipUpdateLock)
         {
-            if (!FilterAlertMessages(messageBatch, _membershipView.GetCurrentConfigurationId()))
+            if (!FilterAlertMessages(messageBatch, _membershipView.ConfigurationId))
             {
                 LogBatchedAlertFiltered(new CurrentConfigId(_membershipView));
                 return RapidUtils.ToRapidResponse(new ConsensusResponse());
@@ -481,13 +477,13 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
                 if (proposals.Count > 0 && !_announcedProposal)
                 {
                     _announcedProposal = true;
-                    var currentConfigurationId = _membershipView.GetCurrentConfigurationId();
+                    var currentConfigurationId = _membershipView.ConfigurationId;
                     LogInitiatingConsensus(new LoggableEndpoints(proposals));
 
                     // Inform subscribers that a proposal has been announced.
                     var nodeStatusChanges = CreateNodeStatusChangeList(proposals);
                     var currentMembership = _membershipView.GetRing(0);
-                    var clusterStatusChange = new ClusterStatusChange(currentConfigurationId, currentMembership, nodeStatusChanges);
+                    var clusterStatusChange = new ClusterStatusChange(currentConfigurationId, [.. currentMembership], nodeStatusChanges);
 
                     foreach (var cb in _subscriptions[ClusterEvents.ViewChangeProposal])
                     {
@@ -521,7 +517,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
     {
         var leaveMessage = request.LeaveMessage;
         LogReceivedLeaveMessage(new LoggableEndpoint(leaveMessage.Sender), new LoggableEndpoint(_myAddr));
-        EdgeFailureNotification(leaveMessage.Sender, _membershipView.GetCurrentConfigurationId());
+        EdgeFailureNotification(leaveMessage.Sender, _membershipView.ConfigurationId);
         return RapidUtils.ToRapidResponse(new ConsensusResponse());
     }
 
@@ -552,6 +548,9 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         // Track nodes that were added so we can notify their joiners after ALL nodes are processed
         var addedNodes = new List<Endpoint>();
 
+        // Create a builder from the current view to make modifications
+        var builder = _membershipView.ToBuilder();
+
         foreach (var node in proposal)
         {
             // If the node is already in the ring, remove it. Else, add it.
@@ -560,7 +559,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
             if (_membershipView.IsHostPresent(node))
             {
                 LogRemovingNode(new LoggableEndpoint(node));
-                _membershipView.RingDelete(node);
+                builder.RingDelete(node);
             }
             else
             {
@@ -573,7 +572,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
                 var metadata = _joinerMetadata.GetValueOrDefault(node, new Metadata());
 
                 LogAddingNode(new LoggableEndpoint(node));
-                _membershipView.RingAdd(node, nodeId);
+                builder.RingAdd(node, nodeId);
                 _metadataManager.Add(node, metadata);
 
                 _joinerUuid.Remove(node);
@@ -584,11 +583,11 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
             }
         }
 
-        // Update the immutable view after all changes are applied
-        _currentImmutableView = _membershipView.ToImmutableView();
+        // Build the new immutable view
+        _membershipView = builder.Build();
 
-        // Publish the new view to the subscription channel
-        _viewChangeChannel.Writer.TryWrite(_currentImmutableView);
+        // Publish the new view to the accessor
+        _viewAccessor.PublishView(_membershipView);
 
         // Now that ALL nodes have been added, notify all joiners with the complete configuration
         foreach (var node in addedNodes)
@@ -596,7 +595,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
             if (_joinersToRespondTo.TryGetValue(node, out var channel))
             {
                 var waitingCount = 0;
-                var config = _currentImmutableView.Configuration;
+                var config = _membershipView.Configuration;
                 var response = new JoinResponse
                 {
                     Sender = _myAddr,
@@ -625,7 +624,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
 
         // Clear data structures for the next round.
         _cutDetection.Clear();
-        _broadcaster.SetMembership(_membershipView.GetRing(0));
+        _broadcaster.SetMembership([.. _membershipView.GetRing(0)]);
 
         // Recreate failure detectors
         foreach (var fd in _failureDetectors)
@@ -638,8 +637,8 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
 
         _fastPaxosInstance = _fastPaxosFactory.Create(
             _myAddr,
-            _membershipView.GetCurrentConfigurationId(),
-            _membershipView.GetMembershipSize(),
+            _membershipView.ConfigurationId,
+            _membershipView.Size,
             _broadcaster);
         _fastPaxosInstance.Decided.ContinueWith(t => DecideViewChange(t.Result), scheduler: TaskScheduler.Default);
 
@@ -647,10 +646,10 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         CreateFailureDetectorsForCurrentConfiguration();
 
         // Publish an event to the listeners.
-        var configurationId = _membershipView.GetCurrentConfigurationId();
+        var configurationId = _membershipView.ConfigurationId;
         var currentMembership = _membershipView.GetRing(0);
         var nodeStatusChanges = CreateNodeStatusChangeList(proposal);
-        var clusterStatusChange = new ClusterStatusChange(configurationId, currentMembership, nodeStatusChanges);
+        var clusterStatusChange = new ClusterStatusChange(configurationId, [.. currentMembership], nodeStatusChanges);
 
         LogPublishingViewChange(new CurrentConfigId(_membershipView), new MembershipSize(_membershipView));
 
@@ -675,13 +674,13 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
     /// Gets the list of endpoints currently in the membership view.
     /// </summary>
     /// <returns>list of endpoints in the membership view</returns>
-    public List<Endpoint> GetMembershipView() => _membershipView.GetRing(0);
+    public List<Endpoint> GetMembershipView() => [.. _membershipView.GetRing(0)];
 
     /// <summary>
     /// Gets the list of endpoints currently in the membership view.
     /// </summary>
     /// <returns>list of endpoints in the membership view</returns>
-    public int GetMembershipSize() => _membershipView.GetMembershipSize();
+    public int GetMembershipSize() => _membershipView.Size;
 
     /// <summary>
     /// Gets the list of endpoints currently in the membership view.
@@ -690,33 +689,13 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
     public Dictionary<Endpoint, Metadata> GetMetadata() => new Dictionary<Endpoint, Metadata>(_metadataManager.GetAllMetadata());
 
     /// <summary>
-    /// Gets the current immutable membership view.
-    /// </summary>
-    /// <returns>The current immutable MembershipView snapshot.</returns>
-    public MembershipView GetCurrentView() => _currentImmutableView;
-
-    /// <summary>
-    /// Subscribes to view changes, returning an async enumerable of subsequently decided views.
-    /// The enumerable will yield a new MembershipView each time consensus is reached on a view change.
-    /// </summary>
-    /// <param name="cancellationToken">Token to cancel the subscription.</param>
-    /// <returns>An async enumerable of MembershipView instances.</returns>
-    public async IAsyncEnumerable<MembershipView> SubscribeToViewChangesAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
-    {
-        await foreach (var view in _viewChangeChannel.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
-        {
-            yield return view;
-        }
-    }
-
-    /// <summary>
     /// Shuts down all the executors.
     /// </summary>
     public void Shutdown()
     {
         LogShutdown();
         _shutdownCts.Cancel();
-        _viewChangeChannel.Writer.TryComplete();
+        _viewAccessor.Complete();
         foreach (var fd in _failureDetectors)
         {
             fd.Dispose();
@@ -876,7 +855,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
     private void CreateFailureDetectorsForCurrentConfiguration()
     {
         var subjects = _membershipView.GetSubjectsOf(_myAddr);
-        var configurationId = _membershipView.GetCurrentConfigurationId();
+        var configurationId = _membershipView.ConfigurationId;
 
         LogCreateFailureDetectors(subjects.Count);
 
@@ -905,7 +884,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
 
         try
         {
-            if (configurationId != _membershipView.GetCurrentConfigurationId())
+            if (configurationId != _membershipView.ConfigurationId)
             {
                 LogIgnoringOldConfigNotification(new LoggableEndpoint(subject), new CurrentConfigId(_membershipView), configurationId);
                 return;

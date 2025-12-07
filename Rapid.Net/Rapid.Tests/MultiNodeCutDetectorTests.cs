@@ -262,7 +262,7 @@ public class MultiNodeCutDetectorTests
     [Fact]
     public void CutDetectionTestLinkInvalidation()
     {
-        var mView = new MutableMembershipView(K);
+        var builder = new MembershipViewBuilder(K);
         var detector = new MultiNodeCutDetector(K, H, L);
         const int numNodes = 30;
         var endpoints = new List<Endpoint>();
@@ -271,8 +271,10 @@ public class MultiNodeCutDetectorTests
         {
             var node = Utils.HostFromParts("127.0.0.2", 2 + i);
             endpoints.Add(node);
-            mView.RingAdd(node, Utils.NodeIdFromUuid(Guid.NewGuid()));
+            builder.RingAdd(node, Utils.NodeIdFromUuid(Guid.NewGuid()));
         }
+
+        var mView = builder.Build();
 
         var dst = endpoints[0];
         var observers = mView.GetObserversOf(dst);

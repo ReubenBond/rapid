@@ -21,7 +21,7 @@ internal sealed partial class Paxos
     private readonly IMessagingClient _client;
     private readonly long _configurationId;
     private readonly Endpoint _myAddr;
-    private readonly int _n;
+    private readonly int _membershipSize;
 
     private readonly struct LoggableEndpoints(IEnumerable<Endpoint> endpoints)
     {
@@ -130,7 +130,7 @@ internal sealed partial class Paxos
     public Paxos(
         Endpoint myAddr,
         long configurationId,
-        int n,
+        int membershipSize,
         IMessagingClient client,
         IBroadcaster broadcaster,
         TaskCompletionSource<List<Endpoint>> completion,
@@ -138,7 +138,7 @@ internal sealed partial class Paxos
     {
         _myAddr = myAddr;
         _configurationId = configurationId;
-        _n = n;
+        _membershipSize = membershipSize;
         _broadcaster = broadcaster;
         _client = client;
         _completion = completion;
@@ -148,7 +148,7 @@ internal sealed partial class Paxos
         _rnd = new Rank { Round = 0, NodeIndex = 0 };
         _vrnd = new Rank { Round = 0, NodeIndex = 0 };
 
-        LogPaxosInitialized(new LoggableEndpoint(myAddr), configurationId, n);
+        LogPaxosInitialized(new LoggableEndpoint(myAddr), configurationId, membershipSize);
     }
 
     private readonly struct LoggableEndpoint(Endpoint endpoint)
@@ -267,15 +267,15 @@ internal sealed partial class Paxos
 
         _phase1bMessages.Add(phase1bMessage);
 
-        var f = (int)Math.Floor((_n - 1) / 4.0);
-        var threshold = _n - f;
+        var f = (int)Math.Floor((_membershipSize - 1) / 4.0);
+        var threshold = _membershipSize - f;
         LogPhase1bCollected(_phase1bMessages.Count, threshold, f);
 
         if (_phase1bMessages.Count >= threshold)
         {
             // selectProposalUsingCoordinator rule may execute multiple times with each additional phase1bMessage
             // being received, but we can enter the following if statement only once when a valid cval is identified.
-            var chosenValue = ChooseValue(_phase1bMessages, _n);
+            var chosenValue = ChooseValue(_phase1bMessages, _membershipSize);
             _cval = chosenValue;
 
             LogPhase1bChosenValue(new LoggableEndpoints(_cval));
@@ -360,8 +360,8 @@ internal sealed partial class Paxos
 
         acceptResponses[phase2bMessage.Sender] = phase2bMessage;
 
-        var f = (int)Math.Floor((_n - 1) / 4.0);
-        var threshold = _n - f;
+        var f = (int)Math.Floor((_membershipSize - 1) / 4.0);
+        var threshold = _membershipSize - f;
         LogPhase2bCollected(acceptResponses.Count, _crnd, threshold, f);
 
         if (acceptResponses.Count >= threshold)

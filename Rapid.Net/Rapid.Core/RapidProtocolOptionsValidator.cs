@@ -49,6 +49,26 @@ internal sealed class RapidProtocolOptionsValidator : IValidateOptions<RapidProt
             return ValidateOptionsResult.Fail("LeaveMessageTimeout must be positive");
         }
 
+        if (options.RingCount <= 0)
+        {
+            return ValidateOptionsResult.Fail("RingCount must be positive");
+        }
+
+        if (options.HighWaterMark <= 0)
+        {
+            return ValidateOptionsResult.Fail("HighWaterMark must be positive");
+        }
+
+        if (options.LowWaterMark < 0)
+        {
+            return ValidateOptionsResult.Fail("LowWaterMark must be non-negative");
+        }
+
+        if (options.LowWaterMark >= options.HighWaterMark)
+        {
+            return ValidateOptionsResult.Fail("LowWaterMark must be less than HighWaterMark");
+        }
+
         return ValidateOptionsResult.Success;
     }
 }

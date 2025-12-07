@@ -121,9 +121,9 @@ internal sealed class MultiNodeCutDetector
     /// Invalidates edges between nodes that are failing or have failed. This step may be skipped safely
     /// when there are no failing nodes.
     /// </summary>
-    /// <param name="view">MutableMembershipView object required to find observer-subject relationships between failing nodes.</param>
+    /// <param name="view">MembershipView object required to find observer-subject relationships between failing nodes.</param>
     /// <returns>A list of endpoints representing a view change proposal.</returns>
-    public List<Endpoint> InvalidateFailingEdges(MutableMembershipView view)
+    public List<Endpoint> InvalidateFailingEdges(MembershipView view)
     {
         lock (_lock)
         {

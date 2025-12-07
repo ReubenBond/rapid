@@ -34,28 +34,20 @@ public interface IRapidCluster
     Task LeaveGracefullyAsync();
 
     /// <summary>
-    /// Gets the current immutable membership view.
+    /// Gets the accessor for membership view information.
+    /// This provides access to the current view and view change notifications.
     /// </summary>
-    /// <returns>The current immutable MembershipView snapshot.</returns>
-    MembershipView GetCurrentView();
-
-    /// <summary>
-    /// Subscribes to view changes, returning an async enumerable of subsequently decided views.
-    /// The enumerable will yield a new MembershipView each time consensus is reached on a view change.
-    /// </summary>
-    /// <param name="cancellationToken">Token to cancel the subscription.</param>
-    /// <returns>An async enumerable of MembershipView instances.</returns>
-    IAsyncEnumerable<MembershipView> SubscribeToViewChangesAsync(CancellationToken cancellationToken = default);
+    IMembershipViewAccessor ViewAccessor { get; }
 }
 
 /// <summary>
-/// Implementation of IRapidCluster that delegates to the membership service.
+/// Implementation of IRapidCluster that delegates to the membership service and view accessor.
 /// </summary>
-internal sealed class RapidCluster(RapidClusterService clusterService) : IRapidCluster
+internal sealed class RapidCluster(RapidClusterService clusterService, IMembershipViewAccessor viewAccessor) : IRapidCluster
 {
-    public IReadOnlyList<Endpoint> GetMemberlist() => clusterService.MembershipService?.GetMembershipView() ?? [];
+    public IReadOnlyList<Endpoint> GetMemberlist() => viewAccessor.CurrentView.Members;
 
-    public int GetMembershipSize() => clusterService.MembershipService?.GetMembershipSize() ?? 0;
+    public int GetMembershipSize() => viewAccessor.CurrentView.Size;
 
     public Dictionary<Endpoint, Metadata> GetClusterMetadata() => clusterService.MembershipService?.GetMetadata() ?? [];
 
@@ -69,19 +61,5 @@ internal sealed class RapidCluster(RapidClusterService clusterService) : IRapidC
         }
     }
 
-    public MembershipView GetCurrentView() => clusterService.MembershipService?.GetCurrentView() 
-        ?? throw new InvalidOperationException("Membership service is not initialized");
-
-    public async IAsyncEnumerable<MembershipView> SubscribeToViewChangesAsync([System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
-    {
-        if (clusterService.MembershipService == null)
-        {
-            yield break;
-        }
-
-        await foreach (var view in clusterService.MembershipService.SubscribeToViewChangesAsync(cancellationToken).ConfigureAwait(false))
-        {
-            yield return view;
-        }
-    }
+    public IMembershipViewAccessor ViewAccessor => viewAccessor;
 }

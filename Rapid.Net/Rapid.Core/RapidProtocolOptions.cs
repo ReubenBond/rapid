@@ -49,4 +49,19 @@ public sealed class RapidProtocolOptions
     /// Timeout for leave messages. Default: 1.5 seconds
     /// </summary>
     public TimeSpan LeaveMessageTimeout { get; set; } = TimeSpan.FromMilliseconds(1500);
+
+    /// <summary>
+    /// Number of virtual rings for consistent hashing. Default: 10
+    /// </summary>
+    public int RingCount { get; set; } = 10;
+
+    /// <summary>
+    /// High watermark threshold for multi-node cut detection. Default: 9
+    /// </summary>
+    public int HighWaterMark { get; set; } = 9;
+
+    /// <summary>
+    /// Low watermark threshold for multi-node cut detection. Default: 4
+    /// </summary>
+    public int LowWaterMark { get; set; } = 4;
 }
