@@ -285,6 +285,76 @@ var harness = new SimulationTestHarness(seed: <failed_seed>);
               └─────────────────────────┘
 ```
 
+## Debugging Tools
+
+### SimulationDebugger
+
+Provides step-by-step execution with breakpoints:
+
+```csharp
+await using var harness = new DeterministicSimulationHarness(seed: 12345, testOutput: output);
+var debugger = new SimulationDebugger(harness, output);
+
+// Set breakpoints
+debugger.SetBreakpointOnMembershipChange();
+debugger.SetBreakpointAtLogicalTime(100);
+debugger.SetConditionalBreakpoint(h => h.Nodes.Any(n => n.MembershipSize > 2), "Size > 2");
+
+// Run until breakpoint
+var hitBp = debugger.Run();
+if (hitBp != null)
+{
+    debugger.PrintState();  // Print cluster state at breakpoint
+    debugger.Continue();    // Continue to next breakpoint
+}
+```
+
+### SimulationRecorder and SimulationReplayer
+
+Record simulation events for debugging and replay:
+
+```csharp
+// Recording
+var recorder = new SimulationRecorder();
+recorder.RecordMessageSent(logicalTime, simulatedTime, "node:0", "node:1", "JoinRequest", 100);
+recorder.RecordNodeStateChange(logicalTime, simulatedTime, "node:1", NodeStateChangeType.Joined, 2, 1);
+
+// Export to JSON for analysis
+var json = recorder.ExportToJson();
+
+// Replay
+var replayer = new SimulationReplayer(recorder, output);
+replayer.StepToEventType(RecordedEventType.NodeStateChange);
+replayer.PrintNodeStates();
+
+// Set breakpoints during replay
+var bp = replayer.SetBreakpoint(e => e.Data is NodeStateChangeData { ChangeType: NodeStateChangeType.Crashed });
+replayer.StepUntilBreakpoint(bp);
+```
+
+### SequenceDiagramGenerator
+
+Generate message sequence diagrams from recorded events:
+
+```csharp
+var generator = new SequenceDiagramGenerator(recorder);
+
+// Text diagram
+var textDiagram = generator.GenerateText(new SequenceDiagramOptions 
+{
+    ShowMessageLabels = true 
+});
+
+// Mermaid format (for GitHub/GitLab rendering)
+var mermaid = generator.GenerateMermaid();
+
+// PlantUML format
+var plantUml = generator.GeneratePlantUML();
+
+// Message matrix showing counts between nodes
+var matrix = generator.GenerateMessageMatrix();
+```
+
 ## Limitations
 
 1. **Consensus delays**: Join operations require consensus, which involves alert batching delays. Tests involving multiple joins may take time even with zero batching window due to protocol round-trips.
@@ -366,6 +436,12 @@ var sharedResources = new SharedResources(
 - `Rapid.Tests/Simulation/DeterministicSimulationHarness.cs` - Extended harness for fully deterministic tests
 - `Rapid.Tests/Simulation/InvariantChecker.cs` - Cluster invariant verification
 - `Rapid.Tests/Simulation/ChaosInjector.cs` - Random fault injection
+- `Rapid.Tests/Simulation/DeterministicMessageQueue.cs` - Priority queue for deterministic message ordering
+- `Rapid.Tests/Simulation/SimulationRecorder.cs` - Event recording for replay and debugging
+- `Rapid.Tests/Simulation/SimulationReplayer.cs` - Event replay with stepping and breakpoints
+- `Rapid.Tests/Simulation/SequenceDiagramGenerator.cs` - Message sequence diagram generation
+- `Rapid.Tests/Simulation/SimulationDebugger.cs` - Step-by-step debugging with breakpoints
+- `Rapid.Tests/Simulation/DeterminismAudit.cs` - Documentation and utilities for determinism audits
 
 ## TODO: Fully Deterministic Simulation Test Suite
 
@@ -391,17 +467,22 @@ The following tasks are required to implement a fully deterministic simulation t
 - [x] **Audit all `CancellationTokenSource` timeout usages** - Ensure they use `TimeProvider`
   - [x] Replace `new CancellationTokenSource(timeout)` with `Task.WaitAsync(timeout, TimeProvider)` pattern in MembershipService
 
-- [ ] **Audit lock contention** - Ensure lock acquisition order is deterministic
-  - [ ] Consider using ordered lock acquisition or deterministic lock scheduling
+- [x] **Audit lock contention** - Ensure lock acquisition order is deterministic
+  - [x] Documented all lock patterns in `DeterminismAudit.cs`
+  - [x] Created `OrderedLock` utility for enforcing acquisition order
+  - [x] No nested lock acquisitions found in current codebase
 
-- [ ] **Audit dictionary iteration order** - .NET dictionaries don't guarantee order
-  - [ ] Replace with `SortedDictionary` or explicit ordering where iteration order affects behavior
+- [x] **Audit dictionary iteration order** - .NET dictionaries don't guarantee order
+  - [x] Documented all dictionary iteration patterns in `DeterminismAudit.cs`
+  - [x] `ListEndpointComparer` already provides deterministic key comparison
+  - [x] Protocol correctness doesn't depend on iteration order
+  - [x] Created `EndpointComparer` for `SortedDictionary` use if needed
 
 ### Phase 3: Network Simulation Enhancements
 
-- [ ] **Deterministic message delivery ordering** - Messages should be delivered in a deterministic order based on simulated time
-  - [ ] Priority queue for pending messages sorted by delivery time
-  - [ ] Tie-breaking by sender/receiver addresses and sequence numbers
+- [x] **Deterministic message delivery ordering** - Messages should be delivered in a deterministic order based on simulated time
+  - [x] Priority queue for pending messages sorted by delivery time (via `DeterministicMessageQueue`)
+  - [x] Tie-breaking by sender/receiver addresses and sequence numbers
 
 - [x] **Deterministic network delay calculation** - Use seeded random for jitter
   - [x] `SimulationNetwork` already uses `DeterministicRandom` for jitter calculation
@@ -416,7 +497,7 @@ The following tasks are required to implement a fully deterministic simulation t
 - [x] **Event logging and replay** - Record all events for debugging and replay
   - [x] Log all message sends/receives with timestamps (via `SimulationEvent` type)
   - [x] Log all task executions with timestamps
-  - [ ] Support replaying a recorded execution
+  - [x] Support replaying a recorded execution (via `SimulationRecorder` and `SimulationReplayer`)
 
 - [x] **Seed logging in test failures** - Automatically log the seed when a test fails
   - [x] xUnit `ITestOutputHelper` integration via `DeterministicSimulationHarness`
@@ -442,10 +523,10 @@ The following tasks are required to implement a fully deterministic simulation t
 - [x] **Parallel test execution** - Ensure deterministic tests can run in parallel
   - [x] Each test gets isolated `SharedResources` instance (via `DeterministicSimulationHarness`)
 
-- [ ] **Debugging helpers** - Tools for debugging simulation failures
-  - [x] Visualize cluster state at any point (partial - via `DumpEventLog()`)
-  - [ ] Step-by-step execution with breakpoints
-  - [ ] Message sequence diagrams
+- [x] **Debugging helpers** - Tools for debugging simulation failures
+  - [x] Visualize cluster state at any point (via `SimulationDebugger.PrintState()`)
+  - [x] Step-by-step execution with breakpoints (via `SimulationDebugger`)
+  - [x] Message sequence diagrams (via `SequenceDiagramGenerator`)
 
 ### References
 

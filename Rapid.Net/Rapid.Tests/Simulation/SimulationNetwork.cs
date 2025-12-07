@@ -1,6 +1,4 @@
 using System.Collections.Concurrent;
-using Rapid.Messaging;
-using Rapid.Pb;
 
 namespace Rapid.Tests.Simulation;
 

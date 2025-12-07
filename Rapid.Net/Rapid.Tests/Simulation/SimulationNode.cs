@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Rapid.Messaging;
-using Rapid.Monitoring;
 using Rapid.Pb;
 
 namespace Rapid.Tests.Simulation;

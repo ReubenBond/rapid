@@ -1,6 +1,5 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Time.Testing;
-using Xunit.v3;
 
 namespace Rapid.Tests.Simulation;
 

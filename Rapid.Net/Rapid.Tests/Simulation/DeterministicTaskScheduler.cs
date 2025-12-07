@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using Microsoft.Extensions.Time.Testing;
 
 namespace Rapid.Tests.Simulation;
