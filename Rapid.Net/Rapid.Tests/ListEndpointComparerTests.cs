@@ -5,7 +5,7 @@ namespace Rapid.Tests;
 /// <summary>
 /// Tests for ListEndpointComparer equality and hashing functionality.
 /// </summary>
-internal class ListEndpointComparerTests
+public class ListEndpointComparerTests
 {
     private static readonly ListEndpointComparer Comparer = ListEndpointComparer.Instance;
 

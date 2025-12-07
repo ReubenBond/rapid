@@ -18,7 +18,7 @@ public sealed class MembershipView
     /// </summary>
     public static MembershipView Empty { get; } = CreateEmpty(ringCount: 1);
 
-    private readonly IReadOnlyList<IReadOnlyList<Endpoint>> _rings;
+    private readonly ImmutableArray<ImmutableArray<Endpoint>> _rings;
     private readonly ImmutableHashSet<Endpoint> _allNodes;
     private readonly ImmutableHashSet<NodeId> _identifiersSeen;
 
@@ -29,10 +29,10 @@ public sealed class MembershipView
     /// <param name="configurationId">The configuration identifier for this view.</param>
     /// <param name="rings">The rings of endpoints (each ring is sorted by its comparator).</param>
     /// <param name="nodeIds">The set of node identifiers seen.</param>
-    internal MembershipView(int ringCount, long configurationId, IReadOnlyList<IReadOnlyList<Endpoint>> rings, IReadOnlyList<NodeId> nodeIds)
+    internal MembershipView(int ringCount, long configurationId, ImmutableArray<ImmutableArray<Endpoint>> rings, ImmutableArray<NodeId> nodeIds)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(ringCount);
-        ArgumentOutOfRangeException.ThrowIfNotEqual(rings.Count, ringCount, "Number of rings does not match ring count");
+        ArgumentOutOfRangeException.ThrowIfNotEqual(rings.Length, ringCount, "Number of rings does not match ring count");
         RingCount = ringCount;
         ConfigurationId = configurationId;
         _rings = rings;
@@ -54,17 +54,17 @@ public sealed class MembershipView
     /// <summary>
     /// Gets the list of member endpoints in the cluster (from ring 0).
     /// </summary>
-    public IReadOnlyList<Endpoint> Members => _rings[0];
+    public ImmutableArray<Endpoint> Members => _rings[0];
 
     /// <summary>
     /// Gets the number of members in the cluster.
     /// </summary>
-    public int Size => Members.Count;
+    public int Size => Members.Length;
 
     /// <summary>
     /// Gets the list of node identifiers that have been seen (including those that have left).
     /// </summary>
-    public IReadOnlyList<NodeId> NodeIds { get; }
+    public ImmutableArray<NodeId> NodeIds { get; }
 
     /// <summary>
     /// Gets the configuration for this view, which can be used to bootstrap a new MembershipViewBuilder.
@@ -123,7 +123,7 @@ public sealed class MembershipView
     /// <param name="ringIndex">The index of the ring to query.</param>
     /// <returns>The list of endpoints in the k'th ring.</returns>
     /// <exception cref="ArgumentOutOfRangeException">Thrown if k is out of range.</exception>
-    public IReadOnlyList<Endpoint> GetRing(int ringIndex)
+    public ImmutableArray<Endpoint> GetRing(int ringIndex)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(ringIndex, 0);
         ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(ringIndex, RingCount);
@@ -136,7 +136,7 @@ public sealed class MembershipView
     /// <param name="node">Input node.</param>
     /// <returns>The set of observers for the node.</returns>
     /// <exception cref="NodeNotInRingException">Thrown if the node is not in the ring.</exception>
-    public IReadOnlyList<Endpoint> GetObserversOf(Endpoint node)
+    public ImmutableArray<Endpoint> GetObserversOf(Endpoint node)
     {
         ArgumentNullException.ThrowIfNull(node);
 
@@ -150,16 +150,16 @@ public sealed class MembershipView
             return [];
         }
 
-        var observers = new List<Endpoint>(RingCount);
+        var observers = ImmutableArray.CreateBuilder<Endpoint>(RingCount);
         for (var k = 0; k < RingCount; k++)
         {
             var ring = _rings[k];
             var index = FindIndex(ring, node);
             // Successor wraps around
-            var successorIndex = (index + 1) % ring.Count;
+            var successorIndex = (index + 1) % ring.Length;
             observers.Add(ring[successorIndex]);
         }
-        return observers;
+        return observers.MoveToImmutable();
     }
 
     /// <summary>
@@ -168,7 +168,7 @@ public sealed class MembershipView
     /// <param name="node">Input node.</param>
     /// <returns>The set of nodes monitored by the node.</returns>
     /// <exception cref="NodeNotInRingException">Thrown if the node is not in the ring.</exception>
-    public IReadOnlyList<Endpoint> GetSubjectsOf(Endpoint node)
+    public ImmutableArray<Endpoint> GetSubjectsOf(Endpoint node)
     {
         ArgumentNullException.ThrowIfNull(node);
 
@@ -192,7 +192,7 @@ public sealed class MembershipView
     /// </summary>
     /// <param name="node">Input node.</param>
     /// <returns>The list of expected observers. Empty list if the membership is empty.</returns>
-    public IReadOnlyList<Endpoint> GetExpectedObserversOf(Endpoint node)
+    public ImmutableArray<Endpoint> GetExpectedObserversOf(Endpoint node)
     {
         ArgumentNullException.ThrowIfNull(node);
 
@@ -202,16 +202,16 @@ public sealed class MembershipView
         }
 
         // For a joining node, find where it would be inserted and return predecessors
-        var subjects = new List<Endpoint>(RingCount);
+        var subjects = ImmutableArray.CreateBuilder<Endpoint>(RingCount);
         for (var k = 0; k < RingCount; k++)
         {
             var ring = _rings[k];
             var insertionPoint = FindInsertionPoint(ring, node, k);
             // Predecessor wraps around
-            var predecessorIndex = (insertionPoint - 1 + ring.Count) % ring.Count;
+            var predecessorIndex = (insertionPoint - 1 + ring.Length) % ring.Length;
             subjects.Add(ring[predecessorIndex]);
         }
-        return subjects;
+        return subjects.MoveToImmutable();
     }
 
     /// <summary>
@@ -220,23 +220,23 @@ public sealed class MembershipView
     /// <param name="observer">The observer node.</param>
     /// <param name="subject">The subject node.</param>
     /// <returns>The indexes k such that observer is a successor of subject on ring[k].</returns>
-    public IReadOnlyList<int> GetRingNumbers(Endpoint observer, Endpoint subject)
+    public ImmutableArray<int> GetRingNumbers(Endpoint observer, Endpoint subject)
     {
         var subjects = GetSubjectsOf(observer);
-        if (subjects.Count == 0)
+        if (subjects.Length == 0)
         {
             return [];
         }
 
-        var ringIndexes = new List<int>();
-        for (var ringNumber = 0; ringNumber < subjects.Count; ringNumber++)
+        var ringIndexes = ImmutableArray.CreateBuilder<int>();
+        for (var ringNumber = 0; ringNumber < subjects.Length; ringNumber++)
         {
             if (subjects[ringNumber].Equals(subject))
             {
                 ringIndexes.Add(ringNumber);
             }
         }
-        return ringIndexes;
+        return ringIndexes.ToImmutable();
     }
 
     /// <summary>
@@ -245,23 +245,23 @@ public sealed class MembershipView
     /// <returns>A new MembershipViewBuilder that can be used to create modified views.</returns>
     internal MembershipViewBuilder ToBuilder() => new(this);
 
-    private List<Endpoint> GetPredecessorsOf(Endpoint node)
+    private ImmutableArray<Endpoint> GetPredecessorsOf(Endpoint node)
     {
-        var subjects = new List<Endpoint>(RingCount);
+        var subjects = ImmutableArray.CreateBuilder<Endpoint>(RingCount);
         for (var k = 0; k < RingCount; k++)
         {
             var ring = _rings[k];
             var index = FindIndex(ring, node);
             // Predecessor wraps around
-            var predecessorIndex = (index - 1 + ring.Count) % ring.Count;
+            var predecessorIndex = (index - 1 + ring.Length) % ring.Length;
             subjects.Add(ring[predecessorIndex]);
         }
-        return subjects;
+        return subjects.MoveToImmutable();
     }
 
-    private static int FindIndex(IReadOnlyList<Endpoint> ring, Endpoint node)
+    private static int FindIndex(ImmutableArray<Endpoint> ring, Endpoint node)
     {
-        for (var i = 0; i < ring.Count; i++)
+        for (var i = 0; i < ring.Length; i++)
         {
             if (ring[i].Equals(node))
             {
@@ -271,14 +271,14 @@ public sealed class MembershipView
         return -1;
     }
 
-    private static int FindInsertionPoint(IReadOnlyList<Endpoint> ring, Endpoint node, int ringIndex)
+    private static int FindInsertionPoint(ImmutableArray<Endpoint> ring, Endpoint node, int ringIndex)
     {
         // Compute hash for the new node
         var nodeHash = MembershipViewBuilder.ComputeEndpointHash(ringIndex, node);
 
         // Binary search for insertion point based on hash
         var left = 0;
-        var right = ring.Count;
+        var right = ring.Length;
         while (left < right)
         {
             var mid = (left + right) / 2;
@@ -297,12 +297,12 @@ public sealed class MembershipView
 
     private static MembershipView CreateEmpty(int ringCount)
     {
-        var emptyRings = new List<IReadOnlyList<Endpoint>>(ringCount);
+        var emptyRingsBuilder = ImmutableArray.CreateBuilder<ImmutableArray<Endpoint>>(ringCount);
         for (var i = 0; i < ringCount; i++)
         {
-            emptyRings.Add([]);
+            emptyRingsBuilder.Add([]);
         }
-        return new MembershipView(ringCount, 0, emptyRings, []);
+        return new MembershipView(ringCount, 0, emptyRingsBuilder.MoveToImmutable(), []);
     }
 }
 
@@ -321,8 +321,8 @@ public sealed class MembershipViewConfiguration
         Endpoints = [.. endpoints];
     }
 
-    public IReadOnlyList<NodeId> NodeIds { get; }
-    public IReadOnlyList<Endpoint> Endpoints { get; }
+    public ImmutableArray<NodeId> NodeIds { get; }
+    public ImmutableArray<Endpoint> Endpoints { get; }
 
     /// <summary>
     /// Gets the configuration ID for the list of endpoints and identifiers.

@@ -5,7 +5,7 @@ namespace Rapid.Tests;
 /// <summary>
 /// Tests for RapidUtils utility methods.
 /// </summary>
-internal class RapidUtilsTests
+public class RapidUtilsTests
 {
     #region NodeIdFromUuid Tests
 

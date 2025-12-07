@@ -6,7 +6,7 @@ namespace Rapid.Tests;
 /// <summary>
 /// Integration tests for Rapid cluster using the new hosting API
 /// </summary>
-internal sealed class ClusterIntegrationTests(ITestOutputHelper outputHelper) : IAsyncDisposable
+public sealed class ClusterIntegrationTests(ITestOutputHelper outputHelper) : IAsyncDisposable
 {
     private readonly TestCluster _cluster = new(outputHelper);
 

@@ -5,7 +5,7 @@ namespace Rapid.Tests;
 /// <summary>
 /// Extended tests for Paxos and FastPaxos protocols.
 /// </summary>
-internal class ExtendedPaxosTests
+public class ExtendedPaxosTests
 {
     #region Phase1aMessage Tests
 

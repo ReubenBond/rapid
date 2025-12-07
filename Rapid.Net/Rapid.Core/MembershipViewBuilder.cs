@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.IO.Hashing;
 using System.Runtime.InteropServices;
 using Rapid.Exceptions;
@@ -266,13 +267,13 @@ internal sealed class MembershipViewBuilder
         var configurationId = MembershipViewConfiguration.GetConfigurationId(_identifiersSeen, _rings[0]);
 
         // Create immutable ring copies
-        var rings = new List<IReadOnlyList<Endpoint>>(_ringCount);
+        var ringsBuilder = ImmutableArray.CreateBuilder<ImmutableArray<Endpoint>>(_ringCount);
         for (var i = 0; i < _ringCount; i++)
         {
-            rings.Add([.. _rings[i]]);
+            ringsBuilder.Add([.. _rings[i]]);
         }
 
-        return new MembershipView(_ringCount, configurationId, rings, [.. _identifiersSeen]);
+        return new MembershipView(_ringCount, configurationId, ringsBuilder.MoveToImmutable(), [.. _identifiersSeen]);
     }
 
     /// <summary>

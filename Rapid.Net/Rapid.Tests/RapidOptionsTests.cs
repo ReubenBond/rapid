@@ -6,7 +6,7 @@ namespace Rapid.Tests;
 /// <summary>
 /// Tests for RapidOptions configuration functionality.
 /// </summary>
-internal class RapidOptionsTests
+public class RapidOptionsTests
 {
     #region ListenAddress Tests
 

@@ -5,7 +5,7 @@ namespace Rapid.Tests;
 /// <summary>
 /// Comprehensive tests for Rank comparison operators and IComparable implementation.
 /// </summary>
-internal class RankTests
+public class RankTests
 {
     #region IComparable Tests
 

@@ -5,7 +5,7 @@ namespace Rapid.Tests;
 /// <summary>
 /// Extended tests for MultiNodeCutDetector.
 /// </summary>
-internal class ExtendedMultiNodeCutDetectorTests
+public class ExtendedMultiNodeCutDetectorTests
 {
     private const int K = 10;
     private const int H = 8;

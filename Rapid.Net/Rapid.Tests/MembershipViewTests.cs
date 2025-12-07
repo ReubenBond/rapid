@@ -6,7 +6,7 @@ namespace Rapid.Tests;
 /// <summary>
 /// Tests for MembershipViewBuilder and MembershipView.
 /// </summary>
-internal class MembershipViewTests
+public class MembershipViewTests
 {
     private const int K = 10;
 
@@ -52,7 +52,7 @@ internal class MembershipViewTests
         for (var k = 0; k < K; k++)
         {
             var list = view.GetRing(k);
-            Assert.Equal(numNodes, list.Count);
+            Assert.Equal(numNodes, list.Length);
         }
     }
 
@@ -196,8 +196,8 @@ internal class MembershipViewTests
         builder.RingAdd(n2, Utils.NodeIdFromUuid(Guid.NewGuid()));
         var view = builder.Build();
 
-        Assert.Equal(K, view.GetSubjectsOf(n1).Count);
-        Assert.Equal(K, view.GetObserversOf(n1).Count);
+        Assert.Equal(K, view.GetSubjectsOf(n1).Length);
+        Assert.Equal(K, view.GetObserversOf(n1).Length);
         Assert.Single(view.GetSubjectsOf(n1).ToHashSet());
         Assert.Single(view.GetObserversOf(n1).ToHashSet());
     }
@@ -218,8 +218,8 @@ internal class MembershipViewTests
         builder.RingAdd(n3, Utils.NodeIdFromUuid(Guid.NewGuid()));
         var view = builder.Build();
 
-        Assert.Equal(K, view.GetSubjectsOf(n1).Count);
-        Assert.Equal(K, view.GetObserversOf(n1).Count);
+        Assert.Equal(K, view.GetSubjectsOf(n1).Length);
+        Assert.Equal(K, view.GetObserversOf(n1).Length);
         Assert.Equal(2, view.GetSubjectsOf(n1).ToHashSet().Count);
         Assert.Equal(2, view.GetObserversOf(n1).ToHashSet().Count);
 
@@ -228,8 +228,8 @@ internal class MembershipViewTests
         builder2.RingDelete(n2);
         var view2 = builder2.Build();
 
-        Assert.Equal(K, view2.GetSubjectsOf(n1).Count);
-        Assert.Equal(K, view2.GetObserversOf(n1).Count);
+        Assert.Equal(K, view2.GetSubjectsOf(n1).Length);
+        Assert.Equal(K, view2.GetObserversOf(n1).Length);
         Assert.Single(view2.GetSubjectsOf(n1).ToHashSet());
         Assert.Single(view2.GetObserversOf(n1).ToHashSet());
     }
@@ -382,8 +382,8 @@ internal class MembershipViewTests
 
         for (var i = 0; i < numNodes; i++)
         {
-            var numSubjects = view.GetSubjectsOf(list[i]).Count;
-            var numObservers = view.GetObserversOf(list[i]).Count;
+            var numSubjects = view.GetSubjectsOf(list[i]).Length;
+            var numObservers = view.GetObserversOf(list[i]).Length;
             Assert.True(K == numSubjects, $"NumSubjects: {numSubjects}");
             Assert.True(K == numObservers, $"NumObservers: {numObservers}");
         }
@@ -403,7 +403,7 @@ internal class MembershipViewTests
 
         var joiningNode = Utils.HostFromParts("127.0.0.1", serverPort + 1);
         var expectedObservers = view.GetExpectedObserversOf(joiningNode);
-        Assert.Equal(K, expectedObservers.Count);
+        Assert.Equal(K, expectedObservers.Length);
         Assert.Single(expectedObservers.Distinct());
         Assert.Equal(n, expectedObservers[0]);
     }
@@ -426,7 +426,7 @@ internal class MembershipViewTests
             builder.RingAdd(n, Utils.NodeIdFromUuid(Guid.NewGuid()));
 
             var view = builder.Build();
-            var numObserversActual = view.GetExpectedObserversOf(joiningNode).Count;
+            var numObserversActual = view.GetExpectedObserversOf(joiningNode).Length;
             Assert.True(numObservers <= numObserversActual);
             numObservers = numObserversActual;
 
@@ -641,7 +641,7 @@ internal class MembershipViewTests
         Assert.NotEqual(view.ConfigurationId, view2.ConfigurationId);
 
         // The new view should have the updated state
-        Assert.Equal(2, view2.Members.Count);
+        Assert.Equal(2, view2.Members.Length);
     }
 
     /// <summary>

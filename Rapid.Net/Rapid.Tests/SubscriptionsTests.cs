@@ -8,7 +8,7 @@ namespace Rapid.Tests;
 /// Tests whether subscription callbacks are invoked on cluster starts/joins.
 /// Port of Java SubscriptionsTest.java
 /// </summary>
-internal sealed class SubscriptionsTests(ITestOutputHelper outputHelper) : IAsyncDisposable
+public sealed class SubscriptionsTests(ITestOutputHelper outputHelper) : IAsyncDisposable
 {
     private readonly TestCluster _cluster = new(outputHelper);
 

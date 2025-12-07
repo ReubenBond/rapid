@@ -5,7 +5,7 @@ namespace Rapid.Tests;
 /// <summary>
 /// Tests for multi node cut detection
 /// </summary>
-internal class MultiNodeCutDetectorTests
+public class MultiNodeCutDetectorTests
 {
     private const int K = 10;
     private const int H = 8;
@@ -278,7 +278,7 @@ internal class MultiNodeCutDetectorTests
 
         var dst = endpoints[0];
         var observers = mView.GetObserversOf(dst);
-        Assert.Equal(K, observers.Count);
+        Assert.Equal(K, observers.Length);
 
         List<Endpoint> ret;
 

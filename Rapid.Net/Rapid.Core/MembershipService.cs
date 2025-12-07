@@ -342,7 +342,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
             {
                 var observers = _membershipView.GetExpectedObserversOf(joiningEndpoint);
                 builder.Endpoints.AddRange(observers);
-                observersCount = observers.Count;
+                observersCount = observers.Length;
             }
 
             LogHandlePreJoinResult(new LoggableEndpoint(joiningEndpoint), statusCode, observersCount);
@@ -713,7 +713,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         try
         {
             var observers = _membershipView.GetObserversOf(_myAddr);
-            LogLeavingWithObservers(new LoggableEndpoint(_myAddr), observers.Count, new LoggableEndpoints(observers));
+            LogLeavingWithObservers(new LoggableEndpoint(_myAddr), observers.Length, new LoggableEndpoints(observers));
 
             var tasks = observers.Select(endpoint =>
                 _messagingClient.SendMessageBestEffortAsync(endpoint, leave, CancellationToken.None).WithDefaultOnException());
@@ -855,9 +855,9 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         var subjects = _membershipView.GetSubjectsOf(_myAddr);
         var configurationId = _membershipView.ConfigurationId;
 
-        LogCreateFailureDetectors(subjects.Count);
+        LogCreateFailureDetectors(subjects.Length);
 
-        for (var i = 0; i < subjects.Count; i++)
+        for (var i = 0; i < subjects.Length; i++)
         {
             var subject = subjects[i];
             var ringNumber = i;
