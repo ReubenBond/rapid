@@ -30,7 +30,7 @@ public static class RapidServiceCollectionExtensions
 
         // Configure options
         services.Configure(configure);
-        
+
         // Configure protocol options
         if (configureProtocol != null)
         {
@@ -40,7 +40,7 @@ public static class RapidServiceCollectionExtensions
         {
             services.Configure<RapidProtocolOptions>(_ => { });
         }
-        
+
         // Add validation
         services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<RapidProtocolOptions>, RapidProtocolOptionsValidator>();
 
@@ -50,7 +50,7 @@ public static class RapidServiceCollectionExtensions
 
         // Add core services
         services.AddGrpc();
-        services.AddSingleton<SharedResources>(sp => 
+        services.AddSingleton<SharedResources>(sp =>
             new SharedResources(
                 sp.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>(),
                 sp.GetRequiredService<TimeProvider>()));

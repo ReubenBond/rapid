@@ -5,14 +5,15 @@ namespace Rapid.Messaging;
 public sealed class UnicastToAllBroadcaster(IMessagingClient client) : IBroadcaster
 {
     private readonly IMessagingClient _client = client;
-    private IReadOnlyList<Endpoint> _membership = Array.Empty<Endpoint>();
+    private IReadOnlyList<Endpoint> _membership = [];
 
     public void SetMembership(IReadOnlyList<Endpoint> membership) => _membership = membership;
 
-    public async Task BroadcastAsync(RapidRequest request)
+    public void Broadcast(RapidRequest request, CancellationToken cancellationToken)
     {
-        var tasks = _membership.Select(endpoint =>
-            _client.SendMessageBestEffortAsync(endpoint, request, CancellationToken.None));
-        await Task.WhenAll(tasks).ConfigureAwait(false);
+        foreach (var member in _membership)
+        {
+            _client.SendOneWayMessage(member, request, cancellationToken);
+        }
     }
 }

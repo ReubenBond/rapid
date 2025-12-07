@@ -11,10 +11,10 @@ namespace Rapid;
 /// </summary>
 internal sealed class MultiNodeCutDetector
 {
-    private const int KMin = 3;
-    private readonly int _k; // Number of observers per subject and vice versa
-    private readonly int _h; // High watermark
-    private readonly int _l; // Low watermark
+    private const int MinObserversPerSubject = 3;
+    private readonly int _observersPerSubject; // Number of observers per subject and vice versa
+    private readonly int _highWaterMark; // High watermark
+    private readonly int _lowWaterMark; // Low watermark
     private readonly Lock _lock = new();
     private int _proposalCount;
     private int _updatesInProgress;
@@ -23,15 +23,16 @@ internal sealed class MultiNodeCutDetector
     private readonly HashSet<Endpoint> _preProposal = [];
     private bool _seenLinkDownEvents;
 
-    public MultiNodeCutDetector(int k, int h, int l)
+    public MultiNodeCutDetector(int observersPerSubject, int highWaterMark, int lowWaterMark)
     {
-        if (h > k || l > h || k < KMin || l <= 0 || h <= 0)
+        if (highWaterMark > observersPerSubject || lowWaterMark > highWaterMark || observersPerSubject < MinObserversPerSubject || lowWaterMark <= 0 || highWaterMark <= 0)
         {
-            throw new ArgumentException($"Arguments do not satisfy K > H >= L >= 0: (K: {k}, H: {h}, L: {l})");
+            throw new ArgumentException($"Arguments do not satisfy K > H >= L >= 0: (K: {observersPerSubject}, H: {highWaterMark}, L: {lowWaterMark})");
         }
-        _k = k;
-        _h = h;
-        _l = l;
+
+        _observersPerSubject = observersPerSubject;
+        _highWaterMark = highWaterMark;
+        _lowWaterMark = lowWaterMark;
     }
 
     public int GetNumProposals()
@@ -64,8 +65,8 @@ internal sealed class MultiNodeCutDetector
     private List<Endpoint> AggregateForProposal(Endpoint linkSrc, Endpoint linkDst,
                                                 EdgeStatus edgeStatus, int ringNumber)
     {
-        if (ringNumber > _k)
-            throw new ArgumentException($"Ring number {ringNumber} exceeds K={_k}");
+        if (ringNumber > _observersPerSubject)
+            throw new ArgumentException($"Ring number {ringNumber} exceeds K={_observersPerSubject}");
 
         lock (_lock)
         {
@@ -76,24 +77,24 @@ internal sealed class MultiNodeCutDetector
 
             if (!_reportsPerHost.TryGetValue(linkDst, out var reportsForHost))
             {
-                reportsForHost = new Dictionary<int, Endpoint>(_k);
+                reportsForHost = new Dictionary<int, Endpoint>(_observersPerSubject);
                 _reportsPerHost[linkDst] = reportsForHost;
             }
 
             if (!reportsForHost.TryAdd(ringNumber, linkSrc))
             {
-                return [];  // duplicate announcement, ignore.
+                return []; // duplicate announcement, ignore.
             }
 
             var numReportsForHost = reportsForHost.Count;
 
-            if (numReportsForHost == _l)
+            if (numReportsForHost == _lowWaterMark)
             {
                 _updatesInProgress++;
                 _preProposal.Add(linkDst);
             }
 
-            if (numReportsForHost == _h)
+            if (numReportsForHost == _highWaterMark)
             {
                 // Enough reports about linkDst have been received that it is safe to act upon,
                 // provided there are no other nodes with L < #reports < H.

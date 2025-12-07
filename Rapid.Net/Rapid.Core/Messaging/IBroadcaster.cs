@@ -17,6 +17,6 @@ public interface IBroadcaster
     /// Broadcasts a message to all nodes in the membership.
     /// </summary>
     /// <param name="request">The request message to broadcast.</param>
-    /// <returns>A task that completes when all broadcasts are sent.</returns>
-    Task BroadcastAsync(RapidRequest request);
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
+    void Broadcast(RapidRequest request, CancellationToken cancellationToken);
 }

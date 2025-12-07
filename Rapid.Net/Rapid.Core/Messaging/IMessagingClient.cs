@@ -8,6 +8,16 @@ namespace Rapid.Messaging;
 public interface IMessagingClient : IDisposable
 {
     /// <summary>
+    /// Sends a message to a remote node without waiting for a response.
+    /// May retry on failures based on implementation.
+    /// </summary>
+    /// <param name="remote">The remote endpoint to send to.</param>
+    /// <param name="request">The request message.</param>
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
+    /// <exception cref="OperationCanceledException">Thrown when the operation is cancelled.</exception>
+    void SendOneWayMessage(Endpoint remote, RapidRequest request, CancellationToken cancellationToken);
+
+    /// <summary>
     /// Sends a message to a remote node and waits for a response.
     /// May retry on failures based on implementation.
     /// </summary>

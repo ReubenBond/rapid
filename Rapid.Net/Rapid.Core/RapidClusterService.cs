@@ -2,7 +2,6 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Rapid.Messaging;
-using Rapid.Monitoring;
 using Rapid.Pb;
 
 namespace Rapid;
@@ -14,11 +13,9 @@ internal sealed partial class RapidClusterService : BackgroundService
 {
     private readonly RapidOptions _options;
     private readonly IMessagingClient _messagingClient;
-    private readonly IEdgeFailureDetectorFactory _edgeFailureDetectorFactory;
+    private readonly IMembershipServiceFactory _membershipServiceFactory;
     private readonly ILogger<RapidClusterService> _logger;
-    private readonly ILoggerFactory _loggerFactory;
     private readonly SharedResources _sharedResources;
-    private readonly IOptions<RapidProtocolOptions> _protocolOptions;
     private MembershipService? _membershipService;
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Starting Rapid cluster service on {ListenAddress}")]
@@ -35,18 +32,15 @@ internal sealed partial class RapidClusterService : BackgroundService
 
     public RapidClusterService(
         IOptions<RapidOptions> options,
-        IOptions<RapidProtocolOptions> protocolOptions,
         IMessagingClient messagingClient,
-        IEdgeFailureDetectorFactory edgeFailureDetectorFactory,
+        IMembershipServiceFactory membershipServiceFactory,
         SharedResources sharedResources,
         ILoggerFactory loggerFactory)
     {
         _options = options.Value;
-        _protocolOptions = protocolOptions;
         _messagingClient = messagingClient;
-        _edgeFailureDetectorFactory = edgeFailureDetectorFactory;
+        _membershipServiceFactory = membershipServiceFactory;
         _sharedResources = sharedResources;
-        _loggerFactory = loggerFactory;
         _logger = loggerFactory.CreateLogger<RapidClusterService>();
     }
 
@@ -89,35 +83,17 @@ internal sealed partial class RapidClusterService : BackgroundService
 
     private async Task StartClusterAsync(CancellationToken cancellationToken)
     {
-        const int K = 10;
-        const int H = 9;
-        const int L = 4;
-
         var currentIdentifier = RapidUtils.NodeIdFromUuid(Guid.NewGuid());
-#pragma warning disable CA2000 // Dispose objects before losing scope - MembershipView ownership transferred to MembershipService
-        var membershipView = new MembershipView(K, [currentIdentifier], [_options.ListenAddress]);
-#pragma warning restore CA2000
-        var cutDetector = new MultiNodeCutDetector(K, H, L);
-        var metadataMap = new Dictionary<Endpoint, Metadata> { { _options.ListenAddress, _options.Metadata } };
 
-        _membershipService = new MembershipService(
+        _membershipService = _membershipServiceFactory.CreateForNewCluster(
             _options.ListenAddress,
-            cutDetector,
-            membershipView,
-            _sharedResources,
-            _protocolOptions,
-            _messagingClient,
-            _edgeFailureDetectorFactory,
-            metadataMap,
-            _options.Subscriptions,
-            _loggerFactory);
+            currentIdentifier,
+            _options.Metadata,
+            _options.Subscriptions);
     }
 
     private async Task JoinClusterAsync(CancellationToken cancellationToken)
     {
-        const int K = 10;
-        const int H = 9;
-        const int L = 4;
 
         var currentIdentifier = RapidUtils.NodeIdFromUuid(Guid.NewGuid());
 
@@ -214,7 +190,7 @@ internal sealed partial class RapidClusterService : BackgroundService
     {
         LogStopping();
         _membershipService?.Shutdown();
-        
+
         // Wait for background tasks to complete gracefully
         try
         {
@@ -225,7 +201,7 @@ internal sealed partial class RapidClusterService : BackgroundService
         {
             // Expected if forced shutdown
         }
-        
+
         await base.StopAsync(cancellationToken).ConfigureAwait(false);
     }
 

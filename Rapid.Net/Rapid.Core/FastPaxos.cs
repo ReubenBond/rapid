@@ -17,16 +17,14 @@ internal sealed partial class FastPaxos : IDisposable
     private readonly Endpoint _myAddr;
     private readonly long _configurationId;
     private readonly long _membershipSize;
-    private readonly Action<List<Endpoint>> _onDecidedWrapped;
     private readonly IBroadcaster _broadcaster;
     private readonly Dictionary<List<Endpoint>, int> _votesPerProposal = new(ListEndpointComparer.Instance);
     private readonly HashSet<Endpoint> _votesReceived = [];
     private readonly Paxos _paxos;
     private readonly Lock _paxosLock = new();
-    private bool _decided;
-    private CancellationTokenSource? _scheduledClassicRoundCts;
     private readonly RapidProtocolOptions _options;
     private readonly SharedResources _sharedResources;
+    private readonly CancellationTokenSource _scheduledClassicRoundCts = new();
 
     private readonly struct LoggableEndpoints(IEnumerable<Endpoint> endpoints)
     {
@@ -46,13 +44,15 @@ internal sealed partial class FastPaxos : IDisposable
     [LoggerMessage(Level = LogLevel.Trace, Message = "Scheduling classic round with delay: {Delay}")]
     private partial void LogSchedulingClassicRound(TimeSpan Delay);
 
+    private readonly TaskCompletionSource<List<Endpoint>> _onDecidedTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public Task<List<Endpoint>> Decided => _onDecidedTcs.Task;
+
     public FastPaxos(
         Endpoint myAddr,
         long configurationId,
         int membershipSize,
         IMessagingClient client,
         IBroadcaster broadcaster,
-        Action<List<Endpoint>> onDecide,
         IOptions<RapidProtocolOptions> options,
         SharedResources sharedResources,
         ILoggerFactory? loggerFactory = null)
@@ -66,28 +66,29 @@ internal sealed partial class FastPaxos : IDisposable
         _logger = (loggerFactory ?? NullLoggerFactory.Instance).CreateLogger<FastPaxos>();
 
         // The rate of a random expovariate variable, used to determine a jitter over a base delay to start classic
-        // rounds. This determines how many classic rounds we want to start per second on average.
+        // rounds. This determines how many classic rounds we want to start per second on average. Does not
+        // affect correctness of the protocol, but having too many nodes starting rounds will increase messaging load,
+        // especially for very large clusters.
         _jitterRate = 1 / (double)membershipSize;
 
-        _onDecidedWrapped = hosts =>
-        {
-            if (_decided) return;
-            _decided = true;
-            _scheduledClassicRoundCts?.Cancel();
-            onDecide(hosts);
-        };
-
         _paxos = new Paxos(myAddr, configurationId, membershipSize, client, broadcaster,
-                          _onDecidedWrapped, loggerFactory);
+                          _onDecidedTcs, loggerFactory);
     }
+
+    /// <summary>
+    /// Propose a value for a fast round.
+    /// </summary>
+    /// <param name="proposal">the membership change proposal towards a configuration change.</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    public void Propose(List<Endpoint> proposal, CancellationToken cancellationToken = default) => Propose(proposal, GetRandomDelay(), cancellationToken);
 
     /// <summary>
     /// Propose a value for a fast round with a delay to trigger the recovery protocol.
     /// </summary>
-    /// <param name="proposal">The membership change proposal towards a configuration change.</param>
+    /// <param name="proposal">the membership change proposal towards a configuration change.</param>
     /// <param name="recoveryDelay">Delay before starting classic Paxos round</param>
     /// <param name="cancellationToken">Cancellation token</param>
-    public async Task ProposeAsync(List<Endpoint> proposal, TimeSpan recoveryDelay, CancellationToken cancellationToken = default)
+    private void Propose(List<Endpoint> proposal, TimeSpan recoveryDelay, CancellationToken cancellationToken = default)
     {
         lock (_paxosLock)
         {
@@ -102,30 +103,35 @@ internal sealed partial class FastPaxos : IDisposable
         consensusMessage.Endpoints.AddRange(proposal);
 
         var proposalMessage = RapidUtils.ToRapidRequest(consensusMessage);
-        await _broadcaster.BroadcastAsync(proposalMessage).ConfigureAwait(false);
+        _broadcaster.Broadcast(proposalMessage, cancellationToken);
 
         LogSchedulingClassicRound(recoveryDelay);
-        _scheduledClassicRoundCts = new CancellationTokenSource();
-        var classicRoundTask = ScheduleClassicRoundAsync(recoveryDelay, cancellationToken);
+        var classicRoundTask = ScheduleClassicRoundAsync(recoveryDelay);
         _sharedResources.TrackBackgroundTask(classicRoundTask);
     }
 
-    private async Task ScheduleClassicRoundAsync(TimeSpan recoveryDelay, CancellationToken cancellationToken)
-    {
-        await Task.Delay(recoveryDelay, _sharedResources.TimeProvider, _scheduledClassicRoundCts!.Token).ConfigureAwait(false);
-        await StartClassicPaxosRoundAsync(cancellationToken).ConfigureAwait(false);
-    }
-
     /// <summary>
-    /// Propose a value for a fast round.
+    /// Trigger Paxos phase1a.
     /// </summary>
-    /// <param name="proposal">The membership change proposal towards a configuration change.</param>
-    /// <param name="cancellationToken">Cancellation token</param>
-    public Task ProposeAsync(List<Endpoint> proposal, CancellationToken cancellationToken = default) => ProposeAsync(proposal, GetRandomDelay(), cancellationToken);
+    private async Task ScheduleClassicRoundAsync(TimeSpan recoveryDelay)
+    {
+        await Task.Delay(recoveryDelay, _sharedResources.TimeProvider, _scheduledClassicRoundCts.Token).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        if (_onDecidedTcs.Task.IsCompleted || _scheduledClassicRoundCts.IsCancellationRequested)
+        {
+            return;
+        }
+
+        // Start classic Paxos round with round number 2
+        lock (_paxosLock)
+        {
+            _paxos.StartPhase1a(2, _scheduledClassicRoundCts.Token);
+        }
+    }
 
     /// <summary>
     /// Invoked by the membership service when it receives a proposal for a fast round.
     /// </summary>
+    /// <param name="proposalMessage">the membership change proposal towards a configuration change.</param>
     private void HandleFastRoundProposal(FastRoundPhase2bMessage proposalMessage)
     {
         if (proposalMessage.ConfigurationId != _configurationId)
@@ -139,7 +145,7 @@ internal sealed partial class FastPaxos : IDisposable
             return;
         }
 
-        if (_decided)
+        if (_onDecidedTcs.Task.IsCompleted)
         {
             return;
         }
@@ -158,8 +164,13 @@ internal sealed partial class FastPaxos : IDisposable
             if (count >= _membershipSize - f)
             {
                 LogDecidedViewChange(new LoggableEndpoints(proposalList));
+
                 // We have a successful proposal. Consume it.
-                _onDecidedWrapped(proposalList);
+                if (_onDecidedTcs.TrySetResult(proposalList))
+                {
+                    // Cancel the classic round.
+                    _scheduledClassicRoundCts?.Cancel();
+                }
             }
             else
             {
@@ -172,7 +183,10 @@ internal sealed partial class FastPaxos : IDisposable
     /// <summary>
     /// Invoked by the membership service when it receives a consensus proposal.
     /// </summary>
-    public async Task<RapidResponse> HandleMessagesAsync(RapidRequest request, CancellationToken cancellationToken = default)
+    /// <param name="request">the membership change proposal towards a configuration change.</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>Response message</returns>
+    public RapidResponse HandleMessages(RapidRequest request, CancellationToken cancellationToken = default)
     {
         switch (request.ContentCase)
         {
@@ -180,39 +194,22 @@ internal sealed partial class FastPaxos : IDisposable
                 HandleFastRoundProposal(request.FastRoundPhase2BMessage);
                 break;
             case RapidRequest.ContentOneofCase.Phase1AMessage:
-                await _paxos.HandlePhase1aMessageAsync(request.Phase1AMessage, cancellationToken).ConfigureAwait(false);
+                _paxos.HandlePhase1aMessage(request.Phase1AMessage, cancellationToken);
                 break;
             case RapidRequest.ContentOneofCase.Phase1BMessage:
-                await _paxos.HandlePhase1bMessageAsync(request.Phase1BMessage, cancellationToken).ConfigureAwait(false);
+                _paxos.HandlePhase1bMessage(request.Phase1BMessage, cancellationToken);
                 break;
             case RapidRequest.ContentOneofCase.Phase2AMessage:
-                await _paxos.HandlePhase2aMessageAsync(request.Phase2AMessage, cancellationToken).ConfigureAwait(false);
+                _paxos.HandlePhase2aMessage(request.Phase2AMessage, cancellationToken);
                 break;
             case RapidRequest.ContentOneofCase.Phase2BMessage:
-                await _paxos.HandlePhase2bMessageAsync(request.Phase2BMessage, cancellationToken).ConfigureAwait(false);
+                _paxos.HandlePhase2bMessage(request.Phase2BMessage);
                 break;
             default:
                 throw new ArgumentException($"Unexpected message case: {request.ContentCase}");
         }
+
         return RapidUtils.ToRapidResponse(new ConsensusResponse());
-    }
-
-    /// <summary>
-    /// Trigger Paxos phase1a.
-    /// </summary>
-    public Task StartClassicPaxosRoundAsync(CancellationToken cancellationToken = default)
-    {
-        if (_decided)
-        {
-            return Task.CompletedTask;
-        }
-
-        Task result;
-        lock (_paxosLock)
-        {
-            result = _paxos.StartPhase1aAsync(2, cancellationToken);
-        }
-        return result;
     }
 
     /// <summary>

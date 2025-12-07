@@ -37,28 +37,21 @@ public interface IRapidCluster
 /// <summary>
 /// Implementation of IRapidCluster that delegates to the membership service.
 /// </summary>
-internal sealed class RapidCluster : IRapidCluster
+internal sealed class RapidCluster(RapidClusterService clusterService) : IRapidCluster
 {
-    private readonly RapidClusterService _clusterService;
+    public IReadOnlyList<Endpoint> GetMemberlist() => clusterService.MembershipService?.GetMembershipView() ?? [];
 
-    public RapidCluster(RapidClusterService clusterService)
-    {
-        _clusterService = clusterService;
-    }
+    public int GetMembershipSize() => clusterService.MembershipService?.GetMembershipSize() ?? 0;
 
-    public IReadOnlyList<Endpoint> GetMemberlist() => _clusterService.MembershipService?.GetMembershipView() ?? [];
+    public Dictionary<Endpoint, Metadata> GetClusterMetadata() => clusterService.MembershipService?.GetMetadata() ?? [];
 
-    public int GetMembershipSize() => _clusterService.MembershipService?.GetMembershipSize() ?? 0;
-
-    public Dictionary<Endpoint, Metadata> GetClusterMetadata() => _clusterService.MembershipService?.GetMetadata() ?? [];
-
-    public void RegisterSubscription(ClusterEvents eventType, Action<ClusterStatusChange> callback) => _clusterService.MembershipService?.RegisterSubscription(eventType, callback);
+    public void RegisterSubscription(ClusterEvents eventType, Action<ClusterStatusChange> callback) => clusterService.MembershipService?.RegisterSubscription(eventType, callback);
 
     public async Task LeaveGracefullyAsync()
     {
-        if (_clusterService.MembershipService != null)
+        if (clusterService.MembershipService != null)
         {
-            await _clusterService.MembershipService.LeaveAsync().ConfigureAwait(false);
+            await clusterService.MembershipService.LeaveAsync().ConfigureAwait(false);
         }
     }
 }

@@ -62,9 +62,15 @@ internal sealed partial class GrpcClient : IMessagingClient
         }
         catch
         {
-            return RapidResponse.Parser.ParseFrom(Array.Empty<byte>());
+            return RapidResponse.Parser.ParseFrom([]);
         }
 #pragma warning restore CA1031
+    }
+
+    public void SendOneWayMessage(Endpoint remote, RapidRequest request, CancellationToken cancellationToken)
+    {
+        var client = GetOrCreateClient(remote);
+        client.sendRequestAsync(request, cancellationToken: cancellationToken).Ignore();
     }
 
     private Pb.MembershipService.MembershipServiceClient GetOrCreateClient(Endpoint remote)

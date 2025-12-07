@@ -11,6 +11,9 @@ namespace Rapid;
 
 /// <summary>
 /// Membership server class that implements the Rapid protocol.
+///
+/// Note: This class is not thread-safe yet. RpcServer.start() uses a single threaded messagingExecutor during the server
+/// initialization to make sure that only a single thread runs the process* methods.
 /// </summary>
 internal sealed partial class MembershipService : IMembershipServiceHandler, IDisposable
 {
@@ -24,16 +27,24 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
     private readonly Dictionary<Endpoint, Metadata> _joinerMetadata = [];
     private readonly IMessagingClient _messagingClient;
     private readonly MetadataManager _metadataManager;
+
+    // Event subscriptions
     private readonly Dictionary<ClusterEvents, List<Action<ClusterStatusChange>>> _subscriptions;
+
+    //
     private FastPaxos? _fastPaxosInstance;
 
-    // Fields used by batching logic
+    // Fields used by batching logic.
     private readonly Channel<AlertMessage> _sendQueue;
     private readonly Lock _batchSchedulerLock = new();
     private readonly SharedResources _sharedResources;
     private readonly CancellationTokenSource _shutdownCts = new();
     private readonly List<IDisposable> _failureDetectors = [];
+
+    // Failure detector
     private readonly IEdgeFailureDetectorFactory _fdFactory;
+
+    // Fields used by consensus protocol
     private bool _announcedProposal;
     private readonly Lock _membershipUpdateLock = new();
     private readonly RapidProtocolOptions _options;
@@ -160,16 +171,19 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         _sharedResources.TrackBackgroundTask(alertBatcherTask);
 
         _broadcaster.SetMembership(_membershipView.GetRing(0));
+        // this::edgeFailureNotification is invoked by the failure detector whenever an edge
+        // to an observer is marked faulty.
 
         // Prepare consensus instance
         _fastPaxosInstance = new FastPaxos(_myAddr, _membershipView.GetCurrentConfigurationId(),
                                           _membershipView.GetMembershipSize(), _messagingClient,
-                                          _broadcaster, DecideViewChange,
+                                          _broadcaster,
                                           _protocolOptions, _sharedResources, loggerFactory);
+        _fastPaxosInstance.Decided.ContinueWith(t => DecideViewChange(t.Result), scheduler: TaskScheduler.Default);
 
         CreateFailureDetectorsForCurrentConfiguration();
 
-        // Execute all VIEW_CHANGE callbacks
+        // Execute all VIEW_CHANGE callbacks. This informs applications that a start/join has successfully completed.
         var configurationId = _membershipView.GetCurrentConfigurationId();
         var currentMembership = _membershipView.GetRing(0);
         var nodeStatusChanges = GetInitialViewChange();
@@ -181,29 +195,35 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         }
     }
 
+    /// <summary>
+    /// Entry point for all messages.
+    /// </summary>
     public async Task<RapidResponse> HandleMessageAsync(RapidRequest msg, CancellationToken cancellationToken)
     {
         return msg.ContentCase switch
         {
-            RapidRequest.ContentOneofCase.PreJoinMessage => await HandlePreJoinMessageAsync(msg.PreJoinMessage, cancellationToken).ConfigureAwait(false),
+            RapidRequest.ContentOneofCase.PreJoinMessage => HandlePreJoinMessage(msg.PreJoinMessage, cancellationToken),
             RapidRequest.ContentOneofCase.JoinMessage => await HandleJoinMessageAsync(msg.JoinMessage, cancellationToken).ConfigureAwait(false),
-            RapidRequest.ContentOneofCase.BatchedAlertMessage => await HandleBatchedAlertMessageAsync(msg.BatchedAlertMessage, cancellationToken).ConfigureAwait(false),
-            RapidRequest.ContentOneofCase.ProbeMessage => await HandleProbeMessage(msg.ProbeMessage, cancellationToken).ConfigureAwait(false),
+            RapidRequest.ContentOneofCase.BatchedAlertMessage => HandleBatchedAlertMessage(msg.BatchedAlertMessage, cancellationToken),
+            RapidRequest.ContentOneofCase.ProbeMessage => HandleProbeMessage(msg.ProbeMessage, cancellationToken),
             RapidRequest.ContentOneofCase.FastRoundPhase2BMessage or
             RapidRequest.ContentOneofCase.Phase1AMessage or
             RapidRequest.ContentOneofCase.Phase1BMessage or
             RapidRequest.ContentOneofCase.Phase2AMessage or
-            RapidRequest.ContentOneofCase.Phase2BMessage => await HandleConsensusMessagesAsync(msg, cancellationToken).ConfigureAwait(false),
-            RapidRequest.ContentOneofCase.LeaveMessage => await HandleLeaveMessageAsync(msg, cancellationToken).ConfigureAwait(false),
+            RapidRequest.ContentOneofCase.Phase2BMessage => HandleConsensusMessages(msg, cancellationToken),
+            RapidRequest.ContentOneofCase.LeaveMessage => HandleLeaveMessage(msg, cancellationToken),
             _ => throw new ArgumentException($"Unidentified RapidRequest type {msg.ContentCase}")
         };
     }
 
-    private async Task<RapidResponse> HandlePreJoinMessageAsync(PreJoinMessage msg, CancellationToken cancellationToken)
+    /// <summary>
+    /// This is invoked by a new node joining the network at a seed node.
+    /// The seed responds with the current configuration ID and a list of observers
+    /// for the joiner, who then moves on to phase 2 of the protocol with its observers.
+    /// </summary>
+    private RapidResponse HandlePreJoinMessage(PreJoinMessage msg, CancellationToken cancellationToken)
     {
-        var tcs = new TaskCompletionSource<RapidResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        await _sharedResources.ScheduleAsyncCallback(async () =>
+        lock (_membershipUpdateLock)
         {
             var joiningEndpoint = msg.Sender;
             var statusCode = _membershipView.IsSafeToJoin(joiningEndpoint, msg.NodeId);
@@ -222,17 +242,21 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
                 builder.Endpoints.AddRange(_membershipView.GetExpectedObserversOf(joiningEndpoint));
             }
 
-            tcs.SetResult(RapidUtils.ToRapidResponse(builder));
-        }).ConfigureAwait(false);
-
-        return await tcs.Task.ConfigureAwait(false);
+            return RapidUtils.ToRapidResponse(builder);
+        }
     }
 
+    /// <summary>
+    /// Invoked by gatekeepers of a joining node. They perform any failure checking
+    /// required before propagating a AlertMessage with the status UP. After the cut detection
+    /// and full agreement succeeds, the observer informs the joiner about the new configuration it
+    /// is now a part of.
+    /// </summary>
     private async Task<RapidResponse> HandleJoinMessageAsync(JoinMessage joinMessage, CancellationToken cancellationToken)
     {
-        var tcs = new TaskCompletionSource<RapidResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var tcs = new TaskCompletionSource<RapidResponse>();
 
-        await _sharedResources.ScheduleAsyncCallback(async () =>
+        lock (_membershipUpdateLock)
         {
             var currentConfiguration = _membershipView.GetCurrentConfigurationId();
 
@@ -243,7 +267,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
 
                 ref var channel = ref CollectionsMarshal.GetValueRefOrAddDefault(_joinersToRespondTo, joinMessage.Sender, out var _);
                 channel ??= Channel.CreateUnbounded<TaskCompletionSource<RapidResponse>>();
-                await channel.Writer.WriteAsync(tcs).ConfigureAwait(false);
+                channel.Writer.TryWrite(tcs);
 
                 var alertMsg = new AlertMessage
                 {
@@ -260,6 +284,8 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
             }
             else
             {
+                // This handles the corner case where the configuration changed between phase 1 and phase 2
+                // of the joining node's bootstrap. It should attempt to rejoin the network.
                 var configuration = _membershipView.GetConfiguration();
                 LogWrongConfiguration(new LoggableEndpoint(joinMessage.Sender), joinMessage.ConfigurationId,
                     new CurrentConfigId(_membershipView), new MembershipSize(_membershipView));
@@ -273,6 +299,10 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
                 if (_membershipView.IsHostPresent(joinMessage.Sender) &&
                     _membershipView.IsIdentifierPresent(joinMessage.NodeId))
                 {
+                    // Race condition where a observer already crossed H messages for the joiner and changed
+                    // the configuration, but the JoinPhase2 messages show up at the observer
+                    // after it has already added the joiner. In this case, we simply
+                    // tell the sender that they're safe to join.
                     responseBuilder.StatusCode = JoinStatusCode.SafeToJoin;
                     responseBuilder.Endpoints.AddRange(configuration.Endpoints);
                     responseBuilder.Identifiers.AddRange(configuration.NodeIds);
@@ -287,33 +317,43 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
 
                 tcs.SetResult(RapidUtils.ToRapidResponse(responseBuilder));
             }
-        }).ConfigureAwait(false);
+        }
 
         return await tcs.Task.ConfigureAwait(false);
     }
 
-    private async Task<RapidResponse> HandleBatchedAlertMessageAsync(BatchedAlertMessage messageBatch, CancellationToken cancellationToken)
+    /// <summary>
+    /// This method receives edge update events and delivers them to
+    /// the cut detector to check if it will return a valid
+    /// proposal.
+    ///
+    /// Edge update messages that do not affect an ongoing proposal
+    /// needs to be dropped.
+    /// </summary>
+    private RapidResponse HandleBatchedAlertMessage(BatchedAlertMessage messageBatch, CancellationToken cancellationToken)
     {
-        var tcs = new TaskCompletionSource<RapidResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        await _sharedResources.ScheduleAsyncCallback(async () =>
+        lock (_membershipUpdateLock)
         {
             if (!FilterAlertMessages(messageBatch, _membershipView.GetCurrentConfigurationId()))
             {
-                tcs.SetResult(RapidUtils.ToRapidResponse(new ConsensusResponse()));
-                return;
+                return RapidUtils.ToRapidResponse(new ConsensusResponse());
             }
 
+            // We already have a proposal for this round
+            // => we have initiated consensus and cannot go back on our proposal.
             var proposals = new List<Endpoint>();
             foreach (var msg in messageBatch.Messages)
             {
+                // For valid UP alerts, extract the joiner details (UUID and metadata) which is going to be needed
+                // when the node is added to the rings
                 var extractedMessage = ExtractJoinerUuidAndMetadata(msg);
                 proposals.AddRange(_cutDetection.AggregateForProposal(extractedMessage));
             }
 
+            // Lastly, we apply implicit detections
             proposals.AddRange(_cutDetection.InvalidateFailingEdges(_membershipView));
 
-            Task? proposeTask = null;
+            // If we have a proposal for this stage, start an instance of consensus on it.
             lock (_membershipUpdateLock)
             {
                 if (proposals.Count > 0 && !_announcedProposal)
@@ -322,7 +362,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
                     var currentConfigurationId = _membershipView.GetCurrentConfigurationId();
                     LogInitiatingConsensus(new LoggableEndpoints(proposals));
 
-                    // Notify subscribers about the proposal
+                    // Inform subscribers that a proposal has been announced.
                     var nodeStatusChanges = CreateNodeStatusChangeList(proposals);
                     var currentMembership = _membershipView.GetRing(0);
                     var clusterStatusChange = new ClusterStatusChange(currentConfigurationId, currentMembership, nodeStatusChanges);
@@ -332,34 +372,29 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
                         cb(clusterStatusChange);
                     }
 
-                    if (_fastPaxosInstance != null)
-                    {
-                        proposeTask = _fastPaxosInstance.ProposeAsync(proposals, cancellationToken);
-                    }
+                    _fastPaxosInstance?.Propose(proposals, cancellationToken);
                 }
             }
 
-            if (proposeTask != null)
-            {
-                await proposeTask.ConfigureAwait(false);
-            }
-
-            tcs.SetResult(RapidUtils.ToRapidResponse(new ConsensusResponse()));
-        }).ConfigureAwait(false);
-
-        return await tcs.Task.ConfigureAwait(false);
+            return RapidUtils.ToRapidResponse(new ConsensusResponse());
+        }
     }
 
-    private async Task<RapidResponse> HandleConsensusMessagesAsync(RapidRequest request, CancellationToken cancellationToken)
+    /// <summary>
+    /// Receives proposal for the one-step consensus (essentially phase 2 of Fast Paxos).
+    ///
+    /// XXX: Implement recovery for the extremely rare possibility of conflicting proposals.
+    /// </summary>
+    private RapidResponse HandleConsensusMessages(RapidRequest request, CancellationToken cancellationToken)
     {
-        if (_fastPaxosInstance != null)
-        {
-            return await _fastPaxosInstance.HandleMessagesAsync(request, cancellationToken).ConfigureAwait(false);
-        }
+        _fastPaxosInstance?.HandleMessages(request, cancellationToken);
         return RapidUtils.ToRapidResponse(new ConsensusResponse());
     }
 
-    private async Task<RapidResponse> HandleLeaveMessageAsync(RapidRequest request, CancellationToken cancellationToken)
+    /// <summary>
+    /// Propagates the intent of a node to leave the group
+    /// </summary>
+    private RapidResponse HandleLeaveMessage(RapidRequest request, CancellationToken cancellationToken)
     {
         var leaveMessage = request.LeaveMessage;
         LogReceivedLeaveMessage(new LoggableEndpoint(leaveMessage.Sender), new LoggableEndpoint(_myAddr));
@@ -367,8 +402,17 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         return RapidUtils.ToRapidResponse(new ConsensusResponse());
     }
 
-    private static async Task<RapidResponse> HandleProbeMessage(ProbeMessage probeMessage, CancellationToken cancellationToken) => RapidUtils.ToRapidResponse(new ProbeResponse());
+    /// <summary>
+    /// Invoked by observers of a node for failure detection.
+    /// </summary>
+    private static RapidResponse HandleProbeMessage(ProbeMessage probeMessage, CancellationToken cancellationToken) => RapidUtils.ToRapidResponse(new ProbeResponse());
 
+    /// <summary>
+    /// This is invoked by FastPaxos modules when they arrive at a decision.
+    ///
+    /// Any node that is not in the membership list will be added to the cluster,
+    /// and any node that is currently in the membership list will be removed from it.
+    /// </summary>
     private void DecideViewChange(List<Endpoint> proposal)
     {
         lock (_membershipUpdateLock)
@@ -378,6 +422,9 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
 
         foreach (var node in proposal)
         {
+            // If the node is already in the ring, remove it. Else, add it.
+            // XXX: Maybe there's a cleaner way to do this in the future because
+            // this ties us to just two states a node can be in.
             if (_membershipView.IsHostPresent(node))
             {
                 LogRemovingNode(new LoggableEndpoint(node));
@@ -400,7 +447,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
                 _joinerUuid.Remove(node);
                 _joinerMetadata.Remove(node);
 
-                // Respond to joiners
+                // Send new configuration to all nodes joining through us
                 if (_joinersToRespondTo.TryGetValue(node, out var channel))
                 {
                     var config = _membershipView.GetConfiguration();
@@ -429,6 +476,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
             }
         }
 
+        // Clear data structures for the next round.
         _cutDetection.Clear();
         _broadcaster.SetMembership(_membershipView.GetRing(0));
 
@@ -439,13 +487,20 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         }
         _failureDetectors.Clear();
 
-        _fastPaxosInstance = new FastPaxos(_myAddr, _membershipView.GetCurrentConfigurationId(),
-                                          _membershipView.GetMembershipSize(), _messagingClient,
-                                          _broadcaster, DecideViewChange, _protocolOptions, _sharedResources);
+        _fastPaxosInstance = new FastPaxos(
+            _myAddr,
+            _membershipView.GetCurrentConfigurationId(),
+            _membershipView.GetMembershipSize(),
+            _messagingClient,
+            _broadcaster,
+            _protocolOptions,
+            _sharedResources);
+        _fastPaxosInstance.Decided.ContinueWith(t => DecideViewChange(t.Result), scheduler: TaskScheduler.Default);
 
+        // Inform EdgeFailureDetector about membership change
         CreateFailureDetectorsForCurrentConfiguration();
 
-        // Notify subscribers
+        // Publish an event to the listeners.
         var configurationId = _membershipView.GetCurrentConfigurationId();
         var currentMembership = _membershipView.GetRing(0);
         var nodeStatusChanges = CreateNodeStatusChangeList(proposal);
@@ -457,14 +512,34 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         }
     }
 
+    /// <summary>
+    /// Invoked by subscribers waiting for event notifications.
+    /// </summary>
+    /// <param name="evt">Cluster event to subscribe to</param>
+    /// <param name="callback">Callback to be executed when <paramref name="evt"/> occurs.</param>
     public void RegisterSubscription(ClusterEvents evt, Action<ClusterStatusChange> callback) => _subscriptions[evt].Add(callback);
 
+    /// <summary>
+    /// Gets the list of endpoints currently in the membership view.
+    /// </summary>
+    /// <returns>list of endpoints in the membership view</returns>
     public List<Endpoint> GetMembershipView() => _membershipView.GetRing(0);
 
+    /// <summary>
+    /// Gets the list of endpoints currently in the membership view.
+    /// </summary>
+    /// <returns>list of endpoints in the membership view</returns>
     public int GetMembershipSize() => _membershipView.GetMembershipSize();
 
+    /// <summary>
+    /// Gets the list of endpoints currently in the membership view.
+    /// </summary>
+    /// <returns>list of endpoints in the membership view</returns>
     public Dictionary<Endpoint, Metadata> GetMetadata() => new Dictionary<Endpoint, Metadata>(_metadataManager.GetAllMetadata());
 
+    /// <summary>
+    /// Shuts down all the executors.
+    /// </summary>
     public void Shutdown()
     {
         _shutdownCts.Cancel();
@@ -475,6 +550,10 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         _failureDetectors.Clear();
     }
 
+    /// <summary>
+    /// Leaves the cluster by telling all the observers to proactively trigger failure.
+    /// This operation is blocking, as we need to wait to send the alert messages before shutting down the rest
+    /// </summary>
     public async Task LeaveAsync()
     {
         var leaveMessage = new LeaveMessage { Sender = _myAddr };
@@ -505,11 +584,16 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         }
         catch (Exception)
         {
+            // we already were removed, so that's fine
             LogNodeAlreadyRemoved();
             throw;
         }
     }
 
+    /// <summary>
+    /// Queues a AlertMessage to be broadcasted after potentially being batched.
+    /// </summary>
+    /// <param name="msg">the AlertMessage to be broadcasted</param>
     private void EnqueueAlertMessage(AlertMessage msg)
     {
         lock (_batchSchedulerLock)
@@ -518,6 +602,9 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         }
     }
 
+    /// <summary>
+    /// Batches outgoing AlertMessages into a single BatchAlertMessage.
+    /// </summary>
     private async Task AlertBatcherAsync()
     {
         var buffer = new List<AlertMessage>();
@@ -544,7 +631,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
                         batchedMessage.Messages.AddRange(buffer);
 
                         var request = RapidUtils.ToRapidRequest(batchedMessage);
-                        _ = _broadcaster.BroadcastAsync(request);
+                        _broadcaster.Broadcast(request, _shutdownCts.Token);
 
                         buffer.Clear();
                     }
@@ -557,18 +644,27 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         }
     }
 
+    /// <summary>
+    /// A filter for removing invalid edge update messages. These include messages that were for a
+    /// configuration that the current node is not a part of, and messages that violate the semantics
+    /// of a node being a part of a configuration.
+    /// </summary>
     private static bool FilterAlertMessages(BatchedAlertMessage batchedAlertMessage, long currentConfigurationId) => batchedAlertMessage.Messages.Any(m => m.ConfigurationId == currentConfigurationId);
 
     private AlertMessage ExtractJoinerUuidAndMetadata(AlertMessage alertMessage)
     {
         if (alertMessage.EdgeStatus == EdgeStatus.Up && alertMessage.NodeId != null)
         {
+            // Both the UUID and Metadata are saved only after the node is done being added.
             _joinerUuid[alertMessage.EdgeDst] = alertMessage.NodeId;
             _joinerMetadata[alertMessage.EdgeDst] = alertMessage.Metadata;
         }
         return alertMessage;
     }
 
+    /// <summary>
+    /// Formats a proposal or a view change for application subscriptions.
+    /// </summary>
     private List<NodeStatusChange> CreateNodeStatusChangeList(IEnumerable<Endpoint> proposal)
     {
         var list = new List<NodeStatusChange>();
@@ -580,6 +676,11 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         return list;
     }
 
+    /// <summary>
+    /// Prepares a view change notification for a node that has just become part of a cluster. This is invoked when the
+    /// membership service is first initialized by a new node, which only happens on a Cluster.join() or Cluster.start().
+    /// Therefore, all EdgeStatus values will be UP.
+    /// </summary>
     private List<NodeStatusChange> GetInitialViewChange()
     {
         var list = new List<NodeStatusChange>();
@@ -590,6 +691,9 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         return list;
     }
 
+    /// <summary>
+    /// Creates and schedules failure detector instances based on the fdFactory instance.
+    /// </summary>
     private void CreateFailureDetectorsForCurrentConfiguration()
     {
         var subjects = _membershipView.GetSubjectsOf(_myAddr);
@@ -606,6 +710,12 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         }
     }
 
+    /// <summary>
+    /// This is a notification from a local edge failure detector at an observer. This changes
+    /// the status of the edge between the observer and the subject to DOWN.
+    /// </summary>
+    /// <param name="subject">The subject that has failed.</param>
+    /// <param name="configurationId">Configuration ID when the failure was detected</param>
     private void EdgeFailureNotification(Endpoint subject, long configurationId)
     {
         _sharedResources.ScheduleCallback(async () =>
@@ -621,7 +731,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
                 LogAnnouncingEdgeFail(new LoggableEndpoint(subject), new LoggableEndpoint(_myAddr), configurationId, new MembershipSize(_membershipView));
 
                 var ringNumbers = _membershipView.GetRingNumbers(_myAddr, subject);
-
+                // Note: setUuid is deliberately missing here because it does not affect leaves.
                 var msg = new AlertMessage
                 {
                     EdgeSrc = _myAddr,

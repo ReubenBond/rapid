@@ -46,8 +46,7 @@ internal sealed class MembershipView : IDisposable
     }
 
     /// <summary>
-    /// Initializes a new instance of the MembershipView class with the specified number of rings
-    /// and pre-populated with the given nodes.
+    /// Used to bootstrap a membership view from the fields of a MembershipView.Configuration object.
     /// </summary>
     /// <param name="k">Number of monitoring rings to maintain.</param>
     /// <param name="nodeIds">Collection of node identifiers to add.</param>
@@ -84,13 +83,14 @@ internal sealed class MembershipView : IDisposable
     }
 
     /// <summary>
-    /// Checks whether it is safe for a node to join the membership view.
+    /// Queries if a host with a logical identifier <paramref name="uuid"/> is safe to add to the network.
     /// </summary>
-    /// <param name="node">The endpoint of the node attempting to join.</param>
-    /// <param name="uuid">The unique identifier of the node attempting to join.</param>
+    /// <param name="node">The joining node.</param>
+    /// <param name="uuid">The joining node's identifier.</param>
     /// <returns>
-    /// A JoinStatusCode indicating whether the join is safe:
-    /// SAFE_TO_JOIN, HOSTNAME_ALREADY_IN_RING, UUID_ALREADY_IN_RING, or CONFIG_CHANGED.
+    /// HOSTNAME_ALREADY_IN_RING if the <paramref name="node"/> is already in the ring.
+    /// UUID_ALREADY_IN_RING if the <paramref name="uuid"/> is already seen before.
+    /// SAFE_TO_JOIN otherwise.
     /// </returns>
     public JoinStatusCode IsSafeToJoin(Endpoint node, NodeId uuid)
     {
@@ -116,10 +116,10 @@ internal sealed class MembershipView : IDisposable
     }
 
     /// <summary>
-    /// Adds a node to all K rings in the membership view.
+    /// Add a node to all K rings and records its unique identifier.
     /// </summary>
-    /// <param name="node">The endpoint of the node to add.</param>
-    /// <param name="nodeId">The unique identifier for the node.</param>
+    /// <param name="node">The node to be added.</param>
+    /// <param name="nodeId">The logical identifier of the node being added.</param>
     /// <exception cref="NodeAlreadyInRingException">Thrown if the node is already in the ring.</exception>
     /// <exception cref="UuidAlreadySeenException">Thrown if the node ID has been seen before.</exception>
     public void RingAdd(Endpoint node, NodeId nodeId)
@@ -170,9 +170,9 @@ internal sealed class MembershipView : IDisposable
     }
 
     /// <summary>
-    /// Removes a node from all K rings in the membership view.
+    /// Delete a host from all K rings.
     /// </summary>
-    /// <param name="node">The endpoint of the node to remove.</param>
+    /// <param name="node">The host to be removed.</param>
     /// <exception cref="NodeNotInRingException">Thrown if the node is not in the ring.</exception>
     public void RingDelete(Endpoint node)
     {
@@ -218,11 +218,11 @@ internal sealed class MembershipView : IDisposable
     }
 
     /// <summary>
-    /// Gets the list of observers monitoring the given node across all K rings.
-    /// An observer is a node that monitors its successor on a ring.
+    /// Returns the set of observers for <paramref name="node"/>.
     /// </summary>
-    /// <param name="node">The node being monitored.</param>
-    /// <returns>A list of endpoints that are observers of the given node.</returns>
+    /// <param name="node">Input node.</param>
+    /// <returns>The set of observers for <paramref name="node"/>.</returns>
+    /// <exception cref="NodeNotInRingException">Thrown if <paramref name="node"/> is not in the ring.</exception>
     public List<Endpoint> GetObserversOf(Endpoint node)
     {
         ArgumentNullException.ThrowIfNull(node);
@@ -248,6 +248,13 @@ internal sealed class MembershipView : IDisposable
         }
     }
 
+    /// <summary>
+    /// Computes the set of observers for <paramref name="node"/>.
+    /// Only call this from a (thread-)safe place!
+    /// </summary>
+    /// <param name="node">Input node.</param>
+    /// <returns>The set of observers for <paramref name="node"/>.</returns>
+    /// <exception cref="NodeNotInRingException">Thrown if <paramref name="node"/> is not in the ring.</exception>
     private List<Endpoint> ComputeObserversOf(Endpoint node)
     {
         ArgumentNullException.ThrowIfNull(node);
@@ -281,11 +288,11 @@ internal sealed class MembershipView : IDisposable
     }
 
     /// <summary>
-    /// Gets the list of subjects that the given node is monitoring across all K rings.
-    /// A subject is a node being monitored by its predecessor on a ring.
+    /// Returns the set of nodes monitored by <paramref name="node"/>.
     /// </summary>
-    /// <param name="node">The observing node.</param>
-    /// <returns>A list of endpoints that the given node is monitoring.</returns>
+    /// <param name="node">Input node.</param>
+    /// <returns>The set of nodes monitored by <paramref name="node"/>.</returns>
+    /// <exception cref="NodeNotInRingException">Thrown if <paramref name="node"/> is not in the ring.</exception>
     public List<Endpoint> GetSubjectsOf(Endpoint node)
     {
         ArgumentNullException.ThrowIfNull(node);
@@ -312,11 +319,12 @@ internal sealed class MembershipView : IDisposable
     }
 
     /// <summary>
-    /// Gets the expected list of observers for a node that hasn't been added to the rings yet.
-    /// This is used during the join protocol to determine which nodes should monitor the joining node.
+    /// Returns the expected observers of <paramref name="node"/>, even before it is
+    /// added to the ring. Used during the bootstrap protocol to identify
+    /// the nodes responsible for gatekeeping a joining peer.
     /// </summary>
-    /// <param name="node">The node to calculate expected observers for.</param>
-    /// <returns>A list of endpoints that would observe this node if it were added.</returns>
+    /// <param name="node">Input node.</param>
+    /// <returns>The list of nodes monitored by <paramref name="node"/>. Empty list if the membership is empty.</returns>
     public List<Endpoint> GetExpectedObserversOf(Endpoint node)
     {
         ArgumentNullException.ThrowIfNull(node);
@@ -336,6 +344,9 @@ internal sealed class MembershipView : IDisposable
         }
     }
 
+    /// <summary>
+    /// Used by GetExpectedObserversOf() and GetSubjectsOf().
+    /// </summary>
     private List<Endpoint> GetPredecessorsOf(Endpoint node)
     {
         var subjects = new List<Endpoint>();
@@ -357,10 +368,10 @@ internal sealed class MembershipView : IDisposable
     }
 
     /// <summary>
-    /// Checks if a host endpoint is present in the membership view.
+    /// Query if a host is part of the current membership set.
     /// </summary>
-    /// <param name="address">The endpoint to check.</param>
-    /// <returns>True if the endpoint is present; otherwise, false.</returns>
+    /// <param name="address">The host.</param>
+    /// <returns>True if the node is present in the membership view and false otherwise.</returns>
     public bool IsHostPresent(Endpoint address)
     {
         _rwLock.EnterReadLock();
@@ -375,10 +386,10 @@ internal sealed class MembershipView : IDisposable
     }
 
     /// <summary>
-    /// Checks if a node identifier has been seen before in the membership view.
+    /// Query if an identifier has been used by a node already.
     /// </summary>
-    /// <param name="identifier">The node identifier to check.</param>
-    /// <returns>True if the identifier has been seen; otherwise, false.</returns>
+    /// <param name="identifier">The identifier to query for.</param>
+    /// <returns>True if the identifier has been seen before and false otherwise.</returns>
     public bool IsIdentifierPresent(NodeId identifier)
     {
         _rwLock.EnterReadLock();
@@ -393,10 +404,10 @@ internal sealed class MembershipView : IDisposable
     }
 
     /// <summary>
-    /// Gets the current configuration identifier for the membership view.
-    /// The configuration ID is a hash of all node identifiers and endpoints in the view.
+    /// Get the current identifier of the configuration. Computed based on the
+    /// set of nodes in the view as well as the identifiers seen so far.
     /// </summary>
-    /// <returns>The current configuration ID.</returns>
+    /// <returns>The current configuration identifier.</returns>
     public long GetCurrentConfigurationId()
     {
         _rwLock.EnterReadLock();
@@ -416,10 +427,10 @@ internal sealed class MembershipView : IDisposable
     }
 
     /// <summary>
-    /// Gets all endpoints in a specific ring.
+    /// Get the list of endpoints in the k'th ring.
     /// </summary>
-    /// <param name="k">The ring number (0-based index).</param>
-    /// <returns>A list of endpoints in the specified ring.</returns>
+    /// <param name="k">The index of the ring to query.</param>
+    /// <returns>The list of endpoints in the k'th ring.</returns>
     /// <exception cref="ArgumentOutOfRangeException">Thrown if k is out of range.</exception>
     public List<Endpoint> GetRing(int k)
     {
@@ -436,11 +447,11 @@ internal sealed class MembershipView : IDisposable
     }
 
     /// <summary>
-    /// Gets the ring numbers where an observer is monitoring a subject.
+    /// Get the ring number of an observer for a given subject.
     /// </summary>
-    /// <param name="observer">The observing node.</param>
-    /// <param name="subject">The subject being monitored.</param>
-    /// <returns>A list of ring numbers where the observer monitors the subject.</returns>
+    /// <param name="observer">The observer node.</param>
+    /// <param name="subject">The subject node.</param>
+    /// <returns>The indexes k such that <paramref name="observer"/> is a successor of <paramref name="subject"/> on ring[k].</returns>
     public List<int> GetRingNumbers(Endpoint observer, Endpoint subject)
     {
         _rwLock.EnterReadLock();
@@ -471,9 +482,9 @@ internal sealed class MembershipView : IDisposable
     }
 
     /// <summary>
-    /// Gets the current number of nodes in the membership view.
+    /// Get the number of nodes currently in the membership.
     /// </summary>
-    /// <returns>The number of nodes in the view.</returns>
+    /// <returns>The number of nodes in the membership.</returns>
     public int GetMembershipSize()
     {
         _rwLock.EnterReadLock();
@@ -487,6 +498,9 @@ internal sealed class MembershipView : IDisposable
         }
     }
 
+    /// <summary>
+    /// XXX: May not be stable across processes. Verify.
+    /// </summary>
     private void UpdateCurrentConfigurationId()
     {
         _currentConfiguration = new Configuration(_identifiersSeen, _rings[0]);
@@ -494,9 +508,11 @@ internal sealed class MembershipView : IDisposable
     }
 
     /// <summary>
-    /// Gets the current configuration containing all node identifiers and endpoints.
+    /// Get a Configuration object that contains the list of nodes in the membership view
+    /// as well as the identifiers seen so far. These two lists suffice to bootstrap an
+    /// identical copy of the MembershipView object.
     /// </summary>
-    /// <returns>The current configuration object.</returns>
+    /// <returns>A Configuration object.</returns>
     public Configuration GetConfiguration()
     {
         _rwLock.EnterReadLock();
@@ -533,11 +549,20 @@ internal sealed class MembershipView : IDisposable
         return set.GetViewBetween(value, max).Where(e => !e.Equals(value)).FirstOrDefault();
     }
 
+    /// <summary>
+    /// The Configuration object contains a list of nodes in the membership view as well as a list of UUIDs.
+    /// An instance of this object created from one MembershipView object contains the necessary information
+    /// to bootstrap an identical MembershipView object.
+    /// </summary>
     public sealed class Configuration(IEnumerable<NodeId> nodeIds, IEnumerable<Endpoint> endpoints)
     {
         public List<NodeId> NodeIds { get; } = [.. nodeIds];
         public List<Endpoint> Endpoints { get; } = [.. endpoints];
 
+        /// <summary>
+        /// Gets the configuration ID for the list of endpoints and identifiers.
+        /// </summary>
+        /// <returns>A configuration identifier.</returns>
         public long GetConfigurationId() => GetConfigurationId(NodeIds, Endpoints);
 
         public static long GetConfigurationId(IEnumerable<NodeId> identifiers, IEnumerable<Endpoint> endpoints)
@@ -557,6 +582,9 @@ internal sealed class MembershipView : IDisposable
         }
     }
 
+    /// <summary>
+    /// Used to order endpoints in the different rings.
+    /// </summary>
     private sealed class AddressComparator(int seed) : IComparer<Endpoint>
     {
         private readonly int _seed = seed;
