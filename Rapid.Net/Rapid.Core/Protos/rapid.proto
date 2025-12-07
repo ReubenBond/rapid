@@ -8,7 +8,7 @@ option csharp_namespace = "Rapid.Pb";
 package remoting;
 
 service MembershipService {
-  rpc sendRequest (RapidRequest) returns (RapidResponse) {}
+  rpc SendRequest (RapidRequest) returns (RapidResponse) {}
 }
 
 message Endpoint

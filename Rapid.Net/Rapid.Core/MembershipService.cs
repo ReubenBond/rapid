@@ -18,7 +18,6 @@ namespace Rapid;
 internal sealed partial class MembershipService : IMembershipServiceHandler, IDisposable
 {
     private readonly ILogger<MembershipService> _logger;
-    private MembershipView _membershipView;
     private readonly MultiNodeCutDetector _cutDetection;
     private readonly Endpoint _myAddr;
     private readonly IBroadcaster _broadcaster;
@@ -28,12 +27,10 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
     private readonly IMessagingClient _messagingClient;
     private readonly MetadataManager _metadataManager;
     private readonly IFastPaxosFactory _fastPaxosFactory;
+    private MembershipView _membershipView;
 
     // Event subscriptions
     private readonly Dictionary<ClusterEvents, List<Action<ClusterStatusChange>>> _subscriptions;
-
-    //
-    private FastPaxos? _fastPaxosInstance;
 
     // Fields used by batching logic.
     private readonly Channel<AlertMessage> _sendQueue;
@@ -46,9 +43,10 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
     private readonly IEdgeFailureDetectorFactory _fdFactory;
 
     // Fields used by consensus protocol
-    private bool _announcedProposal;
     private readonly Lock _membershipUpdateLock = new();
     private readonly RapidProtocolOptions _options;
+    private bool _announcedProposal;
+    private FastPaxos? _fastPaxosInstance;
 
     // View change accessor for publishing updates
     private readonly MembershipViewAccessor _viewAccessor;
@@ -543,119 +541,119 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         lock (_membershipUpdateLock)
         {
             _announcedProposal = false;
-        }
 
-        // Track nodes that were added so we can notify their joiners after ALL nodes are processed
-        var addedNodes = new List<Endpoint>();
+            // Track nodes that were added so we can notify their joiners after ALL nodes are processed
+            var addedNodes = new List<Endpoint>();
 
-        // Create a builder from the current view to make modifications
-        var builder = _membershipView.ToBuilder();
+            // Create a builder from the current view to make modifications
+            var builder = _membershipView.ToBuilder();
 
-        foreach (var node in proposal)
-        {
-            // If the node is already in the ring, remove it. Else, add it.
-            // XXX: Maybe there's a cleaner way to do this in the future because
-            // this ties us to just two states a node can be in.
-            if (_membershipView.IsHostPresent(node))
+            foreach (var node in proposal)
             {
-                LogRemovingNode(new LoggableEndpoint(node));
-                builder.RingDelete(node);
-            }
-            else
-            {
-                if (!_joinerUuid.TryGetValue(node, out var nodeId))
+                // If the node is already in the ring, remove it. Else, add it.
+                // XXX: Maybe there's a cleaner way to do this in the future because
+                // this ties us to just two states a node can be in.
+                if (_membershipView.IsHostPresent(node))
                 {
-                    LogDecidedNodeWithoutUuid(new LoggableEndpoint(node));
-                    continue;
+                    LogRemovingNode(new LoggableEndpoint(node));
+                    builder.RingDelete(node);
                 }
-
-                var metadata = _joinerMetadata.GetValueOrDefault(node, new Metadata());
-
-                LogAddingNode(new LoggableEndpoint(node));
-                builder.RingAdd(node, nodeId);
-                _metadataManager.Add(node, metadata);
-
-                _joinerUuid.Remove(node);
-                _joinerMetadata.Remove(node);
-
-                // Track this node for later notification
-                addedNodes.Add(node);
-            }
-        }
-
-        // Build the new immutable view
-        _membershipView = builder.Build();
-
-        // Publish the new view to the accessor
-        _viewAccessor.PublishView(_membershipView);
-
-        // Now that ALL nodes have been added, notify all joiners with the complete configuration
-        foreach (var node in addedNodes)
-        {
-            if (_joinersToRespondTo.TryGetValue(node, out var channel))
-            {
-                var waitingCount = 0;
-                var config = _membershipView.Configuration;
-                var response = new JoinResponse
+                else
                 {
-                    Sender = _myAddr,
-                    StatusCode = JoinStatusCode.SafeToJoin,
-                    ConfigurationId = config.GetConfigurationId()
-                };
-                response.Endpoints.AddRange(config.Endpoints);
-                response.Identifiers.AddRange(config.NodeIds);
-                var allMetadata = _metadataManager.GetAllMetadata();
-                response.MetadataKeys.AddRange(allMetadata.Keys);
-                response.MetadataValues.AddRange(allMetadata.Values);
+                    if (!_joinerUuid.TryGetValue(node, out var nodeId))
+                    {
+                        LogDecidedNodeWithoutUuid(new LoggableEndpoint(node));
+                        continue;
+                    }
 
-                var rapidResponse = RapidUtils.ToRapidResponse(response);
+                    var metadata = _joinerMetadata.GetValueOrDefault(node, new Metadata());
 
-                // Send response to all waiting tasks
-                while (channel.Reader.TryRead(out var tcs))
-                {
-                    waitingCount++;
-                    tcs.SetResult(rapidResponse);
+                    LogAddingNode(new LoggableEndpoint(node));
+                    builder.RingAdd(node, nodeId);
+                    _metadataManager.Add(node, metadata);
+
+                    _joinerUuid.Remove(node);
+                    _joinerMetadata.Remove(node);
+
+                    // Track this node for later notification
+                    addedNodes.Add(node);
                 }
-
-                LogNotifyingJoiners(waitingCount, new LoggableEndpoint(node));
-                _joinersToRespondTo.Remove(node);
             }
-        }
 
-        // Clear data structures for the next round.
-        _cutDetection.Clear();
-        _broadcaster.SetMembership([.. _membershipView.GetRing(0)]);
+            // Build the new immutable view
+            _membershipView = builder.Build();
 
-        // Recreate failure detectors
-        foreach (var fd in _failureDetectors)
-        {
-            fd.Dispose();
-        }
-        _failureDetectors.Clear();
+            // Publish the new view to the accessor
+            _viewAccessor.PublishView(_membershipView);
 
-        LogDecideViewChangeCleanup();
+            // Now that ALL nodes have been added, notify all joiners with the complete configuration
+            foreach (var node in addedNodes)
+            {
+                if (_joinersToRespondTo.TryGetValue(node, out var channel))
+                {
+                    var waitingCount = 0;
+                    var config = _membershipView.Configuration;
+                    var response = new JoinResponse
+                    {
+                        Sender = _myAddr,
+                        StatusCode = JoinStatusCode.SafeToJoin,
+                        ConfigurationId = config.GetConfigurationId()
+                    };
+                    response.Endpoints.AddRange(config.Endpoints);
+                    response.Identifiers.AddRange(config.NodeIds);
+                    var allMetadata = _metadataManager.GetAllMetadata();
+                    response.MetadataKeys.AddRange(allMetadata.Keys);
+                    response.MetadataValues.AddRange(allMetadata.Values);
 
-        _fastPaxosInstance = _fastPaxosFactory.Create(
-            _myAddr,
-            _membershipView.ConfigurationId,
-            _membershipView.Size,
-            _broadcaster);
-        _fastPaxosInstance.Decided.ContinueWith(t => DecideViewChange(t.Result), scheduler: TaskScheduler.Default);
+                    var rapidResponse = RapidUtils.ToRapidResponse(response);
 
-        // Inform EdgeFailureDetector about membership change
-        CreateFailureDetectorsForCurrentConfiguration();
+                    // Send response to all waiting tasks
+                    while (channel.Reader.TryRead(out var tcs))
+                    {
+                        waitingCount++;
+                        tcs.SetResult(rapidResponse);
+                    }
 
-        // Publish an event to the listeners.
-        var configurationId = _membershipView.ConfigurationId;
-        var currentMembership = _membershipView.GetRing(0);
-        var nodeStatusChanges = CreateNodeStatusChangeList(proposal);
-        var clusterStatusChange = new ClusterStatusChange(configurationId, [.. currentMembership], nodeStatusChanges);
+                    LogNotifyingJoiners(waitingCount, new LoggableEndpoint(node));
+                    _joinersToRespondTo.Remove(node);
+                }
+            }
 
-        LogPublishingViewChange(new CurrentConfigId(_membershipView), new MembershipSize(_membershipView));
+            // Clear data structures for the next round.
+            _cutDetection.Clear();
+            _broadcaster.SetMembership([.. _membershipView.GetRing(0)]);
 
-        foreach (var cb in _subscriptions[ClusterEvents.ViewChange])
-        {
-            cb(clusterStatusChange);
+            // Recreate failure detectors
+            foreach (var fd in _failureDetectors)
+            {
+                fd.Dispose();
+            }
+            _failureDetectors.Clear();
+
+            LogDecideViewChangeCleanup();
+
+            _fastPaxosInstance = _fastPaxosFactory.Create(
+                _myAddr,
+                _membershipView.ConfigurationId,
+                _membershipView.Size,
+                _broadcaster);
+            _fastPaxosInstance.Decided.ContinueWith(t => DecideViewChange(t.Result), scheduler: TaskScheduler.Default);
+
+            // Inform EdgeFailureDetector about membership change
+            CreateFailureDetectorsForCurrentConfiguration();
+
+            // Publish an event to the listeners.
+            var configurationId = _membershipView.ConfigurationId;
+            var currentMembership = _membershipView.GetRing(0);
+            var nodeStatusChanges = CreateNodeStatusChangeList(proposal);
+            var clusterStatusChange = new ClusterStatusChange(configurationId, [.. currentMembership], nodeStatusChanges);
+
+            LogPublishingViewChange(new CurrentConfigId(_membershipView), new MembershipSize(_membershipView));
+
+            foreach (var cb in _subscriptions[ClusterEvents.ViewChange])
+            {
+                cb(clusterStatusChange);
+            }
         }
     }
 
@@ -686,7 +684,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
     /// Gets the list of endpoints currently in the membership view.
     /// </summary>
     /// <returns>list of endpoints in the membership view</returns>
-    public Dictionary<Endpoint, Metadata> GetMetadata() => new Dictionary<Endpoint, Metadata>(_metadataManager.GetAllMetadata());
+    public Dictionary<Endpoint, Metadata> GetMetadata() => new(_metadataManager.GetAllMetadata());
 
     /// <summary>
     /// Shuts down all the executors.

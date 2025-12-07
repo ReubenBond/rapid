@@ -42,7 +42,7 @@ public sealed partial class PingPongFailureDetectorFactory(Endpoint localEndpoin
 
         [LoggerMessage(Level = LogLevel.Warning, Message = "Probe exception for {Subject}")]
         private partial void LogProbeException(Exception ex, LoggableEndpoint Subject);
-        
+
         private Task? _probeTask;
 
         public void Start() => _probeTask = ProbeAsync();

@@ -5,7 +5,7 @@ namespace Rapid.Tests;
 /// <summary>
 /// Tests for RankComparer equality, comparison, and hashing functionality.
 /// </summary>
-public class RankComparerTests
+internal class RankComparerTests
 {
     private static readonly RankComparer Comparer = RankComparer.Instance;
 

@@ -8,7 +8,7 @@ namespace Rapid.Tests;
 /// Tests whether subscription callbacks are invoked on cluster starts/joins.
 /// Port of Java SubscriptionsTest.java
 /// </summary>
-public sealed class SubscriptionsTests(ITestOutputHelper outputHelper) : IAsyncDisposable
+internal sealed class SubscriptionsTests(ITestOutputHelper outputHelper) : IAsyncDisposable
 {
     private readonly TestCluster _cluster = new(outputHelper);
 
@@ -238,7 +238,7 @@ public sealed class SubscriptionsTests(ITestOutputHelper outputHelper) : IAsyncD
         // Filter to only non-empty entries and verify they match
         var nonEmptyEntries = log.Where(entry => entry.Count > 0).ToList();
         Assert.True(nonEmptyEntries.Count > 0 || log.Count == 0, "Expected at least one non-empty delta entry");
-        
+
         foreach (var entry in nonEmptyEntries)
         {
             foreach (var status in entry.Where(s => s.Status == expectedValue))

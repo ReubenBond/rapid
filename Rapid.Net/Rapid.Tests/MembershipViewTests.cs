@@ -6,7 +6,7 @@ namespace Rapid.Tests;
 /// <summary>
 /// Tests for MembershipViewBuilder and MembershipView.
 /// </summary>
-public class MembershipViewTests
+internal class MembershipViewTests
 {
     private const int K = 10;
 
@@ -653,7 +653,7 @@ public class MembershipViewTests
         var builder = new MembershipViewBuilder(K);
         var n1 = Utils.HostFromParts("127.0.0.1", 1);
         builder.RingAdd(n1, Utils.NodeIdFromUuid(Guid.NewGuid()));
-        
+
         var view = builder.Build();
         Assert.NotNull(view);
 
@@ -675,7 +675,7 @@ public class MembershipViewTests
 /// </summary>
 internal static class GuidUtility
 {
-    public static readonly Guid DnsNamespace = new Guid("6ba7b810-9dad-11d1-80b4-00c04fd430c8");
+    public static readonly Guid DnsNamespace = new("6ba7b810-9dad-11d1-80b4-00c04fd430c8");
 
     public static Guid Create(Guid namespaceId, string name)
     {

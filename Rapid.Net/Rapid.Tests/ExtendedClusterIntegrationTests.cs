@@ -6,7 +6,7 @@ namespace Rapid.Tests;
 /// <summary>
 /// Extended integration tests for Rapid cluster scenarios.
 /// </summary>
-public sealed class ExtendedClusterIntegrationTests(ITestOutputHelper outputHelper) : IAsyncDisposable
+internal sealed class ExtendedClusterIntegrationTests(ITestOutputHelper outputHelper) : IAsyncDisposable
 {
     private readonly TestCluster _cluster = new(outputHelper);
 

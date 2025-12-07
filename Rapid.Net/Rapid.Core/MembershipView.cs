@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.IO.Hashing;
 using Rapid.Exceptions;
 using Rapid.Pb;
@@ -18,8 +19,8 @@ public sealed class MembershipView
     public static MembershipView Empty { get; } = CreateEmpty(ringCount: 1);
 
     private readonly IReadOnlyList<IReadOnlyList<Endpoint>> _rings;
-    private readonly HashSet<Endpoint> _allNodes;
-    private readonly HashSet<NodeId> _identifiersSeen;
+    private readonly ImmutableHashSet<Endpoint> _allNodes;
+    private readonly ImmutableHashSet<NodeId> _identifiersSeen;
 
     /// <summary>
     /// Initializes a new immutable MembershipView instance.
@@ -124,7 +125,8 @@ public sealed class MembershipView
     /// <exception cref="ArgumentOutOfRangeException">Thrown if k is out of range.</exception>
     public IReadOnlyList<Endpoint> GetRing(int ringIndex)
     {
-        if (ringIndex < 0 || ringIndex >= RingCount) throw new ArgumentOutOfRangeException(nameof(ringIndex));
+        ArgumentOutOfRangeException.ThrowIfLessThan(ringIndex, 0);
+        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(ringIndex, RingCount);
         return _rings[ringIndex];
     }
 
@@ -273,7 +275,7 @@ public sealed class MembershipView
     {
         // Compute hash for the new node
         var nodeHash = MembershipViewBuilder.ComputeEndpointHash(ringIndex, node);
-        
+
         // Binary search for insertion point based on hash
         var left = 0;
         var right = ring.Count;
@@ -332,7 +334,7 @@ public sealed class MembershipViewConfiguration
     {
         ArgumentNullException.ThrowIfNull(identifiers);
         ArgumentNullException.ThrowIfNull(endpoints);
-        
+
         long hash = 1;
         foreach (var id in identifiers)
         {

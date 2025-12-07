@@ -10,7 +10,6 @@ namespace Rapid;
 internal sealed class MembershipViewAccessor : IMembershipViewAccessor
 {
     private readonly Channel<MembershipView> _viewChangeChannel;
-    private MembershipView _currentView = MembershipView.Empty;
     private readonly Lock _lock = new();
 
     /// <summary>
@@ -26,16 +25,7 @@ internal sealed class MembershipViewAccessor : IMembershipViewAccessor
     }
 
     /// <inheritdoc/>
-    public MembershipView CurrentView
-    {
-        get
-        {
-            lock (_lock)
-            {
-                return _currentView;
-            }
-        }
-    }
+    public MembershipView CurrentView { get; private set; } = MembershipView.Empty;
 
     /// <inheritdoc/>
     public async IAsyncEnumerable<MembershipView> ListenForViewUpdatesAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
@@ -56,7 +46,7 @@ internal sealed class MembershipViewAccessor : IMembershipViewAccessor
 
         lock (_lock)
         {
-            _currentView = view;
+            CurrentView = view;
         }
 
         _viewChangeChannel.Writer.TryWrite(view);

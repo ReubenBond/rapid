@@ -37,7 +37,7 @@ internal sealed class TestCluster : IAsyncDisposable
         builder.Logging.ClearProviders();
         builder.Services.AddSingleton(_loggerFactory);
         builder.ConfigureRapidKestrel(address.Port);
-        
+
         builder.Services.AddRapid(options =>
         {
             options.ListenAddress = address;
@@ -46,15 +46,15 @@ internal sealed class TestCluster : IAsyncDisposable
 
         var app = builder.Build();
         app.MapRapidMembershipService();
-        
+
         await app.StartAsync(cancellationToken).ConfigureAwait(false);
         _apps.Add(app);
-        
+
         var cluster = app.Services.GetRequiredService<IRapidCluster>();
-        
+
         // Wait for the cluster to be initialized
         await WaitForClusterInitializedAsync(cluster, cancellationToken).ConfigureAwait(false);
-        
+
         return (app, cluster);
     }
 
@@ -70,7 +70,7 @@ internal sealed class TestCluster : IAsyncDisposable
         builder.Logging.ClearProviders();
         builder.Services.AddSingleton(_loggerFactory);
         builder.ConfigureRapidKestrel(address.Port);
-        
+
         builder.Services.AddRapid(options =>
         {
             options.ListenAddress = address;
@@ -80,15 +80,15 @@ internal sealed class TestCluster : IAsyncDisposable
 
         var app = builder.Build();
         app.MapRapidMembershipService();
-        
+
         await app.StartAsync(cancellationToken).ConfigureAwait(false);
         _apps.Add(app);
-        
+
         var cluster = app.Services.GetRequiredService<IRapidCluster>();
-        
+
         // Wait for the cluster to be initialized
         await WaitForClusterInitializedAsync(cluster, cancellationToken).ConfigureAwait(false);
-        
+
         return (app, cluster);
     }
 
@@ -104,7 +104,7 @@ internal sealed class TestCluster : IAsyncDisposable
         builder.Logging.ClearProviders();
         builder.Services.AddSingleton(_loggerFactory);
         builder.ConfigureRapidKestrel(address.Port);
-        
+
         builder.Services.AddRapid(options =>
         {
             options.ListenAddress = address;
@@ -113,15 +113,15 @@ internal sealed class TestCluster : IAsyncDisposable
 
         var app = builder.Build();
         app.MapRapidMembershipService();
-        
+
         await app.StartAsync(cancellationToken).ConfigureAwait(false);
         _apps.Add(app);
-        
+
         var cluster = app.Services.GetRequiredService<IRapidCluster>();
-        
+
         // Wait for the cluster to be initialized
         await WaitForClusterInitializedAsync(cluster, cancellationToken).ConfigureAwait(false);
-        
+
         return (app, cluster);
     }
 
@@ -138,7 +138,7 @@ internal sealed class TestCluster : IAsyncDisposable
         builder.Logging.ClearProviders();
         builder.Services.AddSingleton(_loggerFactory);
         builder.ConfigureRapidKestrel(address.Port);
-        
+
         builder.Services.AddRapid(options =>
         {
             options.ListenAddress = address;
@@ -148,15 +148,15 @@ internal sealed class TestCluster : IAsyncDisposable
 
         var app = builder.Build();
         app.MapRapidMembershipService();
-        
+
         await app.StartAsync(cancellationToken).ConfigureAwait(false);
         _apps.Add(app);
-        
+
         var cluster = app.Services.GetRequiredService<IRapidCluster>();
-        
+
         // Wait for the cluster to be initialized
         await WaitForClusterInitializedAsync(cluster, cancellationToken).ConfigureAwait(false);
-        
+
         return (app, cluster);
     }
 

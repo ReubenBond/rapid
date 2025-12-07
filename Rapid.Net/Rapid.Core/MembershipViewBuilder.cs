@@ -264,7 +264,7 @@ internal sealed class MembershipViewBuilder
         _isSealed = true;
 
         var configurationId = MembershipViewConfiguration.GetConfigurationId(_identifiersSeen, _rings[0]);
-        
+
         // Create immutable ring copies
         var rings = new List<IReadOnlyList<Endpoint>>(_ringCount);
         for (var i = 0; i < _ringCount; i++)

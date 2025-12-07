@@ -52,7 +52,7 @@ public static class RapidServiceCollectionExtensions
             new SharedResources(
                 sp.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>(),
                 sp.GetRequiredService<TimeProvider>()));
-        
+
         // Register messaging infrastructure
         // GrpcClient is registered as a hosted service so it shuts down AFTER RapidClusterService
         // (hosted services are stopped in reverse registration order)
@@ -60,7 +60,7 @@ public static class RapidServiceCollectionExtensions
         services.AddSingleton<IMessagingClient>(sp => sp.GetRequiredService<GrpcClient>());
         services.AddHostedService(sp => sp.GetRequiredService<GrpcClient>());
         services.AddSingleton<IBroadcasterFactory, UnicastToAllBroadcasterFactory>();
-        
+
         // Register failure detector factory
         services.AddSingleton<IEdgeFailureDetectorFactory>(sp =>
         {
@@ -70,14 +70,14 @@ public static class RapidServiceCollectionExtensions
             var loggerFactory = sp.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>();
             return new PingPongFailureDetectorFactory(options.ListenAddress, client, sharedResources, loggerFactory);
         });
-        
+
         // Register FastPaxos factory
         services.AddSingleton<IFastPaxosFactory, FastPaxosFactory>();
 
         // Register MembershipViewAccessor as singleton (used by both MembershipService and consumers)
         services.AddSingleton<MembershipViewAccessor>();
         services.AddSingleton<IMembershipViewAccessor>(sp => sp.GetRequiredService<MembershipViewAccessor>());
-        
+
         // Register MembershipService factory
         services.AddSingleton<IMembershipServiceFactory, MembershipServiceFactory>();
 

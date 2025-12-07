@@ -6,7 +6,7 @@ namespace Rapid.Tests;
 /// <summary>
 /// Tests for MetadataManager functionality.
 /// </summary>
-public class MetadataManagerTests
+internal class MetadataManagerTests
 {
     #region Add Tests
 

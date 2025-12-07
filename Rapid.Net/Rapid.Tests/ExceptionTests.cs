@@ -6,7 +6,7 @@ namespace Rapid.Tests;
 /// <summary>
 /// Tests for Rapid exception classes.
 /// </summary>
-public class ExceptionTests
+internal class ExceptionTests
 {
     #region JoinException Tests
 

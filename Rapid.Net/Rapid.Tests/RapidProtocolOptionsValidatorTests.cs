@@ -3,7 +3,7 @@ namespace Rapid.Tests;
 /// <summary>
 /// Tests for RapidProtocolOptionsValidator validation logic.
 /// </summary>
-public class RapidProtocolOptionsValidatorTests
+internal class RapidProtocolOptionsValidatorTests
 {
     private readonly RapidProtocolOptionsValidator _validator = new();
 

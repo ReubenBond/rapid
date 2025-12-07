@@ -69,7 +69,7 @@ internal sealed partial class GrpcClient : IMessagingClient, IHostedService
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             cts.CancelAfter(_options.GrpcTimeout);
 
-            var response = await client.sendRequestAsync(request, cancellationToken: cts.Token);
+            var response = await client.SendRequestAsync(request, cancellationToken: cts.Token);
             return response;
         }
         catch (RpcException ex)
@@ -110,7 +110,7 @@ internal sealed partial class GrpcClient : IMessagingClient, IHostedService
 #pragma warning disable CA1031 // Do not catch general exception types
         try
         {
-            await client.sendRequestAsync(request, cancellationToken: cts.Token);
+            await client.SendRequestAsync(request, cancellationToken: cts.Token);
         }
         catch
         {

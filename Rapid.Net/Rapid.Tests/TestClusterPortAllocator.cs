@@ -1,7 +1,7 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net;
 using System.Net.NetworkInformation;
-using System.Collections.Concurrent;
 using System.Net.Sockets;
 
 namespace Rapid.Tests;
@@ -140,7 +140,7 @@ internal sealed class TestClusterPortAllocator : IDisposable
 
         public bool Acquire(string name)
         {
-            var result = new [] { 0 };
+            var result = new[] { 0 };
             using var signal = new ManualResetEventSlim(initialState: false);
             _workItems.Add(() =>
             {
