@@ -83,34 +83,19 @@ public class RapidUtilsTests
     }
 
     [Fact]
-    public void HostFromStringNullInputThrowsArgumentNullException()
-    {
-        Assert.Throws<ArgumentNullException>(() => RapidUtils.HostFromString(null!));
-    }
+    public void HostFromStringNullInputThrowsArgumentNullException() => Assert.Throws<ArgumentNullException>(() => RapidUtils.HostFromString(null!));
 
     [Fact]
-    public void HostFromStringInvalidFormatNoColonThrows()
-    {
-        Assert.Throws<ArgumentException>(() => RapidUtils.HostFromString("127.0.0.1"));
-    }
+    public void HostFromStringInvalidFormatNoColonThrows() => Assert.Throws<ArgumentException>(() => RapidUtils.HostFromString("127.0.0.1"));
 
     [Fact]
-    public void HostFromStringInvalidFormatNonNumericPortThrows()
-    {
-        Assert.Throws<ArgumentException>(() => RapidUtils.HostFromString("127.0.0.1:abc"));
-    }
+    public void HostFromStringInvalidFormatNonNumericPortThrows() => Assert.Throws<ArgumentException>(() => RapidUtils.HostFromString("127.0.0.1:abc"));
 
     [Fact]
-    public void HostFromStringInvalidFormatEmptyPortThrows()
-    {
-        Assert.Throws<ArgumentException>(() => RapidUtils.HostFromString("127.0.0.1:"));
-    }
+    public void HostFromStringInvalidFormatEmptyPortThrows() => Assert.Throws<ArgumentException>(() => RapidUtils.HostFromString("127.0.0.1:"));
 
     [Fact]
-    public void HostFromStringInvalidFormatMultipleColonsThrows()
-    {
-        Assert.Throws<ArgumentException>(() => RapidUtils.HostFromString("127.0.0.1:8080:extra"));
-    }
+    public void HostFromStringInvalidFormatMultipleColonsThrows() => Assert.Throws<ArgumentException>(() => RapidUtils.HostFromString("127.0.0.1:8080:extra"));
 
     #endregion
 
@@ -158,10 +143,7 @@ public class RapidUtilsTests
     }
 
     [Fact]
-    public void LoggableNullEndpointThrowsArgumentNullException()
-    {
-        Assert.Throws<ArgumentNullException>(() => RapidUtils.Loggable((Endpoint)null!));
-    }
+    public void LoggableNullEndpointThrowsArgumentNullException() => Assert.Throws<ArgumentNullException>(() => RapidUtils.Loggable((Endpoint)null!));
 
     [Fact]
     public void LoggableMultipleEndpointsFormatsCorrectly()

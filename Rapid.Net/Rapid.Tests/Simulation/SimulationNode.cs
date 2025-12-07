@@ -124,10 +124,7 @@ internal sealed class SimulationNode : IDisposable
         SimulationEnvironment environment,
         int nodeId,
         RapidProtocolOptions? protocolOptions = null,
-        ILoggerFactory? loggerFactory = null)
-    {
-        return Create(environment, "node", nodeId, protocolOptions, loggerFactory);
-    }
+        ILoggerFactory? loggerFactory = null) => Create(environment, "node", nodeId, protocolOptions, loggerFactory);
 
     /// <summary>
     /// Starts this node as a new single-node cluster (seed node).
@@ -293,10 +290,7 @@ internal sealed class SimulationNode : IDisposable
     /// <summary>
     /// Registers a subscription for cluster events.
     /// </summary>
-    public void RegisterSubscription(ClusterEvents eventType, Action<ClusterStatusChange> callback)
-    {
-        _membershipService?.RegisterSubscription(eventType, callback);
-    }
+    public void RegisterSubscription(ClusterEvents eventType, Action<ClusterStatusChange> callback) => _membershipService?.RegisterSubscription(eventType, callback);
 
     /// <summary>
     /// Gracefully leaves the cluster.
@@ -312,10 +306,7 @@ internal sealed class SimulationNode : IDisposable
     /// <summary>
     /// Shuts down the node.
     /// </summary>
-    public void Shutdown()
-    {
-        _membershipService?.Shutdown();
-    }
+    public void Shutdown() => _membershipService?.Shutdown();
 
     /// <summary>
     /// Creates a deterministic GUID using the node's random instance.

@@ -16,10 +16,7 @@ public sealed class SimulationTestHarnessTests : IAsyncLifetime
         return ValueTask.CompletedTask;
     }
 
-    public async ValueTask DisposeAsync()
-    {
-        await _harness.DisposeAsync();
-    }
+    public async ValueTask DisposeAsync() => await _harness.DisposeAsync();
 
     [Fact]
     public void DeterministicRandomWithSameSeedProducesSameSequence()
@@ -139,10 +136,7 @@ public sealed class SimulationTestHarnessTests : IAsyncLifetime
     }
 
     [Fact]
-    public void SeedIsAccessible()
-    {
-        Assert.Equal(12345, _harness.Seed);
-    }
+    public void SeedIsAccessible() => Assert.Equal(12345, _harness.Seed);
 
     [Fact(Skip = "Slow test - consensus roundtrips with batching delays. Use for integration testing only.")]
     public async Task SubscribeToViewChangesReceivesNotifications()

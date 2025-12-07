@@ -17,10 +17,7 @@ public sealed class ChaosInjectorTests : IAsyncLifetime
         return ValueTask.CompletedTask;
     }
 
-    public async ValueTask DisposeAsync()
-    {
-        await _harness.DisposeAsync();
-    }
+    public async ValueTask DisposeAsync() => await _harness.DisposeAsync();
 
     [Fact]
     public void DefaultRatesAreZero()
@@ -30,16 +27,10 @@ public sealed class ChaosInjectorTests : IAsyncLifetime
     }
 
     [Fact]
-    public void PartitionHealRateHasDefaultValue()
-    {
-        Assert.Equal(0.1, _chaos.PartitionHealRate);
-    }
+    public void PartitionHealRateHasDefaultValue() => Assert.Equal(0.1, _chaos.PartitionHealRate);
 
     [Fact]
-    public void MinimumAliveNodesHasDefaultValue()
-    {
-        Assert.Equal(1, _chaos.MinimumAliveNodes);
-    }
+    public void MinimumAliveNodesHasDefaultValue() => Assert.Equal(1, _chaos.MinimumAliveNodes);
 
     [Fact]
     public void MaybeInjectFaultReturnsFalseWithZeroRates()

@@ -12,10 +12,7 @@ public class RankComparerTests
     #region IEqualityComparer Equals Tests
 
     [Fact]
-    public void EqualsBothNullReturnsTrue()
-    {
-        Assert.True(Comparer.Equals(null, null));
-    }
+    public void EqualsBothNullReturnsTrue() => Assert.True(Comparer.Equals(null, null));
 
     [Fact]
     public void EqualsFirstNullReturnsFalse()
@@ -112,10 +109,7 @@ public class RankComparerTests
     #region IComparer Compare Tests
 
     [Fact]
-    public void CompareBothNullReturnsZero()
-    {
-        Assert.Equal(0, Comparer.Compare(null, null));
-    }
+    public void CompareBothNullReturnsZero() => Assert.Equal(0, Comparer.Compare(null, null));
 
     [Fact]
     public void CompareFirstNullReturnsNegative()

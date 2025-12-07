@@ -74,10 +74,7 @@ public class ExceptionTests
     }
 
     [Fact]
-    public void NodeAlreadyInRingExceptionNullEndpointThrowsArgumentNull()
-    {
-        Assert.Throws<ArgumentNullException>(() => new NodeAlreadyInRingException((Endpoint)null!));
-    }
+    public void NodeAlreadyInRingExceptionNullEndpointThrowsArgumentNull() => Assert.Throws<ArgumentNullException>(() => new NodeAlreadyInRingException((Endpoint)null!));
 
     #endregion
 
@@ -118,10 +115,7 @@ public class ExceptionTests
     }
 
     [Fact]
-    public void NodeNotInRingExceptionNullEndpointThrowsArgumentNull()
-    {
-        Assert.Throws<ArgumentNullException>(() => new NodeNotInRingException((Endpoint)null!));
-    }
+    public void NodeNotInRingExceptionNullEndpointThrowsArgumentNull() => Assert.Throws<ArgumentNullException>(() => new NodeNotInRingException((Endpoint)null!));
 
     #endregion
 

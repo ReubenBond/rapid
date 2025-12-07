@@ -73,12 +73,10 @@ internal sealed class DeterministicTaskScheduler : TaskScheduler
     }
 
     /// <inheritdoc />
-    protected override bool TryExecuteTaskInline(Task task, bool taskWasPreviouslyQueued)
-    {
+    protected override bool TryExecuteTaskInline(Task task, bool taskWasPreviouslyQueued) =>
         // For deterministic testing, we don't execute inline
         // All tasks go through the queue
-        return false;
-    }
+        false;
 
     /// <summary>
     /// Tries to dequeue and execute a single task.

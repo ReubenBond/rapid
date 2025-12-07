@@ -224,10 +224,7 @@ internal sealed class InvariantChecker
             return x.Hostname == y.Hostname && x.Port == y.Port;
         }
 
-        public int GetHashCode(Pb.Endpoint obj)
-        {
-            return HashCode.Combine(obj.Hostname, obj.Port);
-        }
+        public int GetHashCode(Pb.Endpoint obj) => HashCode.Combine(obj.Hostname, obj.Port);
     }
 }
 

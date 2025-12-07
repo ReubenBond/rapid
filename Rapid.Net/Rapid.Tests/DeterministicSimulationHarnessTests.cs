@@ -15,10 +15,7 @@ public sealed class DeterministicSimulationHarnessTests : IAsyncLifetime
         return ValueTask.CompletedTask;
     }
 
-    public async ValueTask DisposeAsync()
-    {
-        await _harness.DisposeAsync();
-    }
+    public async ValueTask DisposeAsync() => await _harness.DisposeAsync();
 
     [Fact]
     public void CreateSeedNodeWorksWithDeterministicHarness()
@@ -31,10 +28,7 @@ public sealed class DeterministicSimulationHarnessTests : IAsyncLifetime
     }
 
     [Fact]
-    public void LogicalTimeStartsAtZero()
-    {
-        Assert.Equal(0, _harness.LogicalTime);
-    }
+    public void LogicalTimeStartsAtZero() => Assert.Equal(0, _harness.LogicalTime);
 
     [Fact]
     public void StepIncrementsLogicalTime()
@@ -76,10 +70,7 @@ public sealed class DeterministicSimulationHarnessTests : IAsyncLifetime
     }
 
     [Fact]
-    public void TimeProviderIsAvailable()
-    {
-        Assert.NotNull(_harness.TimeProvider);
-    }
+    public void TimeProviderIsAvailable() => Assert.NotNull(_harness.TimeProvider);
 
     [Fact]
     public void AdvanceTimeAndStepAdvancesTimeProvider()
@@ -93,10 +84,7 @@ public sealed class DeterministicSimulationHarnessTests : IAsyncLifetime
     }
 
     [Fact]
-    public void SeedIsAccessible()
-    {
-        Assert.Equal(54321, _harness.Seed);
-    }
+    public void SeedIsAccessible() => Assert.Equal(54321, _harness.Seed);
 
     [Fact]
     public async Task RandomIsDeterministic()
@@ -136,10 +124,7 @@ public sealed class DeterministicSimulationHarnessTests : IAsyncLifetime
     }
 
     [Fact]
-    public void NetworkIsAvailable()
-    {
-        Assert.NotNull(_harness.Network);
-    }
+    public void NetworkIsAvailable() => Assert.NotNull(_harness.Network);
 
     [Fact]
     public void PartitionNodesRecordsEvent()

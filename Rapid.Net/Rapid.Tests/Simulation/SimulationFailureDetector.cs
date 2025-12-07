@@ -76,10 +76,7 @@ internal sealed partial class SimulationFailureDetector : IEdgeFailureDetector
             ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<SimulationFailureDetector>.Instance;
     }
 
-    public void Start()
-    {
-        _probeTask = ProbeAsync();
-    }
+    public void Start() => _probeTask = ProbeAsync();
 
     private async Task ProbeAsync()
     {
@@ -122,10 +119,7 @@ internal sealed partial class SimulationFailureDetector : IEdgeFailureDetector
 #pragma warning restore CA1031
     }
 
-    public void StopMonitoring()
-    {
-        _cts.Cancel();
-    }
+    public void StopMonitoring() => _cts.Cancel();
 
     public void Dispose()
     {

@@ -134,10 +134,7 @@ internal sealed class SimulationTestHarness : IAsyncDisposable
     /// Advances simulation time by the specified duration.
     /// Only works when useFakeTime is enabled.
     /// </summary>
-    public void AdvanceTime(TimeSpan duration)
-    {
-        Environment.AdvanceTime(duration);
-    }
+    public void AdvanceTime(TimeSpan duration) => Environment.AdvanceTime(duration);
 
     /// <summary>
     /// Waits for all nodes to converge to the same membership size.

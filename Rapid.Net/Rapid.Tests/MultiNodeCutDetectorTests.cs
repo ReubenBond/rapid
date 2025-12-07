@@ -335,34 +335,19 @@ public class MultiNodeCutDetectorTests
     }
 
     [Fact]
-    public void ConstructorKBelowMinimumThrows()
-    {
-        Assert.Throws<ArgumentException>(() => new MultiNodeCutDetector(2, 2, 1));
-    }
+    public void ConstructorKBelowMinimumThrows() => Assert.Throws<ArgumentException>(() => new MultiNodeCutDetector(2, 2, 1));
 
     [Fact]
-    public void ConstructorHGreaterThanKThrows()
-    {
-        Assert.Throws<ArgumentException>(() => new MultiNodeCutDetector(5, 6, 2));
-    }
+    public void ConstructorHGreaterThanKThrows() => Assert.Throws<ArgumentException>(() => new MultiNodeCutDetector(5, 6, 2));
 
     [Fact]
-    public void ConstructorLGreaterThanHThrows()
-    {
-        Assert.Throws<ArgumentException>(() => new MultiNodeCutDetector(10, 5, 6));
-    }
+    public void ConstructorLGreaterThanHThrows() => Assert.Throws<ArgumentException>(() => new MultiNodeCutDetector(10, 5, 6));
 
     [Fact]
-    public void ConstructorLZeroThrows()
-    {
-        Assert.Throws<ArgumentException>(() => new MultiNodeCutDetector(10, 8, 0));
-    }
+    public void ConstructorLZeroThrows() => Assert.Throws<ArgumentException>(() => new MultiNodeCutDetector(10, 8, 0));
 
     [Fact]
-    public void ConstructorHZeroThrows()
-    {
-        Assert.Throws<ArgumentException>(() => new MultiNodeCutDetector(10, 0, 0));
-    }
+    public void ConstructorHZeroThrows() => Assert.Throws<ArgumentException>(() => new MultiNodeCutDetector(10, 0, 0));
 
     [Fact]
     public void ConstructorHEqualsLSucceeds()

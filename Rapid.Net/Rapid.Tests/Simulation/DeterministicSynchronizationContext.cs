@@ -4,22 +4,16 @@ namespace Rapid.Tests.Simulation;
 /// A synchronization context that routes all continuations through a <see cref="DeterministicTaskScheduler"/>.
 /// This ensures that async/await continuations are captured and executed deterministically.
 /// </summary>
-internal sealed class DeterministicSynchronizationContext : SynchronizationContext
+/// <remarks>
+/// Creates a new deterministic synchronization context.
+/// </remarks>
+/// <param name="scheduler">The task scheduler to route continuations through.</param>
+internal sealed class DeterministicSynchronizationContext(DeterministicTaskScheduler scheduler) : SynchronizationContext
 {
-
-    /// <summary>
-    /// Creates a new deterministic synchronization context.
-    /// </summary>
-    /// <param name="scheduler">The task scheduler to route continuations through.</param>
-    public DeterministicSynchronizationContext(DeterministicTaskScheduler scheduler)
-    {
-        Scheduler = scheduler ?? throw new ArgumentNullException(nameof(scheduler));
-    }
-
     /// <summary>
     /// Gets the underlying task scheduler.
     /// </summary>
-    public DeterministicTaskScheduler Scheduler { get; }
+    public DeterministicTaskScheduler Scheduler { get; } = scheduler ?? throw new ArgumentNullException(nameof(scheduler));
 
     /// <inheritdoc />
     public override void Post(SendOrPostCallback d, object? state)
@@ -42,10 +36,7 @@ internal sealed class DeterministicSynchronizationContext : SynchronizationConte
     }
 
     /// <inheritdoc />
-    public override SynchronizationContext CreateCopy()
-    {
-        return new DeterministicSynchronizationContext(Scheduler);
-    }
+    public override SynchronizationContext CreateCopy() => new DeterministicSynchronizationContext(Scheduler);
 
     /// <summary>
     /// Installs this synchronization context on the current thread.
@@ -62,8 +53,5 @@ internal sealed class DeterministicSynchronizationContext : SynchronizationConte
     /// Restores the previous synchronization context.
     /// </summary>
     /// <param name="previous">The previous synchronization context to restore.</param>
-    public static void Restore(SynchronizationContext? previous)
-    {
-        SetSynchronizationContext(previous);
-    }
+    public static void Restore(SynchronizationContext? previous) => SetSynchronizationContext(previous);
 }

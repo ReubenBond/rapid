@@ -206,10 +206,7 @@ internal sealed class DeterministicSimulationHarness : IAsyncDisposable
     /// <summary>
     /// Runs until all nodes have the expected membership size.
     /// </summary>
-    public bool RunUntilConverged(int expectedSize, int maxSteps = 10000)
-    {
-        return RunUntil(() => Nodes.All(n => n.MembershipSize == expectedSize), maxSteps);
-    }
+    public bool RunUntilConverged(int expectedSize, int maxSteps = 10000) => RunUntil(() => Nodes.All(n => n.MembershipSize == expectedSize), maxSteps);
 
     /// <summary>
     /// Advances simulation time and executes any tasks that become ready.
@@ -314,10 +311,7 @@ internal sealed class DeterministicSimulationHarness : IAsyncDisposable
     /// <summary>
     /// Logs the seed to the test output for reproduction.
     /// </summary>
-    public void LogSeedForReproduction()
-    {
-        _testOutput?.WriteLine($"[SEED FOR REPRODUCTION] {Seed}");
-    }
+    public void LogSeedForReproduction() => _testOutput?.WriteLine($"[SEED FOR REPRODUCTION] {Seed}");
 
     /// <summary>
     /// Dumps the event log to the test output.

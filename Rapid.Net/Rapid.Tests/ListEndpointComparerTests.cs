@@ -12,10 +12,7 @@ public class ListEndpointComparerTests
     #region Equals Tests
 
     [Fact]
-    public void EqualsBothNullReturnsTrue()
-    {
-        Assert.True(Comparer.Equals(null, null));
-    }
+    public void EqualsBothNullReturnsTrue() => Assert.True(Comparer.Equals(null, null));
 
     [Fact]
     public void EqualsFirstNullReturnsFalse()
@@ -32,10 +29,7 @@ public class ListEndpointComparerTests
     }
 
     [Fact]
-    public void EqualsBothEmptyReturnsTrue()
-    {
-        Assert.True(Comparer.Equals([], []));
-    }
+    public void EqualsBothEmptyReturnsTrue() => Assert.True(Comparer.Equals([], []));
 
     [Fact]
     public void EqualsSameElementsReturnsTrue()
@@ -146,10 +140,7 @@ public class ListEndpointComparerTests
     }
 
     [Fact]
-    public void GetHashCodeEmptyListsReturnsSameHashCode()
-    {
-        Assert.Equal(Comparer.GetHashCode([]), Comparer.GetHashCode([]));
-    }
+    public void GetHashCodeEmptyListsReturnsSameHashCode() => Assert.Equal(Comparer.GetHashCode([]), Comparer.GetHashCode([]));
 
     [Fact]
     public void GetHashCodeDifferentListsLikelyDifferentHashCodes()
