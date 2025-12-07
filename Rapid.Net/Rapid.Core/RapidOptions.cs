@@ -1,5 +1,4 @@
 using Google.Protobuf;
-using Rapid.Messaging;
 using Rapid.Pb;
 
 namespace Rapid;

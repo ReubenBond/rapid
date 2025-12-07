@@ -1,4 +1,3 @@
-using Google.Protobuf;
 using Rapid.Pb;
 
 namespace Rapid.Tests;

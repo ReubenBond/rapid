@@ -368,7 +368,7 @@ public class ExtendedMultiNodeCutDetectorTests
     [Fact]
     public void InvalidateFailingEdgesNoDownEventsReturnsEmpty()
     {
-        var mView = new MembershipView(K);
+        var mView = new MutableMembershipView(K);
         var detector = new MultiNodeCutDetector(K, H, L);
 
         var dst = Utils.HostFromParts("127.0.0.2", 2);
@@ -386,7 +386,7 @@ public class ExtendedMultiNodeCutDetectorTests
     [Fact]
     public void InvalidateFailingEdgesEmptyMembershipViewReturnsEmpty()
     {
-        var mView = new MembershipView(K);
+        var mView = new MutableMembershipView(K);
         var detector = new MultiNodeCutDetector(K, H, L);
 
         var dst = Utils.HostFromParts("127.0.0.2", 2);

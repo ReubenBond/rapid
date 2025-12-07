@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
@@ -18,7 +19,7 @@ namespace Rapid;
 internal sealed partial class MembershipService : IMembershipServiceHandler, IDisposable
 {
     private readonly ILogger<MembershipService> _logger;
-    private readonly MembershipView _membershipView;
+    private readonly MutableMembershipView _membershipView;
     private readonly MultiNodeCutDetector _cutDetection;
     private readonly Endpoint _myAddr;
     private readonly IBroadcaster _broadcaster;
@@ -50,6 +51,10 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
     private readonly Lock _membershipUpdateLock = new();
     private readonly RapidProtocolOptions _options;
 
+    // View change subscription support
+    private readonly Channel<MembershipView> _viewChangeChannel;
+    private MembershipView _currentImmutableView;
+
     private readonly struct LoggableEndpoint(Endpoint endpoint)
     {
         private readonly Endpoint _endpoint = endpoint;
@@ -62,15 +67,15 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         public override readonly string ToString() => RapidUtils.Loggable(_endpoints);
     }
 
-    private readonly struct CurrentConfigId(MembershipView view)
+    private readonly struct CurrentConfigId(MutableMembershipView view)
     {
-        private readonly MembershipView _view = view;
+        private readonly MutableMembershipView _view = view;
         public override readonly string ToString() => _view.GetCurrentConfigurationId().ToString();
     }
 
-    private readonly struct MembershipSize(MembershipView view)
+    private readonly struct MembershipSize(MutableMembershipView view)
     {
-        private readonly MembershipView _view = view;
+        private readonly MutableMembershipView _view = view;
         public override readonly string ToString() => _view.GetMembershipSize().ToString();
     }
 
@@ -209,7 +214,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
     public MembershipService(
         Endpoint myAddr,
         MultiNodeCutDetector cutDetection,
-        MembershipView membershipView,
+        MutableMembershipView membershipView,
         SharedResources sharedResources,
         IOptions<RapidProtocolOptions> options,
         IMessagingClient messagingClient,
@@ -224,7 +229,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
     }
 
     public MembershipService(Endpoint myAddr, MultiNodeCutDetector cutDetection,
-                            MembershipView membershipView, SharedResources sharedResources,
+                            MutableMembershipView membershipView, SharedResources sharedResources,
                             IOptions<RapidProtocolOptions> options, IMessagingClient messagingClient,
                             IBroadcaster broadcaster,
                             IEdgeFailureDetectorFactory edgeFailureDetector,
@@ -247,6 +252,14 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         _fastPaxosFactory = fastPaxosFactory;
         _logger = (loggerFactory ?? NullLoggerFactory.Instance).CreateLogger<MembershipService>();
         _sendQueue = Channel.CreateUnbounded<AlertMessage>();
+
+        // Initialize view change subscription channel
+        _viewChangeChannel = Channel.CreateUnbounded<MembershipView>(new UnboundedChannelOptions
+        {
+            SingleReader = false,
+            SingleWriter = true
+        });
+        _currentImmutableView = _membershipView.ToImmutableView();
 
         // Make sure there is an empty list for every enum type
         foreach (var evt in Enum.GetValues<ClusterEvents>())
@@ -386,7 +399,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
             {
                 // This handles the corner case where the configuration changed between phase 1 and phase 2
                 // of the joining node's bootstrap. It should attempt to rejoin the network.
-                var configuration = _membershipView.GetConfiguration();
+                var configuration = _currentImmutableView.Configuration;
                 LogWrongConfiguration(new LoggableEndpoint(joinMessage.Sender), joinMessage.ConfigurationId,
                     new CurrentConfigId(_membershipView), new MembershipSize(_membershipView));
 
@@ -571,13 +584,19 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
             }
         }
 
+        // Update the immutable view after all changes are applied
+        _currentImmutableView = _membershipView.ToImmutableView();
+
+        // Publish the new view to the subscription channel
+        _viewChangeChannel.Writer.TryWrite(_currentImmutableView);
+
         // Now that ALL nodes have been added, notify all joiners with the complete configuration
         foreach (var node in addedNodes)
         {
             if (_joinersToRespondTo.TryGetValue(node, out var channel))
             {
                 var waitingCount = 0;
-                var config = _membershipView.GetConfiguration();
+                var config = _currentImmutableView.Configuration;
                 var response = new JoinResponse
                 {
                     Sender = _myAddr,
@@ -671,12 +690,33 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
     public Dictionary<Endpoint, Metadata> GetMetadata() => new Dictionary<Endpoint, Metadata>(_metadataManager.GetAllMetadata());
 
     /// <summary>
+    /// Gets the current immutable membership view.
+    /// </summary>
+    /// <returns>The current immutable MembershipView snapshot.</returns>
+    public MembershipView GetCurrentView() => _currentImmutableView;
+
+    /// <summary>
+    /// Subscribes to view changes, returning an async enumerable of subsequently decided views.
+    /// The enumerable will yield a new MembershipView each time consensus is reached on a view change.
+    /// </summary>
+    /// <param name="cancellationToken">Token to cancel the subscription.</param>
+    /// <returns>An async enumerable of MembershipView instances.</returns>
+    public async IAsyncEnumerable<MembershipView> SubscribeToViewChangesAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        await foreach (var view in _viewChangeChannel.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+        {
+            yield return view;
+        }
+    }
+
+    /// <summary>
     /// Shuts down all the executors.
     /// </summary>
     public void Shutdown()
     {
         LogShutdown();
         _shutdownCts.Cancel();
+        _viewChangeChannel.Writer.TryComplete();
         foreach (var fd in _failureDetectors)
         {
             fd.Dispose();

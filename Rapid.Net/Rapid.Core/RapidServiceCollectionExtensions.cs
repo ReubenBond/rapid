@@ -1,8 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Rapid.Messaging;
 using Rapid.Monitoring;
-using Rapid.Pb;
 
 namespace Rapid;
 

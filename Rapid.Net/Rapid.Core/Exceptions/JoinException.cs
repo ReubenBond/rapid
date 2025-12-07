@@ -1,4 +1,4 @@
-namespace Rapid;
+namespace Rapid.Exceptions;
 
 public sealed class JoinException : Exception
 {

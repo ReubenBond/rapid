@@ -1,11 +1,8 @@
-using MartinCostello.Logging.XUnit;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Rapid.Tests;
-using Xunit;
 
-namespace Rapid.Tests.Integration;
+namespace Rapid.Tests;
 
 /// <summary>
 /// Represents a test cluster that tracks and manages nodes for integration tests.

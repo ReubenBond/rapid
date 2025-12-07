@@ -6,13 +6,34 @@ Rapid.NET is a distributed membership service that allows processes to form clus
 
 ## Core Components
 
-### 1. MembershipView
-**Purpose**: Manages K-ring consistent hash topology  
+### 1. MembershipView (Immutable)
+**Purpose**: Public immutable snapshot of cluster membership  
+**Key Responsibilities**:
+- Expose current member list
+- Provide configuration ID
+- Support membership queries
+
+**Public API**:
+```csharp
+public sealed class MembershipView
+{
+    public int K { get; }                           // Number of rings
+    public long ConfigurationId { get; }            // Configuration version
+    public IReadOnlyList<Endpoint> Members { get; } // Member list
+    public int Size { get; }                        // Member count
+    public bool IsMember(Endpoint endpoint);        // Membership check
+    public MembershipViewConfiguration Configuration { get; } // Bootstrap config
+}
+```
+
+### 2. MutableMembershipView (Internal)
+**Purpose**: Internal mutable K-ring consistent hash topology  
 **Key Responsibilities**:
 - Add/remove nodes from K rings
 - Track observer/subject relationships
 - Maintain configuration IDs
 - Detect UUID collisions
+- Generate immutable snapshots
 
 **Data Structures**:
 ```csharp
@@ -24,9 +45,12 @@ Dictionary<Endpoint, NodeId> IdentifiersSeen { get; }
 
 // Configuration version
 long CurrentConfigurationId { get; }
+
+// Snapshot creation
+MembershipView ToImmutableView();
 ```
 
-### 2. MembershipService
+### 3. MembershipService
 **Purpose**: Core Rapid protocol implementation  
 **Key Responsibilities**:
 - Handle join/leave messages
@@ -34,6 +58,16 @@ long CurrentConfigurationId { get; }
 - Coordinate consensus via Paxos
 - Trigger view change events
 - Manage metadata
+- Publish immutable views via `IAsyncEnumerable<MembershipView>`
+
+**Public API for View Access**:
+```csharp
+// Get current snapshot
+MembershipView GetCurrentView();
+
+// Subscribe to subsequent view changes
+IAsyncEnumerable<MembershipView> SubscribeToViewChangesAsync(CancellationToken ct);
+```
 
 **Message Flow**:
 ```
@@ -93,6 +127,26 @@ Classic Round (if fast round fails):
 ```
 StartAsync() → Initialize → Bootstrap/Join → Running
 StopAsync() → Leave (if configured) → Cleanup
+```
+
+### 6. IRapidCluster (Public API)
+**Purpose**: Public interface for cluster interaction  
+**Key Methods**:
+```csharp
+public interface IRapidCluster
+{
+    // Legacy API
+    IReadOnlyList<Endpoint> GetMemberlist();
+    int GetMembershipSize();
+    void RegisterSubscription(ClusterEvents eventType, Action<ClusterStatusChange> callback);
+    
+    // New immutable view API
+    MembershipView GetCurrentView();  // Get current snapshot
+    IAsyncEnumerable<MembershipView> SubscribeToViewChangesAsync(CancellationToken ct);
+    
+    // Lifecycle
+    Task LeaveGracefullyAsync();
+}
 ```
 
 ## Messaging Layer

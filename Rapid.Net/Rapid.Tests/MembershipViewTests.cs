@@ -1,9 +1,10 @@
+using Rapid.Exceptions;
 using Rapid.Pb;
 
 namespace Rapid.Tests;
 
 /// <summary>
-/// Tests for a standalone MembershipView object.
+/// Tests for a standalone MutableMembershipView object.
 /// </summary>
 public class MembershipViewTests
 {
@@ -15,7 +16,7 @@ public class MembershipViewTests
     [Fact]
     public void OneRingAddition()
     {
-        var mview = new MembershipView(K);
+        var mview = new MutableMembershipView(K);
         var addr = Utils.HostFromParts("127.0.0.1", 123);
 
         mview.RingAdd(addr, Utils.NodeIdFromUuid(Guid.NewGuid()));
@@ -37,7 +38,7 @@ public class MembershipViewTests
     [Fact]
     public void MultipleRingAdditions()
     {
-        var mview = new MembershipView(K);
+        var mview = new MutableMembershipView(K);
         const int numNodes = 10;
 
         for (var i = 0; i < numNodes; i++)
@@ -58,7 +59,7 @@ public class MembershipViewTests
     [Fact]
     public void RingReAdditions()
     {
-        var mview = new MembershipView(K);
+        var mview = new MutableMembershipView(K);
         const int numNodes = 10;
         const int startPort = 0;
 
@@ -97,7 +98,7 @@ public class MembershipViewTests
     [Fact]
     public void RingDeletionsOnly()
     {
-        var mview = new MembershipView(K);
+        var mview = new MutableMembershipView(K);
         const int numNodes = 10;
         var numThrows = 0;
 
@@ -122,7 +123,7 @@ public class MembershipViewTests
     [Fact]
     public void RingAdditionsAndDeletions()
     {
-        var mview = new MembershipView(K);
+        var mview = new MutableMembershipView(K);
         const int numNodes = 10;
 
         for (var i = 0; i < numNodes; i++)
@@ -148,7 +149,7 @@ public class MembershipViewTests
     [Fact]
     public void MonitoringRelationshipEdge()
     {
-        var mview = new MembershipView(K);
+        var mview = new MutableMembershipView(K);
         var n1 = Utils.HostFromParts("127.0.0.1", 1);
 
         mview.RingAdd(n1, Utils.NodeIdFromUuid(Guid.NewGuid()));
@@ -167,7 +168,7 @@ public class MembershipViewTests
     [Fact]
     public void MonitoringRelationshipEmpty()
     {
-        var mview = new MembershipView(K);
+        var mview = new MutableMembershipView(K);
         var n = Utils.HostFromParts("127.0.0.1", 1);
 
         Assert.Throws<NodeNotInRingException>(() => mview.GetSubjectsOf(n));
@@ -180,7 +181,7 @@ public class MembershipViewTests
     [Fact]
     public void MonitoringRelationshipTwoNodes()
     {
-        var mview = new MembershipView(K);
+        var mview = new MutableMembershipView(K);
         var n1 = Utils.HostFromParts("127.0.0.1", 1);
         var n2 = Utils.HostFromParts("127.0.0.1", 2);
 
@@ -199,7 +200,7 @@ public class MembershipViewTests
     [Fact]
     public void MonitoringRelationshipThreeNodesWithDelete()
     {
-        var mview = new MembershipView(K);
+        var mview = new MutableMembershipView(K);
         var n1 = Utils.HostFromParts("127.0.0.1", 1);
         var n2 = Utils.HostFromParts("127.0.0.1", 2);
         var n3 = Utils.HostFromParts("127.0.0.1", 3);
@@ -227,7 +228,7 @@ public class MembershipViewTests
     [Fact]
     public void ConfigurationIdChanges()
     {
-        var mview = new MembershipView(K);
+        var mview = new MutableMembershipView(K);
         var initialConfig = mview.GetCurrentConfigurationId();
 
         var n1 = Utils.HostFromParts("127.0.0.1", 1);
@@ -254,7 +255,7 @@ public class MembershipViewTests
     [Fact]
     public void MembershipSize()
     {
-        var mview = new MembershipView(K);
+        var mview = new MutableMembershipView(K);
         Assert.Equal(0, mview.GetMembershipSize());
 
         var n1 = Utils.HostFromParts("127.0.0.1", 1);
@@ -278,7 +279,7 @@ public class MembershipViewTests
     [Fact]
     public void HostAndIdentifierPresence()
     {
-        var mview = new MembershipView(K);
+        var mview = new MutableMembershipView(K);
         var n1 = Utils.HostFromParts("127.0.0.1", 1);
         var nodeId1 = Utils.NodeIdFromUuid(Guid.NewGuid());
 
@@ -303,7 +304,7 @@ public class MembershipViewTests
     [Fact]
     public void UuidCollisionDetection()
     {
-        var mview = new MembershipView(K);
+        var mview = new MutableMembershipView(K);
         var n1 = Utils.HostFromParts("127.0.0.1", 1);
         var n2 = Utils.HostFromParts("127.0.0.1", 2);
         var sharedUuid = Utils.NodeIdFromUuid(Guid.NewGuid());
@@ -320,7 +321,7 @@ public class MembershipViewTests
     [Fact]
     public void SafeToJoinChecks()
     {
-        var mview = new MembershipView(K);
+        var mview = new MutableMembershipView(K);
         var n1 = Utils.HostFromParts("127.0.0.1", 1);
         var n2 = Utils.HostFromParts("127.0.0.1", 2);
         var nodeId1 = Utils.NodeIdFromUuid(Guid.NewGuid());
@@ -347,7 +348,7 @@ public class MembershipViewTests
     [Fact]
     public void MonitoringRelationshipMultipleNodes()
     {
-        var mview = new MembershipView(K);
+        var mview = new MutableMembershipView(K);
         const int numNodes = 1000;
         var list = new List<Endpoint>();
 
@@ -373,7 +374,7 @@ public class MembershipViewTests
     [Fact]
     public void MonitoringRelationshipBootstrap()
     {
-        var mview = new MembershipView(K);
+        var mview = new MutableMembershipView(K);
         const int serverPort = 1234;
         var n = Utils.HostFromParts("127.0.0.1", serverPort);
         mview.RingAdd(n, Utils.NodeIdFromUuid(Guid.NewGuid()));
@@ -391,7 +392,7 @@ public class MembershipViewTests
     [Fact]
     public void MonitoringRelationshipBootstrapMultiple()
     {
-        var mview = new MembershipView(K);
+        var mview = new MutableMembershipView(K);
         const int numNodes = 20;
         const int serverPortBase = 1234;
         var joiningNode = Utils.HostFromParts("127.0.0.1", serverPortBase - 1);
@@ -418,7 +419,7 @@ public class MembershipViewTests
     [Fact]
     public void NodeUniqueIdNoDeletions()
     {
-        var mview = new MembershipView(K);
+        var mview = new MutableMembershipView(K);
         var numExceptions = 0;
         var n1 = Utils.HostFromParts("127.0.0.1", 1);
         var id1 = Utils.NodeIdFromUuid(Guid.NewGuid());
@@ -483,7 +484,7 @@ public class MembershipViewTests
     [Fact]
     public void NodeUniqueIdWithDeletions()
     {
-        var mview = new MembershipView(K);
+        var mview = new MutableMembershipView(K);
         var n1 = Utils.HostFromParts("127.0.0.1", 1);
         var id1 = Utils.NodeIdFromUuid(Guid.NewGuid());
         mview.RingAdd(n1, id1);
@@ -521,7 +522,7 @@ public class MembershipViewTests
     [Fact]
     public void NodeConfigurationChange()
     {
-        var mview = new MembershipView(K);
+        var mview = new MutableMembershipView(K);
         const int numNodes = 1000;
         var set = new HashSet<long>(numNodes);
 
@@ -544,8 +545,8 @@ public class MembershipViewTests
     [Fact]
     public void NodeConfigurationsAcrossMViews()
     {
-        var mview1 = new MembershipView(K);
-        var mview2 = new MembershipView(K);
+        var mview1 = new MutableMembershipView(K);
+        var mview2 = new MutableMembershipView(K);
         const int numNodes = 1000;
         var list1 = new List<long>(numNodes);
         var list2 = new List<long>(numNodes);
@@ -577,6 +578,40 @@ public class MembershipViewTests
             Assert.NotEqual(list1[i], list2[i]);
         }
         Assert.Equal(list1[numNodes - 1], list2[numNodes - 1]);
+    }
+
+    /// <summary>
+    /// Verify that ToImmutableView creates a proper immutable snapshot
+    /// </summary>
+    [Fact]
+    public void ImmutableViewSnapshot()
+    {
+        var mview = new MutableMembershipView(K);
+        var n1 = Utils.HostFromParts("127.0.0.1", 1);
+        var nodeId1 = Utils.NodeIdFromUuid(Guid.NewGuid());
+        mview.RingAdd(n1, nodeId1);
+
+        var immutableView = mview.ToImmutableView();
+
+        // Verify the immutable view has correct values
+        Assert.Equal(K, immutableView.K);
+        Assert.Equal(mview.GetCurrentConfigurationId(), immutableView.ConfigurationId);
+        Assert.Single(immutableView.Members);
+        Assert.Equal(n1, immutableView.Members[0]);
+        Assert.Single(immutableView.NodeIds);
+
+        // Add another node to the mutable view
+        var n2 = Utils.HostFromParts("127.0.0.1", 2);
+        mview.RingAdd(n2, Utils.NodeIdFromUuid(Guid.NewGuid()));
+
+        // The immutable view should still show the old state
+        Assert.Single(immutableView.Members);
+        Assert.NotEqual(mview.GetCurrentConfigurationId(), immutableView.ConfigurationId);
+
+        // Get a new snapshot which should have the updated state
+        var newImmutableView = mview.ToImmutableView();
+        Assert.Equal(2, newImmutableView.Members.Count);
+        Assert.Equal(mview.GetCurrentConfigurationId(), newImmutableView.ConfigurationId);
     }
 }
 

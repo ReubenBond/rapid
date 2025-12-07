@@ -10,38 +10,20 @@ namespace Rapid;
 /// Default implementation of IMembershipServiceFactory.
 /// Uses DI to obtain all dependencies and creates MembershipService instances with runtime data.
 /// </summary>
-internal sealed class MembershipServiceFactory : IMembershipServiceFactory
+internal sealed class MembershipServiceFactory(
+    IMessagingClient messagingClient,
+    IEdgeFailureDetectorFactory edgeFailureDetectorFactory,
+    IBroadcasterFactory broadcasterFactory,
+    IFastPaxosFactory fastPaxosFactory,
+    SharedResources sharedResources,
+    IOptions<RapidProtocolOptions> protocolOptions,
+    ILoggerFactory loggerFactory) : IMembershipServiceFactory
 {
-    private readonly IMessagingClient _messagingClient;
-    private readonly IEdgeFailureDetectorFactory _edgeFailureDetectorFactory;
-    private readonly IBroadcasterFactory _broadcasterFactory;
-    private readonly IFastPaxosFactory _fastPaxosFactory;
-    private readonly SharedResources _sharedResources;
-    private readonly IOptions<RapidProtocolOptions> _protocolOptions;
-    private readonly ILoggerFactory _loggerFactory;
 
     // Constants for cluster configuration
-    private const int K = 10;  // Number of rings
-    private const int H = 9;   // High watermark
-    private const int L = 4;   // Low watermark
-
-    public MembershipServiceFactory(
-        IMessagingClient messagingClient,
-        IEdgeFailureDetectorFactory edgeFailureDetectorFactory,
-        IBroadcasterFactory broadcasterFactory,
-        IFastPaxosFactory fastPaxosFactory,
-        SharedResources sharedResources,
-        IOptions<RapidProtocolOptions> protocolOptions,
-        ILoggerFactory loggerFactory)
-    {
-        _messagingClient = messagingClient;
-        _edgeFailureDetectorFactory = edgeFailureDetectorFactory;
-        _broadcasterFactory = broadcasterFactory;
-        _fastPaxosFactory = fastPaxosFactory;
-        _sharedResources = sharedResources;
-        _protocolOptions = protocolOptions;
-        _loggerFactory = loggerFactory;
-    }
+    private const int RingCount = 10;  // Number of rings
+    private const int HighWaterMark = 9;   // High watermark
+    private const int LowWaterMark = 4;   // Low watermark
 
     public MembershipService CreateForNewCluster(
         Endpoint localEndpoint,
@@ -49,26 +31,24 @@ internal sealed class MembershipServiceFactory : IMembershipServiceFactory
         Metadata metadata,
         Dictionary<ClusterEvents, List<Action<ClusterStatusChange>>> subscriptions)
     {
-#pragma warning disable CA2000 // Dispose objects before losing scope - MembershipView ownership transferred to MembershipService
-        var membershipView = new MembershipView(K, [nodeId], [localEndpoint]);
-#pragma warning restore CA2000
-        var cutDetector = new MultiNodeCutDetector(K, H, L);
+        var membershipView = new MutableMembershipView(RingCount, [nodeId], [localEndpoint]);
+        var cutDetector = new MultiNodeCutDetector(RingCount, HighWaterMark, LowWaterMark);
         var metadataMap = new Dictionary<Endpoint, Metadata> { { localEndpoint, metadata } };
-        var broadcaster = _broadcasterFactory.Create();
+        var broadcaster = broadcasterFactory.Create();
 
         return new MembershipService(
             localEndpoint,
             cutDetector,
             membershipView,
-            _sharedResources,
-            _protocolOptions,
-            _messagingClient,
+            sharedResources,
+            protocolOptions,
+            messagingClient,
             broadcaster,
-            _edgeFailureDetectorFactory,
-            _fastPaxosFactory,
+            edgeFailureDetectorFactory,
+            fastPaxosFactory,
             metadataMap,
             subscriptions,
-            _loggerFactory);
+            loggerFactory);
     }
 
     public MembershipService CreateForJoin(
@@ -78,28 +58,26 @@ internal sealed class MembershipServiceFactory : IMembershipServiceFactory
         Dictionary<Endpoint, Metadata> metadataMap,
         Dictionary<ClusterEvents, List<Action<ClusterStatusChange>>> subscriptions)
     {
-        // Convert to collections as MembershipView requires ICollection
+        // Convert to collections as MutableMembershipView requires ICollection
         var nodeIdList = nodeIds.ToList();
         var endpointList = endpoints.ToList();
-        
-#pragma warning disable CA2000 // Dispose objects before losing scope - MembershipView ownership transferred to MembershipService
-        var membershipView = new MembershipView(K, nodeIdList, endpointList);
-#pragma warning restore CA2000
-        var cutDetector = new MultiNodeCutDetector(K, H, L);
-        var broadcaster = _broadcasterFactory.Create();
+
+        var membershipView = new MutableMembershipView(RingCount, nodeIdList, endpointList);
+        var cutDetector = new MultiNodeCutDetector(RingCount, HighWaterMark, LowWaterMark);
+        var broadcaster = broadcasterFactory.Create();
 
         return new MembershipService(
             localEndpoint,
             cutDetector,
             membershipView,
-            _sharedResources,
-            _protocolOptions,
-            _messagingClient,
+            sharedResources,
+            protocolOptions,
+            messagingClient,
             broadcaster,
-            _edgeFailureDetectorFactory,
-            _fastPaxosFactory,
+            edgeFailureDetectorFactory,
+            fastPaxosFactory,
             metadataMap,
             subscriptions,
-            _loggerFactory);
+            loggerFactory);
     }
 }

@@ -1,6 +1,6 @@
 using Rapid.Pb;
 
-namespace Rapid;
+namespace Rapid.Exceptions;
 
 public sealed class NodeNotInRingException : Exception
 {

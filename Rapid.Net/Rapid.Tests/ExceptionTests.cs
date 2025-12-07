@@ -1,3 +1,4 @@
+using Rapid.Exceptions;
 using Rapid.Pb;
 
 namespace Rapid.Tests;

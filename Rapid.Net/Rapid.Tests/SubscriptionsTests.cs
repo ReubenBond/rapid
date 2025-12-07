@@ -1,10 +1,8 @@
 using System.Collections.Concurrent;
 using Google.Protobuf;
-using Microsoft.AspNetCore.Builder;
 using Rapid.Pb;
-using Xunit;
 
-namespace Rapid.Tests.Integration;
+namespace Rapid.Tests;
 
 /// <summary>
 /// Tests whether subscription callbacks are invoked on cluster starts/joins.

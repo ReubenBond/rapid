@@ -1,9 +1,7 @@
 using System.Collections.Concurrent;
 using Microsoft.AspNetCore.Builder;
-using Microsoft.Extensions.DependencyInjection;
-using Xunit;
 
-namespace Rapid.Tests.Integration;
+namespace Rapid.Tests;
 
 /// <summary>
 /// Integration tests for Rapid cluster using the new hosting API

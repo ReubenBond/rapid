@@ -1,5 +1,3 @@
-using Rapid.Pb;
-
 namespace Rapid.Messaging;
 
 /// <summary>

@@ -1,11 +1,7 @@
 using System.Collections.Concurrent;
 using Google.Protobuf;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.Extensions.DependencyInjection;
-using Rapid.Pb;
-using Xunit;
 
-namespace Rapid.Tests.Integration;
+namespace Rapid.Tests;
 
 /// <summary>
 /// Extended integration tests for Rapid cluster scenarios.
