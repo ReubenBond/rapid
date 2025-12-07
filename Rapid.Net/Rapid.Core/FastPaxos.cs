@@ -288,7 +288,7 @@ internal sealed partial class FastPaxos : IDisposable
 #pragma warning disable CA5394 // Do not use insecure randomness. Justification: this is not security-sensitive code.
         var jitter = (long)(-1000 * Math.Log(1 - Random.Shared.NextDouble()) / _jitterRate);
 #pragma warning restore CA5394 // Do not use insecure randomness
-        var totalDelay = TimeSpan.FromMicroseconds(jitter + (long)_options.ConsensusFallbackTimeoutBaseDelay.TotalMilliseconds);
+        var totalDelay = TimeSpan.FromMilliseconds(jitter + (long)_options.ConsensusFallbackTimeoutBaseDelay.TotalMilliseconds);
         LogRandomDelay(jitter, totalDelay);
         return totalDelay;
     }
