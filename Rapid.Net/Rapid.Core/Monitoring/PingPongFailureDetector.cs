@@ -15,10 +15,7 @@ public sealed partial class PingPongFailureDetectorFactory(Endpoint localEndpoin
     private readonly SharedResources _sharedResources = sharedResources;
     private readonly ILoggerFactory? _loggerFactory = loggerFactory;
 
-    public IEdgeFailureDetector CreateInstance(Endpoint subject, Action notifier)
-    {
-        return new PingPongFailureDetector(subject, _localEndpoint, _client, _sharedResources, notifier, _loggerFactory);
-    }
+    public IEdgeFailureDetector CreateInstance(Endpoint subject, Action notifier) => new PingPongFailureDetector(subject, _localEndpoint, _client, _sharedResources, notifier, _loggerFactory);
 
     private sealed partial class PingPongFailureDetector(Endpoint subject, Endpoint observer, IMessagingClient client,
         SharedResources sharedResources, Action notifier, ILoggerFactory? loggerFactory) : IEdgeFailureDetector
@@ -48,10 +45,7 @@ public sealed partial class PingPongFailureDetectorFactory(Endpoint localEndpoin
         
         private Task? _probeTask;
 
-        public void Start()
-        {
-            _probeTask = ProbeAsync();
-        }
+        public void Start() => _probeTask = ProbeAsync();
 
         private async Task ProbeAsync()
         {
@@ -59,7 +53,7 @@ public sealed partial class PingPongFailureDetectorFactory(Endpoint localEndpoin
             {
                 try
                 {
-                    await _sharedResources.TimeProvider.Delay(TimeSpan.FromSeconds(1), _cts.Token).ConfigureAwait(false);
+                    await Task.Delay(TimeSpan.FromSeconds(1), _sharedResources.TimeProvider, _cts.Token).ConfigureAwait(false);
                     await ProbeOnceAsync().ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
@@ -93,10 +87,7 @@ public sealed partial class PingPongFailureDetectorFactory(Endpoint localEndpoin
 #pragma warning restore CA1031
         }
 
-        public void StopMonitoring()
-        {
-            _cts.Cancel();
-        }
+        public void StopMonitoring() => _cts.Cancel();
 
         public void Dispose()
         {

@@ -616,9 +616,6 @@ internal static class GuidUtility
         SwapBytes(guid, 6, 7);
     }
 
-    private static void SwapBytes(byte[] guid, int left, int right)
-    {
-        (guid[left], guid[right]) = (guid[right], guid[left]);
-    }
+    private static void SwapBytes(byte[] guid, int left, int right) => (guid[left], guid[right]) = (guid[right], guid[left]);
 }
 

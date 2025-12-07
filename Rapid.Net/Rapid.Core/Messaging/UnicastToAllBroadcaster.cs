@@ -7,10 +7,7 @@ public sealed class UnicastToAllBroadcaster(IMessagingClient client) : IBroadcas
     private readonly IMessagingClient _client = client;
     private IReadOnlyList<Endpoint> _membership = Array.Empty<Endpoint>();
 
-    public void SetMembership(IReadOnlyList<Endpoint> membership)
-    {
-        _membership = membership;
-    }
+    public void SetMembership(IReadOnlyList<Endpoint> membership) => _membership = membership;
 
     public async Task BroadcastAsync(RapidRequest request)
     {

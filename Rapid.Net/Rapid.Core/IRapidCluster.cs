@@ -46,25 +46,13 @@ internal sealed class RapidCluster : IRapidCluster
         _clusterService = clusterService;
     }
 
-    public IReadOnlyList<Endpoint> GetMemberlist()
-    {
-        return _clusterService.MembershipService?.GetMembershipView() ?? [];
-    }
+    public IReadOnlyList<Endpoint> GetMemberlist() => _clusterService.MembershipService?.GetMembershipView() ?? [];
 
-    public int GetMembershipSize()
-    {
-        return _clusterService.MembershipService?.GetMembershipSize() ?? 0;
-    }
+    public int GetMembershipSize() => _clusterService.MembershipService?.GetMembershipSize() ?? 0;
 
-    public Dictionary<Endpoint, Metadata> GetClusterMetadata()
-    {
-        return _clusterService.MembershipService?.GetMetadata() ?? [];
-    }
+    public Dictionary<Endpoint, Metadata> GetClusterMetadata() => _clusterService.MembershipService?.GetMetadata() ?? [];
 
-    public void RegisterSubscription(ClusterEvents eventType, Action<ClusterStatusChange> callback)
-    {
-        _clusterService.MembershipService?.RegisterSubscription(eventType, callback);
-    }
+    public void RegisterSubscription(ClusterEvents eventType, Action<ClusterStatusChange> callback) => _clusterService.MembershipService?.RegisterSubscription(eventType, callback);
 
     public async Task LeaveGracefullyAsync()
     {

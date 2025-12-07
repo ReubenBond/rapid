@@ -538,10 +538,7 @@ internal sealed class MembershipView : IDisposable
         public List<NodeId> NodeIds { get; } = [.. nodeIds];
         public List<Endpoint> Endpoints { get; } = [.. endpoints];
 
-        public long GetConfigurationId()
-        {
-            return GetConfigurationId(NodeIds, Endpoints);
-        }
+        public long GetConfigurationId() => GetConfigurationId(NodeIds, Endpoints);
 
         public static long GetConfigurationId(IEnumerable<NodeId> identifiers, IEnumerable<Endpoint> endpoints)
         {
@@ -630,9 +627,6 @@ internal sealed class MembershipView : IDisposable
         }
     }
 
-    public void Dispose()
-    {
-        _rwLock.Dispose();
-    }
+    public void Dispose() => _rwLock.Dispose();
 }
 

@@ -78,15 +78,9 @@ public sealed partial class SharedResources : IDisposable
         }
     }
 
-    public async Task ScheduleAsyncCallback(Func<Task> asyncFunc)
-    {
-        await ProtocolExecutor.Writer.WriteAsync(asyncFunc).ConfigureAwait(false);
-    }
+    public async Task ScheduleAsyncCallback(Func<Task> asyncFunc) => await ProtocolExecutor.Writer.WriteAsync(asyncFunc).ConfigureAwait(false);
 
-    public void ScheduleCallback(Func<Task> asyncFunc)
-    {
-        ProtocolExecutor.Writer.TryWrite(asyncFunc);
-    }
+    public void ScheduleCallback(Func<Task> asyncFunc) => ProtocolExecutor.Writer.TryWrite(asyncFunc);
 
     /// <summary>
     /// Tracks a background task to ensure it can be awaited during shutdown.

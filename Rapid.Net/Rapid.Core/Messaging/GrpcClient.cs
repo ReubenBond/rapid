@@ -77,10 +77,7 @@ internal sealed partial class GrpcClient : IMessagingClient
         });
     }
 
-    public void Shutdown()
-    {
-        Dispose();
-    }
+    public void Shutdown() => Dispose();
 
     public void Dispose()
     {

@@ -57,10 +57,7 @@ public static class RapidUtils
     /// <summary>
     /// Creates a loggable string representation of endpoints.
     /// </summary>
-    public static string Loggable(IEnumerable<Endpoint> endpoints)
-    {
-        return $"[{string.Join(", ", endpoints.Select(Loggable))}]";
-    }
+    public static string Loggable(IEnumerable<Endpoint> endpoints) => $"[{string.Join(", ", endpoints.Select(Loggable))}]";
 
     // Helper methods to construct RapidRequest/RapidResponse
     public static RapidRequest ToRapidRequest(PreJoinMessage msg) =>

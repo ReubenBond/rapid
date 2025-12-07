@@ -81,7 +81,7 @@ internal sealed partial class Paxos
         ++voteCount;
     }
 
-    public void StartPhase1a(int round)
+    public async Task StartPhase1aAsync(int round, CancellationToken cancellationToken = default)
     {
         if (_crnd.Round > round)
         {
@@ -100,10 +100,10 @@ internal sealed partial class Paxos
 
         var request = RapidUtils.ToRapidRequest(prepare);
         LogBroadcastingPhase1a();
-        _ = _broadcaster.BroadcastAsync(request);
+        await _broadcaster.BroadcastAsync(request).ConfigureAwait(false);
     }
 
-    public void HandlePhase1aMessage(Phase1aMessage phase1aMessage)
+    public async Task HandlePhase1aMessageAsync(Phase1aMessage phase1aMessage, CancellationToken cancellationToken = default)
     {
         if (phase1aMessage.ConfigurationId != _configurationId)
         {
@@ -124,11 +124,11 @@ internal sealed partial class Paxos
             phase1b.Vval.AddRange(_vval);
 
             var request = RapidUtils.ToRapidRequest(phase1b);
-            _ = _client.SendMessageAsync(phase1aMessage.Sender, request, CancellationToken.None);
+            await _client.SendMessageAsync(phase1aMessage.Sender, request, cancellationToken).ConfigureAwait(false);
         }
     }
 
-    public void HandlePhase1bMessage(Phase1bMessage phase1bMessage)
+    public async Task HandlePhase1bMessageAsync(Phase1bMessage phase1bMessage, CancellationToken cancellationToken = default)
     {
         if (phase1bMessage.ConfigurationId != _configurationId)
         {
@@ -157,11 +157,11 @@ internal sealed partial class Paxos
             phase2a.Vval.AddRange(_cval);
 
             var request = RapidUtils.ToRapidRequest(phase2a);
-            _ = _broadcaster.BroadcastAsync(request);
+            await _broadcaster.BroadcastAsync(request).ConfigureAwait(false);
         }
     }
 
-    public void HandlePhase2aMessage(Phase2aMessage phase2aMessage)
+    public async Task HandlePhase2aMessageAsync(Phase2aMessage phase2aMessage, CancellationToken cancellationToken = default)
     {
         if (phase2aMessage.ConfigurationId != _configurationId)
         {
@@ -183,20 +183,20 @@ internal sealed partial class Paxos
             phase2b.Endpoints.AddRange(_vval);
 
             var request = RapidUtils.ToRapidRequest(phase2b);
-            _ = _client.SendMessageAsync(phase2aMessage.Sender, request, CancellationToken.None);
+            await _client.SendMessageAsync(phase2aMessage.Sender, request, cancellationToken).ConfigureAwait(false);
         }
     }
 
-    public void HandlePhase2bMessage(Phase2bMessage phase2bMessage)
+    public Task HandlePhase2bMessageAsync(Phase2bMessage phase2bMessage, CancellationToken cancellationToken = default)
     {
         if (phase2bMessage.ConfigurationId != _configurationId)
         {
-            return;
+            return Task.CompletedTask;
         }
 
         if (!phase2bMessage.Rnd.Equals(_crnd))
         {
-            return;
+            return Task.CompletedTask;
         }
 
         if (!_acceptResponses.TryGetValue(_crnd, out var acceptResponses))
@@ -214,6 +214,8 @@ internal sealed partial class Paxos
             LogDecidedValue(new LoggableEndpoints(endpoints));
             _onDecide(endpoints);
         }
+
+        return Task.CompletedTask;
     }
 
     private static List<Endpoint> ChooseValue(List<Phase1bMessage> phase1bMessages, int n)

@@ -15,10 +15,7 @@ internal sealed class RankComparer : IEqualityComparer<Rank>, IComparer<Rank>
         return x.Equals(y);
     }
 
-    public int GetHashCode(Rank obj)
-    {
-        return HashCode.Combine(obj.Round, obj.NodeIndex);
-    }
+    public int GetHashCode(Rank obj) => HashCode.Combine(obj.Round, obj.NodeIndex);
 
     public int Compare(Rank? x, Rank? y)
     {

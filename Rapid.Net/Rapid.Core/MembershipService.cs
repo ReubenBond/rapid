@@ -313,6 +313,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
 
             proposals.AddRange(_cutDetection.InvalidateFailingEdges(_membershipView));
 
+            Task? proposeTask = null;
             lock (_membershipUpdateLock)
             {
                 if (proposals.Count > 0 && !_announcedProposal)
@@ -331,8 +332,16 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
                         cb(clusterStatusChange);
                     }
 
-                    _fastPaxosInstance?.Propose(proposals);
+                    if (_fastPaxosInstance != null)
+                    {
+                        proposeTask = _fastPaxosInstance.ProposeAsync(proposals, cancellationToken);
+                    }
                 }
+            }
+
+            if (proposeTask != null)
+            {
+                await proposeTask.ConfigureAwait(false);
             }
 
             tcs.SetResult(RapidUtils.ToRapidResponse(new ConsensusResponse()));
@@ -341,10 +350,13 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         return await tcs.Task.ConfigureAwait(false);
     }
 
-    private Task<RapidResponse> HandleConsensusMessagesAsync(RapidRequest request, CancellationToken cancellationToken)
+    private async Task<RapidResponse> HandleConsensusMessagesAsync(RapidRequest request, CancellationToken cancellationToken)
     {
-        return Task.Run(() => _fastPaxosInstance?.HandleMessages(request)
-                             ?? RapidUtils.ToRapidResponse(new ConsensusResponse()));
+        if (_fastPaxosInstance != null)
+        {
+            return await _fastPaxosInstance.HandleMessagesAsync(request, cancellationToken).ConfigureAwait(false);
+        }
+        return RapidUtils.ToRapidResponse(new ConsensusResponse());
     }
 
     private async Task<RapidResponse> HandleLeaveMessageAsync(RapidRequest request, CancellationToken cancellationToken)
@@ -445,25 +457,13 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         }
     }
 
-    public void RegisterSubscription(ClusterEvents evt, Action<ClusterStatusChange> callback)
-    {
-        _subscriptions[evt].Add(callback);
-    }
+    public void RegisterSubscription(ClusterEvents evt, Action<ClusterStatusChange> callback) => _subscriptions[evt].Add(callback);
 
-    public List<Endpoint> GetMembershipView()
-    {
-        return _membershipView.GetRing(0);
-    }
+    public List<Endpoint> GetMembershipView() => _membershipView.GetRing(0);
 
-    public int GetMembershipSize()
-    {
-        return _membershipView.GetMembershipSize();
-    }
+    public int GetMembershipSize() => _membershipView.GetMembershipSize();
 
-    public Dictionary<Endpoint, Metadata> GetMetadata()
-    {
-        return new Dictionary<Endpoint, Metadata>(_metadataManager.GetAllMetadata());
-    }
+    public Dictionary<Endpoint, Metadata> GetMetadata() => new Dictionary<Endpoint, Metadata>(_metadataManager.GetAllMetadata());
 
     public void Shutdown()
     {
@@ -526,7 +526,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         {
             try
             {
-                await _sharedResources.TimeProvider.Delay(_options.BatchingWindow, _shutdownCts.Token).ConfigureAwait(false);
+                await Task.Delay(_options.BatchingWindow, _sharedResources.TimeProvider, _shutdownCts.Token).ConfigureAwait(false);
 
                 lock (_batchSchedulerLock)
                 {
@@ -557,10 +557,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         }
     }
 
-    private static bool FilterAlertMessages(BatchedAlertMessage batchedAlertMessage, long currentConfigurationId)
-    {
-        return batchedAlertMessage.Messages.Any(m => m.ConfigurationId == currentConfigurationId);
-    }
+    private static bool FilterAlertMessages(BatchedAlertMessage batchedAlertMessage, long currentConfigurationId) => batchedAlertMessage.Messages.Any(m => m.ConfigurationId == currentConfigurationId);
 
     private AlertMessage ExtractJoinerUuidAndMetadata(AlertMessage alertMessage)
     {
