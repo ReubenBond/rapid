@@ -8,42 +8,34 @@ namespace Rapid.Tests.Simulation;
 /// In-memory messaging client for simulation testing.
 /// Routes messages through the SimulationNetwork instead of gRPC.
 /// </summary>
-internal sealed class InMemoryMessagingClient : IMessagingClient
+internal sealed class InMemoryMessagingClient(SimulationEnvironment environment, Endpoint localEndpoint) : IMessagingClient
 {
-    private readonly SimulationEnvironment _environment;
-    private readonly Endpoint _localEndpoint;
     private readonly ConcurrentDictionary<int, Task> _pendingTasks = new();
     private int _taskIdCounter;
     private bool _disposed;
-
-    public InMemoryMessagingClient(SimulationEnvironment environment, Endpoint localEndpoint)
-    {
-        _environment = environment;
-        _localEndpoint = localEndpoint;
-    }
 
     public async Task<RapidResponse> SendMessageAsync(Endpoint remote, RapidRequest request, CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        var localAddr = RapidUtils.Loggable(_localEndpoint);
+        var localAddr = RapidUtils.Loggable(localEndpoint);
         var remoteAddr = RapidUtils.Loggable(remote);
 
         // Check if message can be delivered
-        if (!_environment.Network.CanDeliver(localAddr, remoteAddr))
+        if (!environment.Network.CanDeliver(localAddr, remoteAddr))
         {
             throw new InvalidOperationException($"Network partition: {localAddr} cannot reach {remoteAddr}");
         }
 
         // Simulate network delay
-        var delay = _environment.Network.GetMessageDelay();
+        var delay = environment.Network.GetMessageDelay();
         if (delay > TimeSpan.Zero)
         {
-            await Task.Delay(delay, _environment.TimeProvider, cancellationToken).ConfigureAwait(true);
+            await Task.Delay(delay, environment.TimeProvider, cancellationToken).ConfigureAwait(true);
         }
 
         // Find the target node and dispatch the message
-        var targetNode = _environment.GetNode(remoteAddr);
+        var targetNode = environment.GetNode(remoteAddr);
         if (targetNode == null)
         {
             throw new InvalidOperationException($"Target node not found: {remoteAddr}");

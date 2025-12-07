@@ -8,25 +8,19 @@ namespace Rapid.Tests.Simulation;
 /// This class intentionally uses System.Random for reproducibility in deterministic simulation testing.
 /// It is NOT intended for security-sensitive operations.
 /// </remarks>
+/// <remarks>
+/// Creates a new deterministic random with the specified seed.
+/// </remarks>
+/// <param name="seed">The seed for reproducible random sequences.</param>
 #pragma warning disable CA5394 // Do not use insecure randomness - intentionally deterministic for simulation testing
-internal sealed class DeterministicRandom
+internal sealed class DeterministicRandom(int seed)
 {
-    private readonly Random _random;
-
-    /// <summary>
-    /// Creates a new deterministic random with the specified seed.
-    /// </summary>
-    /// <param name="seed">The seed for reproducible random sequences.</param>
-    public DeterministicRandom(int seed)
-    {
-        Seed = seed;
-        _random = new Random(seed);
-    }
+    private readonly Random _random = new Random(seed);
 
     /// <summary>
     /// Gets the seed used to initialize this random instance.
     /// </summary>
-    public int Seed { get; }
+    public int Seed { get; } = seed;
 
     /// <summary>
     /// Returns a non-negative random integer.

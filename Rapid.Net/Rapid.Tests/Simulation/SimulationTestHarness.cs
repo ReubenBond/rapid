@@ -7,20 +7,15 @@ namespace Rapid.Tests.Simulation;
 /// Test harness for deterministic simulation testing of Rapid clusters.
 /// Provides a controlled environment without WebApplication or gRPC dependencies.
 /// </summary>
-internal sealed class SimulationTestHarness : IAsyncDisposable
+/// <remarks>
+/// Creates a new simulation test harness with the specified seed.
+/// </remarks>
+/// <param name="seed">The seed for deterministic random number generation.</param>
+/// <param name="loggerFactory">Optional logger factory for logging simulation events.</param>
+/// <param name="useFakeTime">Whether to use fake time provider for deterministic time control. Default is false.</param>
+internal sealed class SimulationTestHarness(int seed, ILoggerFactory? loggerFactory = null, bool useFakeTime = false) : IAsyncDisposable
 {
     private readonly List<SimulationNode> _nodes = [];
-
-    /// <summary>
-    /// Creates a new simulation test harness with the specified seed.
-    /// </summary>
-    /// <param name="seed">The seed for deterministic random number generation.</param>
-    /// <param name="loggerFactory">Optional logger factory for logging simulation events.</param>
-    /// <param name="useFakeTime">Whether to use fake time provider for deterministic time control. Default is false.</param>
-    public SimulationTestHarness(int seed, ILoggerFactory? loggerFactory = null, bool useFakeTime = false)
-    {
-        Environment = new SimulationEnvironment(seed, loggerFactory, useFakeTime);
-    }
 
     /// <summary>
     /// Creates a new simulation test harness with a random seed.
@@ -35,7 +30,7 @@ internal sealed class SimulationTestHarness : IAsyncDisposable
     /// <summary>
     /// Gets the simulation environment.
     /// </summary>
-    public SimulationEnvironment Environment { get; }
+    public SimulationEnvironment Environment { get; } = new SimulationEnvironment(seed, loggerFactory, useFakeTime);
 
     /// <summary>
     /// Gets the deterministic random number generator.

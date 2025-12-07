@@ -36,14 +36,16 @@ internal sealed class SimulationFailureDetectorFactory(
 /// Failure detector for simulation testing.
 /// Uses the simulation's TimeProvider for timing control.
 /// </summary>
-internal sealed partial class SimulationFailureDetector : IEdgeFailureDetector
+internal sealed partial class SimulationFailureDetector(
+    Endpoint subject,
+    Endpoint observer,
+    IMessagingClient client,
+    SharedResources sharedResources,
+    Action notifier,
+    ILoggerFactory? loggerFactory) : IEdgeFailureDetector
 {
-    private readonly Endpoint _subject;
-    private readonly Endpoint _observer;
-    private readonly IMessagingClient _client;
-    private readonly SharedResources _sharedResources;
-    private readonly Action _notifier;
-    private readonly ILogger _logger;
+    private readonly ILogger _logger = loggerFactory?.CreateLogger<SimulationFailureDetector>()
+            ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<SimulationFailureDetector>.Instance;
     private readonly CancellationTokenSource _cts = new();
     private Task? _probeTask;
 
@@ -59,23 +61,6 @@ internal sealed partial class SimulationFailureDetector : IEdgeFailureDetector
     [LoggerMessage(Level = LogLevel.Warning, Message = "Simulation probe exception for {Subject}")]
     private partial void LogProbeException(Exception ex, LoggableEndpoint Subject);
 
-    public SimulationFailureDetector(
-        Endpoint subject,
-        Endpoint observer,
-        IMessagingClient client,
-        SharedResources sharedResources,
-        Action notifier,
-        ILoggerFactory? loggerFactory)
-    {
-        _subject = subject;
-        _observer = observer;
-        _client = client;
-        _sharedResources = sharedResources;
-        _notifier = notifier;
-        _logger = loggerFactory?.CreateLogger<SimulationFailureDetector>()
-            ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<SimulationFailureDetector>.Instance;
-    }
-
     public void Start() => _probeTask = ProbeAsync();
 
     private async Task ProbeAsync()
@@ -85,7 +70,7 @@ internal sealed partial class SimulationFailureDetector : IEdgeFailureDetector
             try
             {
                 // Use the TimeProvider from SharedResources for deterministic timing
-                await Task.Delay(TimeSpan.FromSeconds(1), _sharedResources.TimeProvider, _cts.Token).ConfigureAwait(true);
+                await Task.Delay(TimeSpan.FromSeconds(1), sharedResources.TimeProvider, _cts.Token).ConfigureAwait(true);
                 await ProbeOnceAsync().ConfigureAwait(true);
             }
             catch (OperationCanceledException)
@@ -100,20 +85,20 @@ internal sealed partial class SimulationFailureDetector : IEdgeFailureDetector
 #pragma warning disable CA1031
         try
         {
-            var request = RapidUtils.ToRapidRequest(new ProbeMessage { Sender = _observer });
-            var response = await _client.SendMessageAsync(_subject, request, _cts.Token).ConfigureAwait(true);
+            var request = RapidUtils.ToRapidRequest(new ProbeMessage { Sender = observer });
+            var response = await client.SendMessageAsync(subject, request, _cts.Token).ConfigureAwait(true);
 
             if (response.ProbeResponse == null)
             {
-                LogProbeFailed(new LoggableEndpoint(_subject));
-                _notifier();
+                LogProbeFailed(new LoggableEndpoint(subject));
+                notifier();
                 StopMonitoring();
             }
         }
         catch (Exception ex)
         {
-            LogProbeException(ex, new LoggableEndpoint(_subject));
-            _notifier();
+            LogProbeException(ex, new LoggableEndpoint(subject));
+            notifier();
             StopMonitoring();
         }
 #pragma warning restore CA1031

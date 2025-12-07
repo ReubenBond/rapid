@@ -4,19 +4,14 @@ namespace Rapid.Tests.Simulation;
 /// Checks cluster invariants during simulation testing.
 /// Used to detect split-brain scenarios, membership inconsistencies, and other safety violations.
 /// </summary>
-internal sealed class InvariantChecker
+/// <remarks>
+/// Creates a new invariant checker for the specified harness.
+/// </remarks>
+internal sealed class InvariantChecker(DeterministicSimulationHarness harness)
 {
-    private readonly DeterministicSimulationHarness _harness;
+    private readonly DeterministicSimulationHarness _harness = harness ?? throw new ArgumentNullException(nameof(harness));
     private readonly List<InvariantViolation> _violations = [];
     private readonly Lock _lock = new();
-
-    /// <summary>
-    /// Creates a new invariant checker for the specified harness.
-    /// </summary>
-    public InvariantChecker(DeterministicSimulationHarness harness)
-    {
-        _harness = harness ?? throw new ArgumentNullException(nameof(harness));
-    }
 
     /// <summary>
     /// Gets all recorded violations.

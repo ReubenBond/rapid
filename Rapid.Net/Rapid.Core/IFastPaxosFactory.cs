@@ -29,25 +29,12 @@ internal interface IFastPaxosFactory
 /// <summary>
 /// Default implementation of IFastPaxosFactory.
 /// </summary>
-internal sealed class FastPaxosFactory : IFastPaxosFactory
+internal sealed class FastPaxosFactory(
+    IMessagingClient messagingClient,
+    IOptions<RapidProtocolOptions> protocolOptions,
+    SharedResources sharedResources,
+    ILoggerFactory loggerFactory) : IFastPaxosFactory
 {
-    private readonly IMessagingClient _messagingClient;
-    private readonly IOptions<RapidProtocolOptions> _protocolOptions;
-    private readonly SharedResources _sharedResources;
-    private readonly ILoggerFactory _loggerFactory;
-
-    public FastPaxosFactory(
-        IMessagingClient messagingClient,
-        IOptions<RapidProtocolOptions> protocolOptions,
-        SharedResources sharedResources,
-        ILoggerFactory loggerFactory)
-    {
-        _messagingClient = messagingClient;
-        _protocolOptions = protocolOptions;
-        _sharedResources = sharedResources;
-        _loggerFactory = loggerFactory;
-    }
-
     public FastPaxos Create(
         Endpoint myAddr,
         long configurationId,
@@ -58,10 +45,10 @@ internal sealed class FastPaxosFactory : IFastPaxosFactory
             myAddr,
             configurationId,
             membershipSize,
-            _messagingClient,
+            messagingClient,
             broadcaster,
-            _protocolOptions,
-            _sharedResources,
-            _loggerFactory);
+            protocolOptions,
+            sharedResources,
+            loggerFactory);
     }
 }

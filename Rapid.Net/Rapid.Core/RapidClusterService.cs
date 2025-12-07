@@ -10,13 +10,15 @@ namespace Rapid;
 /// <summary>
 /// Hosted service that manages the Rapid cluster lifecycle.
 /// </summary>
-internal sealed partial class RapidClusterService : BackgroundService
+internal sealed partial class RapidClusterService(
+    IOptions<RapidOptions> options,
+    IMessagingClient messagingClient,
+    IMembershipServiceFactory membershipServiceFactory,
+    SharedResources sharedResources,
+    ILoggerFactory loggerFactory) : BackgroundService
 {
-    private readonly RapidOptions _options;
-    private readonly IMessagingClient _messagingClient;
-    private readonly IMembershipServiceFactory _membershipServiceFactory;
-    private readonly ILogger<RapidClusterService> _logger;
-    private readonly SharedResources _sharedResources;
+    private readonly RapidOptions _options = options.Value;
+    private readonly ILogger<RapidClusterService> _logger = loggerFactory.CreateLogger<RapidClusterService>();
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Starting Rapid cluster service on {ListenAddress}")]
     private partial void LogStarting(string ListenAddress);
@@ -29,20 +31,6 @@ internal sealed partial class RapidClusterService : BackgroundService
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Error in Rapid cluster service")]
     private partial void LogError(Exception ex);
-
-    public RapidClusterService(
-        IOptions<RapidOptions> options,
-        IMessagingClient messagingClient,
-        IMembershipServiceFactory membershipServiceFactory,
-        SharedResources sharedResources,
-        ILoggerFactory loggerFactory)
-    {
-        _options = options.Value;
-        _messagingClient = messagingClient;
-        _membershipServiceFactory = membershipServiceFactory;
-        _sharedResources = sharedResources;
-        _logger = loggerFactory.CreateLogger<RapidClusterService>();
-    }
 
     public MembershipService? MembershipService { get; private set; }
 
@@ -83,9 +71,9 @@ internal sealed partial class RapidClusterService : BackgroundService
 
     private async Task StartClusterAsync(CancellationToken cancellationToken)
     {
-        var currentIdentifier = RapidUtils.NodeIdFromUuid(_sharedResources.NewGuid());
+        var currentIdentifier = RapidUtils.NodeIdFromUuid(sharedResources.NewGuid());
 
-        MembershipService = _membershipServiceFactory.CreateForNewCluster(
+        MembershipService = membershipServiceFactory.CreateForNewCluster(
             _options.ListenAddress,
             currentIdentifier,
             _options.Metadata,
@@ -95,7 +83,7 @@ internal sealed partial class RapidClusterService : BackgroundService
     private async Task JoinClusterAsync(CancellationToken cancellationToken)
     {
 
-        var currentIdentifier = RapidUtils.NodeIdFromUuid(_sharedResources.NewGuid());
+        var currentIdentifier = RapidUtils.NodeIdFromUuid(sharedResources.NewGuid());
 
         // Phase 1: Contact seed for observers
         var preJoinMessage = new PreJoinMessage
@@ -104,7 +92,7 @@ internal sealed partial class RapidClusterService : BackgroundService
             NodeId = currentIdentifier
         };
 
-        var preJoinResponse = await _messagingClient.SendMessageAsync(
+        var preJoinResponse = await messagingClient.SendMessageAsync(
             _options.SeedAddress!,
             RapidUtils.ToRapidRequest(preJoinMessage),
             cancellationToken).ConfigureAwait(true);
@@ -145,7 +133,7 @@ internal sealed partial class RapidClusterService : BackgroundService
             };
             joinMessageForObserver.RingNumber.AddRange(entry.Value);
 
-            return await _messagingClient.SendMessageAsync(
+            return await messagingClient.SendMessageAsync(
                 entry.Key,
                 RapidUtils.ToRapidRequest(joinMessageForObserver),
                 cancellationToken).WithDefaultOnException().ConfigureAwait(true);
@@ -168,7 +156,7 @@ internal sealed partial class RapidClusterService : BackgroundService
             metadataMap[endpoint] = metadata;
         }
 
-        MembershipService = _membershipServiceFactory.CreateForJoin(
+        MembershipService = membershipServiceFactory.CreateForJoin(
             _options.ListenAddress,
             successfulResponse.Identifiers,
             successfulResponse.Endpoints,
@@ -184,8 +172,8 @@ internal sealed partial class RapidClusterService : BackgroundService
         // Wait for background tasks to complete gracefully
         try
         {
-            _sharedResources.StartShutdown();
-            await _sharedResources.WaitForBackgroundTasksAsync(TimeSpan.FromSeconds(5), cancellationToken)
+            sharedResources.StartShutdown();
+            await sharedResources.WaitForBackgroundTasksAsync(TimeSpan.FromSeconds(5), cancellationToken)
                 .ConfigureAwait(true);
         }
         catch (OperationCanceledException)
@@ -199,7 +187,7 @@ internal sealed partial class RapidClusterService : BackgroundService
     public override void Dispose()
     {
         MembershipService?.Dispose();
-        _sharedResources.Dispose();
+        sharedResources.Dispose();
         base.Dispose();
     }
 }

@@ -8,20 +8,15 @@ namespace Rapid.Tests;
 /// Represents a test cluster that tracks and manages nodes for integration tests.
 /// Automatically shuts down all nodes when disposed.
 /// </summary>
-internal sealed class TestCluster : IAsyncDisposable
+internal sealed class TestCluster(ITestOutputHelper outputHelper) : IAsyncDisposable
 {
     private readonly List<WebApplication> _apps = [];
-    private readonly ILoggerFactory _loggerFactory;
-    private readonly TestClusterPortAllocator _portAllocator = new();
-
-    public TestCluster(ITestOutputHelper outputHelper)
-    {
-        _loggerFactory = LoggerFactory.Create(builder => builder
+    private readonly ILoggerFactory _loggerFactory = LoggerFactory.Create(builder => builder
             .AddXUnit(outputHelper)
             .AddFilter("Microsoft.AspNetCore", LogLevel.Warning)
             .AddFilter("Grpc.AspNetCore", LogLevel.Warning)
             .SetMinimumLevel(LogLevel.Debug));
-    }
+    private readonly TestClusterPortAllocator _portAllocator = new();
 
     /// <summary>
     /// Gets the next available port for a node.

@@ -11,21 +11,15 @@ namespace Rapid.Messaging;
 /// gRPC-based messaging client for Rapid.
 /// Implements IHostedService to ensure proper shutdown ordering.
 /// </summary>
-internal sealed partial class GrpcClient : IMessagingClient, IHostedService
+internal sealed partial class GrpcClient(IOptions<RapidProtocolOptions> options, ILoggerFactory? loggerFactory = null) : IMessagingClient, IHostedService
 {
-    private readonly RapidProtocolOptions _options;
-    private readonly ILogger<GrpcClient> _logger;
+    private readonly RapidProtocolOptions _options = options.Value;
+    private readonly ILogger<GrpcClient> _logger = (loggerFactory ?? Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance)
+            .CreateLogger<GrpcClient>();
     private readonly ConcurrentDictionary<string, Pb.MembershipService.MembershipServiceClient> _clients = new();
     private readonly ConcurrentDictionary<int, Task> _pendingTasks = new();
     private int _taskIdCounter;
     private bool _disposed;
-
-    public GrpcClient(IOptions<RapidProtocolOptions> options, ILoggerFactory? loggerFactory = null)
-    {
-        _options = options.Value;
-        _logger = (loggerFactory ?? Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance)
-            .CreateLogger<GrpcClient>();
-    }
 
     private readonly struct LoggableEndpoint(Endpoint endpoint)
     {

@@ -16,14 +16,7 @@ public interface IBroadcasterFactory
 /// <summary>
 /// Default factory implementation that creates UnicastToAllBroadcaster instances.
 /// </summary>
-internal sealed class UnicastToAllBroadcasterFactory : IBroadcasterFactory
+internal sealed class UnicastToAllBroadcasterFactory(IMessagingClient messagingClient) : IBroadcasterFactory
 {
-    private readonly IMessagingClient _messagingClient;
-
-    public UnicastToAllBroadcasterFactory(IMessagingClient messagingClient)
-    {
-        _messagingClient = messagingClient;
-    }
-
-    public IBroadcaster Create() => new UnicastToAllBroadcaster(_messagingClient);
+    public IBroadcaster Create() => new UnicastToAllBroadcaster(messagingClient);
 }

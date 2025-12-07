@@ -3,10 +3,13 @@ namespace Rapid.Tests.Simulation;
 /// <summary>
 /// Injects random faults into the simulation for chaos testing.
 /// </summary>
-internal sealed class ChaosInjector
+/// <remarks>
+/// Creates a new chaos injector.
+/// </remarks>
+internal sealed class ChaosInjector(DeterministicSimulationHarness harness)
 {
-    private readonly DeterministicSimulationHarness _harness;
-    private readonly DeterministicRandom _random;
+    private readonly DeterministicSimulationHarness _harness = harness ?? throw new ArgumentNullException(nameof(harness));
+    private readonly DeterministicRandom _random = harness.Random.Fork();
     private readonly List<ScheduledFault> _scheduledFaults = [];
     private readonly Lock _lock = new();
 
@@ -29,15 +32,6 @@ internal sealed class ChaosInjector
     /// Gets or sets the minimum number of nodes to keep alive during chaos.
     /// </summary>
     public int MinimumAliveNodes { get; set; } = 1;
-
-    /// <summary>
-    /// Creates a new chaos injector.
-    /// </summary>
-    public ChaosInjector(DeterministicSimulationHarness harness)
-    {
-        _harness = harness ?? throw new ArgumentNullException(nameof(harness));
-        _random = harness.Random.Fork();
-    }
 
     /// <summary>
     /// Possibly injects a fault based on configured rates.
