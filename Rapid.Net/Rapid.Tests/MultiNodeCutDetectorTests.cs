@@ -262,7 +262,7 @@ public class MultiNodeCutDetectorTests
     [Fact]
     public void CutDetectionTestLinkInvalidation()
     {
-        using var mView = new MembershipView(K);
+        var mView = new MembershipView(K);
         var detector = new MultiNodeCutDetector(K, H, L);
         const int numNodes = 30;
         var endpoints = new List<Endpoint>();

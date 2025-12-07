@@ -15,7 +15,7 @@ public class MembershipViewTests
     [Fact]
     public void OneRingAddition()
     {
-        using var mview = new MembershipView(K);
+        var mview = new MembershipView(K);
         var addr = Utils.HostFromParts("127.0.0.1", 123);
 
         mview.RingAdd(addr, Utils.NodeIdFromUuid(Guid.NewGuid()));
@@ -37,7 +37,7 @@ public class MembershipViewTests
     [Fact]
     public void MultipleRingAdditions()
     {
-        using var mview = new MembershipView(K);
+        var mview = new MembershipView(K);
         const int numNodes = 10;
 
         for (var i = 0; i < numNodes; i++)
@@ -58,7 +58,7 @@ public class MembershipViewTests
     [Fact]
     public void RingReAdditions()
     {
-        using var mview = new MembershipView(K);
+        var mview = new MembershipView(K);
         const int numNodes = 10;
         const int startPort = 0;
 
@@ -97,7 +97,7 @@ public class MembershipViewTests
     [Fact]
     public void RingDeletionsOnly()
     {
-        using var mview = new MembershipView(K);
+        var mview = new MembershipView(K);
         const int numNodes = 10;
         var numThrows = 0;
 
@@ -122,7 +122,7 @@ public class MembershipViewTests
     [Fact]
     public void RingAdditionsAndDeletions()
     {
-        using var mview = new MembershipView(K);
+        var mview = new MembershipView(K);
         const int numNodes = 10;
 
         for (var i = 0; i < numNodes; i++)
@@ -148,7 +148,7 @@ public class MembershipViewTests
     [Fact]
     public void MonitoringRelationshipEdge()
     {
-        using var mview = new MembershipView(K);
+        var mview = new MembershipView(K);
         var n1 = Utils.HostFromParts("127.0.0.1", 1);
 
         mview.RingAdd(n1, Utils.NodeIdFromUuid(Guid.NewGuid()));
@@ -167,7 +167,7 @@ public class MembershipViewTests
     [Fact]
     public void MonitoringRelationshipEmpty()
     {
-        using var mview = new MembershipView(K);
+        var mview = new MembershipView(K);
         var n = Utils.HostFromParts("127.0.0.1", 1);
 
         Assert.Throws<NodeNotInRingException>(() => mview.GetSubjectsOf(n));
@@ -180,7 +180,7 @@ public class MembershipViewTests
     [Fact]
     public void MonitoringRelationshipTwoNodes()
     {
-        using var mview = new MembershipView(K);
+        var mview = new MembershipView(K);
         var n1 = Utils.HostFromParts("127.0.0.1", 1);
         var n2 = Utils.HostFromParts("127.0.0.1", 2);
 
@@ -199,7 +199,7 @@ public class MembershipViewTests
     [Fact]
     public void MonitoringRelationshipThreeNodesWithDelete()
     {
-        using var mview = new MembershipView(K);
+        var mview = new MembershipView(K);
         var n1 = Utils.HostFromParts("127.0.0.1", 1);
         var n2 = Utils.HostFromParts("127.0.0.1", 2);
         var n3 = Utils.HostFromParts("127.0.0.1", 3);
@@ -227,7 +227,7 @@ public class MembershipViewTests
     [Fact]
     public void ConfigurationIdChanges()
     {
-        using var mview = new MembershipView(K);
+        var mview = new MembershipView(K);
         var initialConfig = mview.GetCurrentConfigurationId();
 
         var n1 = Utils.HostFromParts("127.0.0.1", 1);
@@ -254,7 +254,7 @@ public class MembershipViewTests
     [Fact]
     public void MembershipSize()
     {
-        using var mview = new MembershipView(K);
+        var mview = new MembershipView(K);
         Assert.Equal(0, mview.GetMembershipSize());
 
         var n1 = Utils.HostFromParts("127.0.0.1", 1);
@@ -278,7 +278,7 @@ public class MembershipViewTests
     [Fact]
     public void HostAndIdentifierPresence()
     {
-        using var mview = new MembershipView(K);
+        var mview = new MembershipView(K);
         var n1 = Utils.HostFromParts("127.0.0.1", 1);
         var nodeId1 = Utils.NodeIdFromUuid(Guid.NewGuid());
 
@@ -303,7 +303,7 @@ public class MembershipViewTests
     [Fact]
     public void UuidCollisionDetection()
     {
-        using var mview = new MembershipView(K);
+        var mview = new MembershipView(K);
         var n1 = Utils.HostFromParts("127.0.0.1", 1);
         var n2 = Utils.HostFromParts("127.0.0.1", 2);
         var sharedUuid = Utils.NodeIdFromUuid(Guid.NewGuid());
@@ -320,7 +320,7 @@ public class MembershipViewTests
     [Fact]
     public void SafeToJoinChecks()
     {
-        using var mview = new MembershipView(K);
+        var mview = new MembershipView(K);
         var n1 = Utils.HostFromParts("127.0.0.1", 1);
         var n2 = Utils.HostFromParts("127.0.0.1", 2);
         var nodeId1 = Utils.NodeIdFromUuid(Guid.NewGuid());
@@ -347,7 +347,7 @@ public class MembershipViewTests
     [Fact]
     public void MonitoringRelationshipMultipleNodes()
     {
-        using var mview = new MembershipView(K);
+        var mview = new MembershipView(K);
         const int numNodes = 1000;
         var list = new List<Endpoint>();
 
@@ -373,7 +373,7 @@ public class MembershipViewTests
     [Fact]
     public void MonitoringRelationshipBootstrap()
     {
-        using var mview = new MembershipView(K);
+        var mview = new MembershipView(K);
         const int serverPort = 1234;
         var n = Utils.HostFromParts("127.0.0.1", serverPort);
         mview.RingAdd(n, Utils.NodeIdFromUuid(Guid.NewGuid()));
@@ -391,7 +391,7 @@ public class MembershipViewTests
     [Fact]
     public void MonitoringRelationshipBootstrapMultiple()
     {
-        using var mview = new MembershipView(K);
+        var mview = new MembershipView(K);
         const int numNodes = 20;
         const int serverPortBase = 1234;
         var joiningNode = Utils.HostFromParts("127.0.0.1", serverPortBase - 1);
@@ -418,7 +418,7 @@ public class MembershipViewTests
     [Fact]
     public void NodeUniqueIdNoDeletions()
     {
-        using var mview = new MembershipView(K);
+        var mview = new MembershipView(K);
         var numExceptions = 0;
         var n1 = Utils.HostFromParts("127.0.0.1", 1);
         var id1 = Utils.NodeIdFromUuid(Guid.NewGuid());
@@ -483,7 +483,7 @@ public class MembershipViewTests
     [Fact]
     public void NodeUniqueIdWithDeletions()
     {
-        using var mview = new MembershipView(K);
+        var mview = new MembershipView(K);
         var n1 = Utils.HostFromParts("127.0.0.1", 1);
         var id1 = Utils.NodeIdFromUuid(Guid.NewGuid());
         mview.RingAdd(n1, id1);
@@ -521,7 +521,7 @@ public class MembershipViewTests
     [Fact]
     public void NodeConfigurationChange()
     {
-        using var mview = new MembershipView(K);
+        var mview = new MembershipView(K);
         const int numNodes = 1000;
         var set = new HashSet<long>(numNodes);
 
@@ -544,8 +544,8 @@ public class MembershipViewTests
     [Fact]
     public void NodeConfigurationsAcrossMViews()
     {
-        using var mview1 = new MembershipView(K);
-        using var mview2 = new MembershipView(K);
+        var mview1 = new MembershipView(K);
+        var mview2 = new MembershipView(K);
         const int numNodes = 1000;
         var list1 = new List<long>(numNodes);
         var list2 = new List<long>(numNodes);

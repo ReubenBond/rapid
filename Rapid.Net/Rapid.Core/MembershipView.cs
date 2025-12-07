@@ -8,10 +8,10 @@ namespace Rapid;
 /// Hosts K permutations of the memberlist that represent the monitoring relationship between nodes;
 /// every node (an observer) observers its successor (a subject) on each ring.
 /// </summary>
-internal sealed class MembershipView : IDisposable
+internal sealed class MembershipView
 {
     private readonly int _k;
-    private readonly ReaderWriterLockSlim _rwLock = new();
+    private readonly Lock _lock = new();
     private readonly List<AddressComparator> _addressComparators;
     private readonly List<SortedSet<Endpoint>> _rings;
     private readonly SortedSet<NodeId> _identifiersSeen;
@@ -94,8 +94,7 @@ internal sealed class MembershipView : IDisposable
     /// </returns>
     public JoinStatusCode IsSafeToJoin(Endpoint node, NodeId uuid)
     {
-        _rwLock.EnterReadLock();
-        try
+        lock (_lock)
         {
             if (_allNodes.Contains(node))
             {
@@ -108,10 +107,6 @@ internal sealed class MembershipView : IDisposable
             }
 
             return JoinStatusCode.SafeToJoin;
-        }
-        finally
-        {
-            _rwLock.ExitReadLock();
         }
     }
 
@@ -132,7 +127,7 @@ internal sealed class MembershipView : IDisposable
             throw new UuidAlreadySeenException(node, nodeId);
         }
 
-        _rwLock.EnterWriteLock();
+        _lock.Enter();
         try
         {
             if (_rings[0].Contains(node))
@@ -165,7 +160,7 @@ internal sealed class MembershipView : IDisposable
         }
         finally
         {
-            _rwLock.ExitWriteLock();
+            _lock.Exit();
         }
     }
 
@@ -178,7 +173,7 @@ internal sealed class MembershipView : IDisposable
     {
         ArgumentNullException.ThrowIfNull(node);
 
-        _rwLock.EnterWriteLock();
+        _lock.Enter();
         try
         {
             if (!_rings[0].Contains(node))
@@ -213,7 +208,7 @@ internal sealed class MembershipView : IDisposable
         }
         finally
         {
-            _rwLock.ExitWriteLock();
+            _lock.Exit();
         }
     }
 
@@ -227,8 +222,7 @@ internal sealed class MembershipView : IDisposable
     {
         ArgumentNullException.ThrowIfNull(node);
 
-        _rwLock.EnterReadLock();
-        try
+        lock (_lock)
         {
             if (!_allNodes.Contains(node))
             {
@@ -241,10 +235,6 @@ internal sealed class MembershipView : IDisposable
                 _cachedObservers[node] = observers;
             }
             return observers;
-        }
-        finally
-        {
-            _rwLock.ExitReadLock();
         }
     }
 
@@ -297,8 +287,7 @@ internal sealed class MembershipView : IDisposable
     {
         ArgumentNullException.ThrowIfNull(node);
 
-        _rwLock.EnterReadLock();
-        try
+        lock (_lock)
         {
             if (!_allNodes.Contains(node))
             {
@@ -311,10 +300,6 @@ internal sealed class MembershipView : IDisposable
             }
 
             return GetPredecessorsOf(node);
-        }
-        finally
-        {
-            _rwLock.ExitReadLock();
         }
     }
 
@@ -329,18 +314,13 @@ internal sealed class MembershipView : IDisposable
     {
         ArgumentNullException.ThrowIfNull(node);
 
-        _rwLock.EnterReadLock();
-        try
+        lock (_lock)
         {
             if (_rings[0].Count == 0)
             {
                 return [];
             }
             return GetPredecessorsOf(node);
-        }
-        finally
-        {
-            _rwLock.ExitReadLock();
         }
     }
 
@@ -374,14 +354,9 @@ internal sealed class MembershipView : IDisposable
     /// <returns>True if the node is present in the membership view and false otherwise.</returns>
     public bool IsHostPresent(Endpoint address)
     {
-        _rwLock.EnterReadLock();
-        try
+        lock (_lock)
         {
             return _allNodes.Contains(address);
-        }
-        finally
-        {
-            _rwLock.ExitReadLock();
         }
     }
 
@@ -392,14 +367,9 @@ internal sealed class MembershipView : IDisposable
     /// <returns>True if the identifier has been seen before and false otherwise.</returns>
     public bool IsIdentifierPresent(NodeId identifier)
     {
-        _rwLock.EnterReadLock();
-        try
+        lock (_lock)
         {
             return _identifiersSeen.Contains(identifier);
-        }
-        finally
-        {
-            _rwLock.ExitReadLock();
         }
     }
 
@@ -410,8 +380,7 @@ internal sealed class MembershipView : IDisposable
     /// <returns>The current configuration identifier.</returns>
     public long GetCurrentConfigurationId()
     {
-        _rwLock.EnterReadLock();
-        try
+        lock (_lock)
         {
             if (_shouldUpdateConfigurationId)
             {
@@ -419,10 +388,6 @@ internal sealed class MembershipView : IDisposable
                 _shouldUpdateConfigurationId = false;
             }
             return _currentConfigurationId;
-        }
-        finally
-        {
-            _rwLock.ExitReadLock();
         }
     }
 
@@ -434,15 +399,10 @@ internal sealed class MembershipView : IDisposable
     /// <exception cref="ArgumentOutOfRangeException">Thrown if k is out of range.</exception>
     public List<Endpoint> GetRing(int k)
     {
-        _rwLock.EnterReadLock();
-        try
+        lock (_lock)
         {
             if (k < 0) throw new ArgumentOutOfRangeException(nameof(k));
             return [.. _rings[k]];
-        }
-        finally
-        {
-            _rwLock.ExitReadLock();
         }
     }
 
@@ -454,8 +414,7 @@ internal sealed class MembershipView : IDisposable
     /// <returns>The indexes k such that <paramref name="observer"/> is a successor of <paramref name="subject"/> on ring[k].</returns>
     public List<int> GetRingNumbers(Endpoint observer, Endpoint subject)
     {
-        _rwLock.EnterReadLock();
-        try
+        lock (_lock)
         {
             var subjects = GetSubjectsOf(observer);
             if (subjects.Count == 0)
@@ -475,10 +434,6 @@ internal sealed class MembershipView : IDisposable
             }
             return ringIndexes;
         }
-        finally
-        {
-            _rwLock.ExitReadLock();
-        }
     }
 
     /// <summary>
@@ -487,14 +442,9 @@ internal sealed class MembershipView : IDisposable
     /// <returns>The number of nodes in the membership.</returns>
     public int GetMembershipSize()
     {
-        _rwLock.EnterReadLock();
-        try
+        lock (_lock)
         {
             return _rings[0].Count;
-        }
-        finally
-        {
-            _rwLock.ExitReadLock();
         }
     }
 
@@ -515,8 +465,7 @@ internal sealed class MembershipView : IDisposable
     /// <returns>A Configuration object.</returns>
     public Configuration GetConfiguration()
     {
-        _rwLock.EnterReadLock();
-        try
+        lock (_lock)
         {
             if (_shouldUpdateConfigurationId)
             {
@@ -524,10 +473,6 @@ internal sealed class MembershipView : IDisposable
                 _shouldUpdateConfigurationId = false;
             }
             return _currentConfiguration;
-        }
-        finally
-        {
-            _rwLock.ExitReadLock();
         }
     }
 
@@ -654,7 +599,5 @@ internal sealed class MembershipView : IDisposable
             return 0;
         }
     }
-
-    public void Dispose() => _rwLock.Dispose();
 }
 

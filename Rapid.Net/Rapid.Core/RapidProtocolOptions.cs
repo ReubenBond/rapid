@@ -11,9 +11,9 @@ public sealed class RapidProtocolOptions
     public bool UseInProcessTransport { get; set; }
 
     /// <summary>
-    /// gRPC request timeout. Default: 1 second
+    /// gRPC request timeout. Default: 10 seconds
     /// </summary>
-    public TimeSpan GrpcTimeout { get; set; } = TimeSpan.FromSeconds(1);
+    public TimeSpan GrpcTimeout { get; set; } = TimeSpan.FromSeconds(10);
 
     /// <summary>
     /// Number of retries for failed gRPC requests. Default: 5

@@ -119,6 +119,93 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
     [LoggerMessage(Level = LogLevel.Information, Message = "Wrong configuration for {{sender:{Sender}, config:{Config}, myConfig:{MyConfig}, size:{Size}}}")]
     private partial void LogWrongConfiguration(LoggableEndpoint Sender, long Config, CurrentConfigId MyConfig, MembershipSize Size);
 
+    [LoggerMessage(Level = LogLevel.Debug, Message = "MembershipService initialized: myAddr={MyAddr}, configId={ConfigId}, membershipSize={MembershipSize}")]
+    private partial void LogMembershipServiceInitialized(LoggableEndpoint MyAddr, CurrentConfigId ConfigId, MembershipSize MembershipSize);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "HandleMessageAsync: received {MessageType} from request")]
+    private partial void LogHandleMessageReceived(RapidRequest.ContentOneofCase MessageType);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "HandlePreJoinMessage: joiner={Joiner}, statusCode={StatusCode}, observers count={ObserversCount}")]
+    private partial void LogHandlePreJoinResult(LoggableEndpoint Joiner, JoinStatusCode StatusCode, int ObserversCount);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "HandleJoinMessageAsync: processing join from {Sender}, configId={ConfigId}")]
+    private partial void LogHandleJoinMessage(LoggableEndpoint Sender, long ConfigId);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "HandleJoinMessageAsync: joiner already in ring, responding SAFE_TO_JOIN")]
+    private partial void LogJoinerAlreadyInRing();
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "HandleBatchedAlertMessage: received batch with {Count} messages from {Sender}")]
+    private partial void LogHandleBatchedAlertMessage(int Count, LoggableEndpoint Sender);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "HandleBatchedAlertMessage: filtered out messages not matching current config {ConfigId}")]
+    private partial void LogBatchedAlertFiltered(CurrentConfigId ConfigId);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "HandleBatchedAlertMessage: processing alert edgeSrc={EdgeSrc}, edgeDst={EdgeDst}, status={Status}")]
+    private partial void LogProcessingAlert(LoggableEndpoint EdgeSrc, LoggableEndpoint EdgeDst, EdgeStatus Status);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "HandleBatchedAlertMessage: cut detection returned {Count} proposals")]
+    private partial void LogCutDetectionProposals(int Count);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "HandleBatchedAlertMessage: implicit edge invalidation returned {Count} proposals")]
+    private partial void LogImplicitEdgeInvalidation(int Count);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "HandleConsensusMessages: forwarding to FastPaxos instance")]
+    private partial void LogHandleConsensusMessages();
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "HandleProbeMessage: responding to probe")]
+    private partial void LogHandleProbeMessage();
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "DecideViewChange: processing {Count} nodes in proposal")]
+    private partial void LogDecideViewChange(int Count);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "DecideViewChange: notifying {Count} joiners waiting through us for node {Node}")]
+    private partial void LogNotifyingJoiners(int Count, LoggableEndpoint Node);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "DecideViewChange: cleared cut detection, updated broadcaster, recreated failure detectors")]
+    private partial void LogDecideViewChangeCleanup();
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "DecideViewChange: publishing VIEW_CHANGE event, configId={ConfigId}, membershipSize={MembershipSize}")]
+    private partial void LogPublishingViewChange(CurrentConfigId ConfigId, MembershipSize MembershipSize);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "RegisterSubscription: registered callback for event {Event}")]
+    private partial void LogRegisterSubscription(ClusterEvents Event);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Shutdown: cancelling background tasks and disposing failure detectors")]
+    private partial void LogShutdown();
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "EnqueueAlertMessage: queued alert edgeSrc={EdgeSrc}, edgeDst={EdgeDst}, status={Status}")]
+    private partial void LogEnqueueAlertMessage(LoggableEndpoint EdgeSrc, LoggableEndpoint EdgeDst, EdgeStatus Status);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "AlertBatcherAsync: broadcasting batch with {Count} messages")]
+    private partial void LogAlertBatcherBroadcast(int Count);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "AlertBatcherAsync: exiting due to cancellation")]
+    private partial void LogAlertBatcherExit();
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "ExtractJoinerUuidAndMetadata: saved UUID and metadata for joiner {Joiner}")]
+    private partial void LogExtractJoinerUuidAndMetadata(LoggableEndpoint Joiner);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "CreateFailureDetectorsForCurrentConfiguration: creating {Count} failure detectors for subjects")]
+    private partial void LogCreateFailureDetectors(int Count);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "CreateFailureDetectorsForCurrentConfiguration: created detector for subject {Subject}, ringNumber={RingNumber}")]
+    private partial void LogCreatedFailureDetector(LoggableEndpoint Subject, int RingNumber);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "EdgeFailureNotification: scheduling callback for subject {Subject}, configId={ConfigId}")]
+    private partial void LogEdgeFailureNotificationScheduled(LoggableEndpoint Subject, long ConfigId);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "EdgeFailureNotification: enqueueing DOWN alert for subject {Subject}, ringNumbers={RingNumbers}")]
+    private partial void LogEdgeFailureNotificationEnqueued(LoggableEndpoint Subject, LoggableRingNumbers RingNumbers);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Dispose: disposing MembershipService resources")]
+    private partial void LogDispose();
+
+    private readonly struct LoggableRingNumbers(IEnumerable<int> ringNumbers)
+    {
+        private readonly IEnumerable<int> _ringNumbers = ringNumbers;
+        public override readonly string ToString() => string.Join(",", _ringNumbers);
+    }
+
     public MembershipService(
         Endpoint myAddr,
         MultiNodeCutDetector cutDetection,
@@ -195,6 +282,8 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         {
             cb(clusterStatusChange);
         }
+
+        LogMembershipServiceInitialized(new LoggableEndpoint(myAddr), new CurrentConfigId(_membershipView), new MembershipSize(_membershipView));
     }
 
     /// <summary>
@@ -202,6 +291,8 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
     /// </summary>
     public async Task<RapidResponse> HandleMessageAsync(RapidRequest msg, CancellationToken cancellationToken)
     {
+        LogHandleMessageReceived(msg.ContentCase);
+
         return msg.ContentCase switch
         {
             RapidRequest.ContentOneofCase.PreJoinMessage => HandlePreJoinMessage(msg.PreJoinMessage, cancellationToken),
@@ -239,10 +330,15 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
             LogJoinAtSeed(new LoggableEndpoint(_myAddr), new LoggableEndpoint(msg.Sender),
                 new CurrentConfigId(_membershipView), new MembershipSize(_membershipView));
 
+            var observersCount = 0;
             if (statusCode == JoinStatusCode.SafeToJoin || statusCode == JoinStatusCode.HostnameAlreadyInRing)
             {
-                builder.Endpoints.AddRange(_membershipView.GetExpectedObserversOf(joiningEndpoint));
+                var observers = _membershipView.GetExpectedObserversOf(joiningEndpoint);
+                builder.Endpoints.AddRange(observers);
+                observersCount = observers.Count;
             }
+
+            LogHandlePreJoinResult(new LoggableEndpoint(joiningEndpoint), statusCode, observersCount);
 
             return RapidUtils.ToRapidResponse(builder);
         }
@@ -257,6 +353,8 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
     private async Task<RapidResponse> HandleJoinMessageAsync(JoinMessage joinMessage, CancellationToken cancellationToken)
     {
         var tcs = new TaskCompletionSource<RapidResponse>();
+
+        LogHandleJoinMessage(new LoggableEndpoint(joinMessage.Sender), joinMessage.ConfigurationId);
 
         lock (_membershipUpdateLock)
         {
@@ -305,6 +403,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
                     // the configuration, but the JoinPhase2 messages show up at the observer
                     // after it has already added the joiner. In this case, we simply
                     // tell the sender that they're safe to join.
+                    LogJoinerAlreadyInRing();
                     responseBuilder.StatusCode = JoinStatusCode.SafeToJoin;
                     responseBuilder.Endpoints.AddRange(configuration.Endpoints);
                     responseBuilder.Identifiers.AddRange(configuration.NodeIds);
@@ -334,10 +433,13 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
     /// </summary>
     private RapidResponse HandleBatchedAlertMessage(BatchedAlertMessage messageBatch, CancellationToken cancellationToken)
     {
+        LogHandleBatchedAlertMessage(messageBatch.Messages.Count, new LoggableEndpoint(messageBatch.Sender));
+
         lock (_membershipUpdateLock)
         {
             if (!FilterAlertMessages(messageBatch, _membershipView.GetCurrentConfigurationId()))
             {
+                LogBatchedAlertFiltered(new CurrentConfigId(_membershipView));
                 return RapidUtils.ToRapidResponse(new ConsensusResponse());
             }
 
@@ -346,14 +448,19 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
             var proposals = new List<Endpoint>();
             foreach (var msg in messageBatch.Messages)
             {
+                LogProcessingAlert(new LoggableEndpoint(msg.EdgeSrc), new LoggableEndpoint(msg.EdgeDst), msg.EdgeStatus);
                 // For valid UP alerts, extract the joiner details (UUID and metadata) which is going to be needed
                 // when the node is added to the rings
                 var extractedMessage = ExtractJoinerUuidAndMetadata(msg);
-                proposals.AddRange(_cutDetection.AggregateForProposal(extractedMessage));
+                var cutProposals = _cutDetection.AggregateForProposal(extractedMessage);
+                LogCutDetectionProposals(cutProposals.Count);
+                proposals.AddRange(cutProposals);
             }
 
             // Lastly, we apply implicit detections
-            proposals.AddRange(_cutDetection.InvalidateFailingEdges(_membershipView));
+            var implicitProposals = _cutDetection.InvalidateFailingEdges(_membershipView);
+            LogImplicitEdgeInvalidation(implicitProposals.Count);
+            proposals.AddRange(implicitProposals);
 
             // If we have a proposal for this stage, start an instance of consensus on it.
             lock (_membershipUpdateLock)
@@ -389,6 +496,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
     /// </summary>
     private RapidResponse HandleConsensusMessages(RapidRequest request, CancellationToken cancellationToken)
     {
+        LogHandleConsensusMessages();
         _fastPaxosInstance?.HandleMessages(request, cancellationToken);
         return RapidUtils.ToRapidResponse(new ConsensusResponse());
     }
@@ -407,7 +515,11 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
     /// <summary>
     /// Invoked by observers of a node for failure detection.
     /// </summary>
-    private static RapidResponse HandleProbeMessage(ProbeMessage probeMessage, CancellationToken cancellationToken) => RapidUtils.ToRapidResponse(new ProbeResponse());
+    private RapidResponse HandleProbeMessage(ProbeMessage probeMessage, CancellationToken cancellationToken)
+    {
+        LogHandleProbeMessage();
+        return RapidUtils.ToRapidResponse(new ProbeResponse());
+    }
 
     /// <summary>
     /// This is invoked by FastPaxos modules when they arrive at a decision.
@@ -417,6 +529,8 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
     /// </summary>
     private void DecideViewChange(List<Endpoint> proposal)
     {
+        LogDecideViewChange(proposal.Count);
+
         lock (_membershipUpdateLock)
         {
             _announcedProposal = false;
@@ -452,6 +566,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
                 // Send new configuration to all nodes joining through us
                 if (_joinersToRespondTo.TryGetValue(node, out var channel))
                 {
+                    var waitingCount = 0;
                     var config = _membershipView.GetConfiguration();
                     var response = new JoinResponse
                     {
@@ -470,9 +585,11 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
                     // Send response to all waiting tasks
                     while (channel.Reader.TryRead(out var tcs))
                     {
+                        waitingCount++;
                         tcs.SetResult(rapidResponse);
                     }
 
+                    LogNotifyingJoiners(waitingCount, new LoggableEndpoint(node));
                     _joinersToRespondTo.Remove(node);
                 }
             }
@@ -488,6 +605,8 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
             fd.Dispose();
         }
         _failureDetectors.Clear();
+
+        LogDecideViewChangeCleanup();
 
         _fastPaxosInstance = _fastPaxosFactory.Create(
             _myAddr,
@@ -505,6 +624,8 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         var nodeStatusChanges = CreateNodeStatusChangeList(proposal);
         var clusterStatusChange = new ClusterStatusChange(configurationId, currentMembership, nodeStatusChanges);
 
+        LogPublishingViewChange(new CurrentConfigId(_membershipView), new MembershipSize(_membershipView));
+
         foreach (var cb in _subscriptions[ClusterEvents.ViewChange])
         {
             cb(clusterStatusChange);
@@ -516,7 +637,11 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
     /// </summary>
     /// <param name="evt">Cluster event to subscribe to</param>
     /// <param name="callback">Callback to be executed when <paramref name="evt"/> occurs.</param>
-    public void RegisterSubscription(ClusterEvents evt, Action<ClusterStatusChange> callback) => _subscriptions[evt].Add(callback);
+    public void RegisterSubscription(ClusterEvents evt, Action<ClusterStatusChange> callback)
+    {
+        LogRegisterSubscription(evt);
+        _subscriptions[evt].Add(callback);
+    }
 
     /// <summary>
     /// Gets the list of endpoints currently in the membership view.
@@ -541,6 +666,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
     /// </summary>
     public void Shutdown()
     {
+        LogShutdown();
         _shutdownCts.Cancel();
         foreach (var fd in _failureDetectors)
         {
@@ -595,6 +721,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
     /// <param name="msg">the AlertMessage to be broadcasted</param>
     private void EnqueueAlertMessage(AlertMessage msg)
     {
+        LogEnqueueAlertMessage(new LoggableEndpoint(msg.EdgeSrc), new LoggableEndpoint(msg.EdgeDst), msg.EdgeStatus);
         lock (_batchSchedulerLock)
         {
             _sendQueue.Writer.TryWrite(msg);
@@ -623,6 +750,8 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
 
                     if (buffer.Count > 0)
                     {
+                        LogAlertBatcherBroadcast(buffer.Count);
+
                         var batchedMessage = new BatchedAlertMessage
                         {
                             Sender = _myAddr
@@ -638,6 +767,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
             }
             catch (OperationCanceledException)
             {
+                LogAlertBatcherExit();
                 break;
             }
         }
@@ -657,6 +787,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
             // Both the UUID and Metadata are saved only after the node is done being added.
             _joinerUuid[alertMessage.EdgeDst] = alertMessage.NodeId;
             _joinerMetadata[alertMessage.EdgeDst] = alertMessage.Metadata;
+            LogExtractJoinerUuidAndMetadata(new LoggableEndpoint(alertMessage.EdgeDst));
         }
         return alertMessage;
     }
@@ -698,11 +829,15 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         var subjects = _membershipView.GetSubjectsOf(_myAddr);
         var configurationId = _membershipView.GetCurrentConfigurationId();
 
+        LogCreateFailureDetectors(subjects.Count);
+
         for (var i = 0; i < subjects.Count; i++)
         {
             var subject = subjects[i];
             var ringNumber = i;
             var fd = _fdFactory.CreateInstance(subject, () => EdgeFailureNotification(subject, configurationId));
+
+            LogCreatedFailureDetector(new LoggableEndpoint(subject), ringNumber);
 
             fd.Start();
             _failureDetectors.Add(fd);
@@ -717,43 +852,44 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
     /// <param name="configurationId">Configuration ID when the failure was detected</param>
     private void EdgeFailureNotification(Endpoint subject, long configurationId)
     {
-        _sharedResources.ScheduleCallback(async () =>
+        LogEdgeFailureNotificationScheduled(new LoggableEndpoint(subject), configurationId);
+
+        try
         {
-            try
+            if (configurationId != _membershipView.GetCurrentConfigurationId())
             {
-                if (configurationId != _membershipView.GetCurrentConfigurationId())
-                {
-                    LogIgnoringOldConfigNotification(new LoggableEndpoint(subject), new CurrentConfigId(_membershipView), configurationId);
-                    return;
-                }
-
-                LogAnnouncingEdgeFail(new LoggableEndpoint(subject), new LoggableEndpoint(_myAddr), configurationId, new MembershipSize(_membershipView));
-
-                var ringNumbers = _membershipView.GetRingNumbers(_myAddr, subject);
-                // Note: setUuid is deliberately missing here because it does not affect leaves.
-                var msg = new AlertMessage
-                {
-                    EdgeSrc = _myAddr,
-                    EdgeDst = subject,
-                    EdgeStatus = EdgeStatus.Down,
-                    ConfigurationId = configurationId
-                };
-                msg.RingNumber.AddRange(ringNumbers);
-
-                EnqueueAlertMessage(msg);
+                LogIgnoringOldConfigNotification(new LoggableEndpoint(subject), new CurrentConfigId(_membershipView), configurationId);
+                return;
             }
-            catch (Exception ex)
+
+            LogAnnouncingEdgeFail(new LoggableEndpoint(subject), new LoggableEndpoint(_myAddr), configurationId, new MembershipSize(_membershipView));
+
+            var ringNumbers = _membershipView.GetRingNumbers(_myAddr, subject);
+            LogEdgeFailureNotificationEnqueued(new LoggableEndpoint(subject), new LoggableRingNumbers(ringNumbers));
+
+            // Note: setUuid is deliberately missing here because it does not affect leaves.
+            var msg = new AlertMessage
             {
-                LogErrorInEdgeFailureNotification(ex, new LoggableEndpoint(subject));
-                throw;
-            }
-        });
+                EdgeSrc = _myAddr,
+                EdgeDst = subject,
+                EdgeStatus = EdgeStatus.Down,
+                ConfigurationId = configurationId
+            };
+            msg.RingNumber.AddRange(ringNumbers);
+
+            EnqueueAlertMessage(msg);
+        }
+        catch (Exception ex)
+        {
+            LogErrorInEdgeFailureNotification(ex, new LoggableEndpoint(subject));
+            throw;
+        }
     }
 
     public void Dispose()
     {
+        LogDispose();
         _shutdownCts.Dispose();
-        _membershipView.Dispose();
         _fastPaxosInstance?.Dispose();
         foreach (var fd in _failureDetectors)
         {

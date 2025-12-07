@@ -184,6 +184,7 @@ internal sealed partial class RapidClusterService : BackgroundService
         // Wait for background tasks to complete gracefully
         try
         {
+            _sharedResources.StartShutdown();
             await _sharedResources.WaitForBackgroundTasksAsync(TimeSpan.FromSeconds(5), cancellationToken)
                 .ConfigureAwait(false);
         }

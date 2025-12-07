@@ -1,0 +1,350 @@
+using Rapid.Pb;
+
+namespace Rapid.Tests;
+
+/// <summary>
+/// Comprehensive tests for Rank comparison operators and IComparable implementation.
+/// </summary>
+public class RankTests
+{
+    #region IComparable Tests
+
+    [Fact]
+    public void CompareToHigherRoundReturnsPositive()
+    {
+        var rank1 = new Rank { Round = 1, NodeIndex = 0 };
+        var rank2 = new Rank { Round = 2, NodeIndex = 0 };
+
+        Assert.True(rank2.CompareTo(rank1) > 0);
+    }
+
+    [Fact]
+    public void CompareToLowerRoundReturnsNegative()
+    {
+        var rank1 = new Rank { Round = 1, NodeIndex = 0 };
+        var rank2 = new Rank { Round = 2, NodeIndex = 0 };
+
+        Assert.True(rank1.CompareTo(rank2) < 0);
+    }
+
+    [Fact]
+    public void CompareToSameRoundHigherNodeIndexReturnsPositive()
+    {
+        var rank1 = new Rank { Round = 5, NodeIndex = 10 };
+        var rank2 = new Rank { Round = 5, NodeIndex = 20 };
+
+        Assert.True(rank2.CompareTo(rank1) > 0);
+    }
+
+    [Fact]
+    public void CompareToSameRoundLowerNodeIndexReturnsNegative()
+    {
+        var rank1 = new Rank { Round = 5, NodeIndex = 10 };
+        var rank2 = new Rank { Round = 5, NodeIndex = 20 };
+
+        Assert.True(rank1.CompareTo(rank2) < 0);
+    }
+
+    [Fact]
+    public void CompareToEqualRanksReturnsZero()
+    {
+        var rank1 = new Rank { Round = 5, NodeIndex = 10 };
+        var rank2 = new Rank { Round = 5, NodeIndex = 10 };
+
+        Assert.Equal(0, rank1.CompareTo(rank2));
+    }
+
+    [Fact]
+    public void CompareToNullRankReturnsPositive()
+    {
+        var rank = new Rank { Round = 1, NodeIndex = 1 };
+
+        Assert.True(rank.CompareTo(null) > 0);
+    }
+
+    [Fact]
+    public void CompareToZeroRankComparedCorrectly()
+    {
+        var zeroRank = new Rank { Round = 0, NodeIndex = 0 };
+        var nonZeroRank = new Rank { Round = 1, NodeIndex = 0 };
+
+        Assert.True(nonZeroRank.CompareTo(zeroRank) > 0);
+        Assert.True(zeroRank.CompareTo(nonZeroRank) < 0);
+    }
+
+    [Fact]
+    public void CompareToNegativeNodeIndexHandledCorrectly()
+    {
+        var rank1 = new Rank { Round = 1, NodeIndex = -5 };
+        var rank2 = new Rank { Round = 1, NodeIndex = 5 };
+
+        Assert.True(rank1.CompareTo(rank2) < 0);
+    }
+
+    [Fact]
+    public void CompareToLargeValuesHandledCorrectly()
+    {
+        var rank1 = new Rank { Round = int.MaxValue, NodeIndex = int.MaxValue };
+        var rank2 = new Rank { Round = int.MaxValue, NodeIndex = int.MaxValue - 1 };
+
+        Assert.True(rank1.CompareTo(rank2) > 0);
+    }
+
+    #endregion
+
+    #region Equality Operators Tests
+
+    [Fact]
+    public void EqualityOperatorEqualRanksReturnsTrue()
+    {
+        var rank1 = new Rank { Round = 5, NodeIndex = 10 };
+        var rank2 = new Rank { Round = 5, NodeIndex = 10 };
+
+        Assert.True(rank1.Equals(rank2));
+    }
+
+    [Fact]
+    public void EqualityOperatorDifferentRoundReturnsFalse()
+    {
+        var rank1 = new Rank { Round = 5, NodeIndex = 10 };
+        var rank2 = new Rank { Round = 6, NodeIndex = 10 };
+
+        Assert.False(rank1.Equals(rank2));
+    }
+
+    [Fact]
+    public void EqualityOperatorDifferentNodeIndexReturnsFalse()
+    {
+        var rank1 = new Rank { Round = 5, NodeIndex = 10 };
+        var rank2 = new Rank { Round = 5, NodeIndex = 11 };
+
+        Assert.False(rank1.Equals(rank2));
+    }
+
+    [Fact]
+    public void EqualityOperatorBothNullReturnsTrue()
+    {
+        Rank? rank1 = null;
+        Rank? rank2 = null;
+
+#pragma warning disable CA1508 // Test intentionally checks null behavior
+        Assert.True(rank1 == rank2);
+#pragma warning restore CA1508
+    }
+
+    [Fact]
+    public void EqualityOperatorLeftNullReturnsFalse()
+    {
+        Rank? rank1 = null;
+        var rank2 = new Rank { Round = 1, NodeIndex = 1 };
+
+#pragma warning disable CA1508 // Test intentionally checks null behavior
+        Assert.False(rank1 == rank2);
+#pragma warning restore CA1508
+    }
+
+    [Fact]
+    public void EqualityOperatorRightNullReturnsFalse()
+    {
+        var rank1 = new Rank { Round = 1, NodeIndex = 1 };
+        Rank? rank2 = null;
+
+#pragma warning disable CA1508 // Test intentionally checks null behavior
+        Assert.False(rank1 == rank2);
+#pragma warning restore CA1508
+    }
+
+    #endregion
+
+    #region Inequality Operators Tests
+
+    [Fact]
+    public void InequalityOperatorEqualRanksReturnsFalse()
+    {
+        var rank1 = new Rank { Round = 5, NodeIndex = 10 };
+        var rank2 = new Rank { Round = 5, NodeIndex = 10 };
+
+        Assert.False(rank1 != rank2);
+    }
+
+    [Fact]
+    public void InequalityOperatorDifferentRanksReturnsTrue()
+    {
+        var rank1 = new Rank { Round = 5, NodeIndex = 10 };
+        var rank2 = new Rank { Round = 6, NodeIndex = 10 };
+
+        Assert.True(rank1 != rank2);
+    }
+
+    #endregion
+
+    #region Less Than Operator Tests
+
+    [Fact]
+    public void LessThanOperatorSmallerRankReturnsTrue()
+    {
+        var rank1 = new Rank { Round = 1, NodeIndex = 0 };
+        var rank2 = new Rank { Round = 2, NodeIndex = 0 };
+
+        Assert.True(rank1 < rank2);
+    }
+
+    [Fact]
+    public void LessThanOperatorLargerRankReturnsFalse()
+    {
+        var rank1 = new Rank { Round = 2, NodeIndex = 0 };
+        var rank2 = new Rank { Round = 1, NodeIndex = 0 };
+
+        Assert.False(rank1 < rank2);
+    }
+
+    [Fact]
+    public void LessThanOperatorEqualRanksReturnsFalse()
+    {
+        var rank1 = new Rank { Round = 1, NodeIndex = 1 };
+        var rank2 = new Rank { Round = 1, NodeIndex = 1 };
+
+        Assert.False(rank1 < rank2);
+    }
+
+    [Fact]
+    public void LessThanOperatorLeftNullReturnsTrue()
+    {
+        Rank? rank1 = null;
+        var rank2 = new Rank { Round = 1, NodeIndex = 1 };
+
+        Assert.True(rank1 < rank2);
+    }
+
+    [Fact]
+    public void LessThanOperatorRightNullReturnsFalse()
+    {
+        var rank1 = new Rank { Round = 1, NodeIndex = 1 };
+        Rank? rank2 = null;
+
+        Assert.False(rank1 < rank2);
+    }
+
+    [Fact]
+    public void LessThanOperatorBothNullReturnsFalse()
+    {
+        Rank? rank1 = null;
+        Rank? rank2 = null;
+
+        Assert.False(rank1 < rank2);
+    }
+
+    #endregion
+
+    #region Greater Than Operator Tests
+
+    [Fact]
+    public void GreaterThanOperatorLargerRankReturnsTrue()
+    {
+        var rank1 = new Rank { Round = 2, NodeIndex = 0 };
+        var rank2 = new Rank { Round = 1, NodeIndex = 0 };
+
+        Assert.True(rank1 > rank2);
+    }
+
+    [Fact]
+    public void GreaterThanOperatorSmallerRankReturnsFalse()
+    {
+        var rank1 = new Rank { Round = 1, NodeIndex = 0 };
+        var rank2 = new Rank { Round = 2, NodeIndex = 0 };
+
+        Assert.False(rank1 > rank2);
+    }
+
+    [Fact]
+    public void GreaterThanOperatorEqualRanksReturnsFalse()
+    {
+        var rank1 = new Rank { Round = 1, NodeIndex = 1 };
+        var rank2 = new Rank { Round = 1, NodeIndex = 1 };
+
+        Assert.False(rank1 > rank2);
+    }
+
+    #endregion
+
+    #region Less Than Or Equal Operator Tests
+
+    [Fact]
+    public void LessThanOrEqualOperatorSmallerRankReturnsTrue()
+    {
+        var rank1 = new Rank { Round = 1, NodeIndex = 0 };
+        var rank2 = new Rank { Round = 2, NodeIndex = 0 };
+
+        Assert.True(rank1 <= rank2);
+    }
+
+    [Fact]
+    public void LessThanOrEqualOperatorEqualRanksReturnsTrue()
+    {
+        var rank1 = new Rank { Round = 1, NodeIndex = 1 };
+        var rank2 = new Rank { Round = 1, NodeIndex = 1 };
+
+        Assert.True(rank1 <= rank2);
+    }
+
+    #endregion
+
+    #region Greater Than Or Equal Operator Tests
+
+    [Fact]
+    public void GreaterThanOrEqualOperatorLargerRankReturnsTrue()
+    {
+        var rank1 = new Rank { Round = 2, NodeIndex = 0 };
+        var rank2 = new Rank { Round = 1, NodeIndex = 0 };
+
+        Assert.True(rank1 >= rank2);
+    }
+
+    [Fact]
+    public void GreaterThanOrEqualOperatorEqualRanksReturnsTrue()
+    {
+        var rank1 = new Rank { Round = 1, NodeIndex = 1 };
+        var rank2 = new Rank { Round = 1, NodeIndex = 1 };
+
+        Assert.True(rank1 >= rank2);
+    }
+
+    #endregion
+
+    #region Edge Cases
+
+    [Fact]
+    public void RankRoundDifferenceOverridesNodeIndex()
+    {
+        // Higher round should win even if node index is smaller
+        var rank1 = new Rank { Round = 2, NodeIndex = 0 };
+        var rank2 = new Rank { Round = 1, NodeIndex = 100 };
+
+        Assert.True(rank1 > rank2);
+        Assert.True(rank1.CompareTo(rank2) > 0);
+    }
+
+    [Fact]
+    public void RankSortingOrdersCorrectly()
+    {
+        var ranks = new List<Rank>
+        {
+            new() { Round = 3, NodeIndex = 1 },
+            new() { Round = 1, NodeIndex = 5 },
+            new() { Round = 2, NodeIndex = 3 },
+            new() { Round = 1, NodeIndex = 2 },
+            new() { Round = 2, NodeIndex = 1 }
+        };
+
+        ranks.Sort();
+
+        Assert.Equal(1, ranks[0].Round);
+        Assert.Equal(2, ranks[0].NodeIndex);
+        Assert.Equal(1, ranks[1].Round);
+        Assert.Equal(5, ranks[1].NodeIndex);
+        Assert.Equal(2, ranks[2].Round);
+        Assert.Equal(1, ranks[2].NodeIndex);
+    }
+
+    #endregion
+}

@@ -20,6 +20,8 @@ public sealed partial class SharedResources : IDisposable
     /// </summary>
     public TimeProvider TimeProvider { get; }
 
+    public CancellationToken ShuttingDown => _shutdownCts.Token;
+
     private Channel<Func<Task>> ProtocolExecutor => _protocolExecutor;
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Error executing protocol message")]
@@ -78,8 +80,6 @@ public sealed partial class SharedResources : IDisposable
         }
     }
 
-    public async Task ScheduleAsyncCallback(Func<Task> asyncFunc) => await ProtocolExecutor.Writer.WriteAsync(asyncFunc).ConfigureAwait(false);
-
     public void ScheduleCallback(Func<Task> asyncFunc) => ProtocolExecutor.Writer.TryWrite(asyncFunc);
 
     /// <summary>
@@ -92,6 +92,11 @@ public sealed partial class SharedResources : IDisposable
         {
             _backgroundTasks.Add(task);
         }
+    }
+
+    public void StartShutdown()
+    {
+        _shutdownCts.Cancel();
     }
 
     /// <summary>

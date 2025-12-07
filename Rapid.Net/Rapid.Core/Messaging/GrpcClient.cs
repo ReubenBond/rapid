@@ -67,10 +67,22 @@ internal sealed partial class GrpcClient : IMessagingClient
 #pragma warning restore CA1031
     }
 
-    public void SendOneWayMessage(Endpoint remote, RapidRequest request, CancellationToken cancellationToken)
+    public async void SendOneWayMessage(Endpoint remote, RapidRequest request, CancellationToken cancellationToken)
     {
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(_options.GrpcTimeout);
+
         var client = GetOrCreateClient(remote);
-        client.sendRequestAsync(request, cancellationToken: cancellationToken).Ignore();
+#pragma warning disable CA1031 // Do not catch general exception types
+        try
+        {
+            await client.sendRequestAsync(request, cancellationToken: cts.Token);
+        }
+        catch
+        {
+            // Ignore.
+        }
+#pragma warning restore CA1031 // Do not catch general exception types
     }
 
     private Pb.MembershipService.MembershipServiceClient GetOrCreateClient(Endpoint remote)
