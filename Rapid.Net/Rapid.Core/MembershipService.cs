@@ -262,7 +262,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         }
 
         // Start background jobs and track them
-        var alertBatcherTask = Task.Run(AlertBatcherAsync, _shutdownCts.Token);
+        var alertBatcherTask = Task.Factory.StartNew(AlertBatcherAsync, _shutdownCts.Token, TaskCreationOptions.None, _sharedResources.TaskScheduler).Unwrap();
         _sharedResources.TrackBackgroundTask(alertBatcherTask);
 
         _broadcaster.SetMembership([.. _membershipView.GetRing(0)]);
@@ -272,7 +272,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         // Prepare consensus instance
         _fastPaxosInstance = _fastPaxosFactory.Create(_myAddr, _membershipView.ConfigurationId,
                                           _membershipView.Size, _broadcaster);
-        _fastPaxosInstance.Decided.ContinueWith(t => DecideViewChange(t.Result), scheduler: TaskScheduler.Default);
+        _fastPaxosInstance.Decided.ContinueWith(t => DecideViewChange(t.Result), scheduler: _sharedResources.TaskScheduler);
 
         CreateFailureDetectorsForCurrentConfiguration();
 
@@ -637,7 +637,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
                 _membershipView.ConfigurationId,
                 _membershipView.Size,
                 _broadcaster);
-            _fastPaxosInstance.Decided.ContinueWith(t => DecideViewChange(t.Result), scheduler: TaskScheduler.Default);
+            _fastPaxosInstance.Decided.ContinueWith(t => DecideViewChange(t.Result), scheduler: _sharedResources.TaskScheduler);
 
             // Inform EdgeFailureDetector about membership change
             CreateFailureDetectorsForCurrentConfiguration();

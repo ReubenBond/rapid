@@ -7,17 +7,41 @@ namespace Rapid;
 /// <summary>
 /// Holds all resources that are shared across a single instance of Rapid.
 /// </summary>
-public sealed partial class SharedResources(ILoggerFactory? loggerFactory = null, TimeProvider? timeProvider = null) : IDisposable
+public sealed partial class SharedResources(
+    ILoggerFactory? loggerFactory = null,
+    TimeProvider? timeProvider = null,
+    TaskScheduler? taskScheduler = null,
+    Random? random = null,
+    Func<Guid>? guidFactory = null) : IDisposable
 {
     private readonly ILogger<SharedResources> _logger = (loggerFactory ?? NullLoggerFactory.Instance).CreateLogger<SharedResources>();
     private readonly CancellationTokenSource _shutdownCts = new();
     private readonly List<Task> _backgroundTasks = [];
     private readonly Lock _backgroundTasksLock = new();
+    private readonly Random _random = random ?? Random.Shared;
+    private readonly Func<Guid> _guidFactory = guidFactory ?? Guid.NewGuid;
 
     /// <summary>
     /// Gets the TimeProvider used for all time-related operations.
     /// </summary>
     public TimeProvider TimeProvider { get; } = timeProvider ?? TimeProvider.System;
+
+    /// <summary>
+    /// Gets the TaskScheduler used for scheduling tasks.
+    /// </summary>
+    public TaskScheduler TaskScheduler { get; } = taskScheduler ?? TaskScheduler.Default;
+
+    /// <summary>
+    /// Generates a random double value between 0.0 and 1.0.
+    /// </summary>
+#pragma warning disable CA5394 // Do not use insecure randomness. Justification: this is not security-sensitive code.
+    public double NextRandomDouble() => _random.NextDouble();
+#pragma warning restore CA5394
+
+    /// <summary>
+    /// Generates a new GUID.
+    /// </summary>
+    public Guid NewGuid() => _guidFactory();
 
     public CancellationToken ShuttingDown => _shutdownCts.Token;
 

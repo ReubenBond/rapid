@@ -84,7 +84,7 @@ internal sealed partial class RapidClusterService : BackgroundService
 
     private async Task StartClusterAsync(CancellationToken cancellationToken)
     {
-        var currentIdentifier = RapidUtils.NodeIdFromUuid(Guid.NewGuid());
+        var currentIdentifier = RapidUtils.NodeIdFromUuid(_sharedResources.NewGuid());
 
         _membershipService = _membershipServiceFactory.CreateForNewCluster(
             _options.ListenAddress,
@@ -96,7 +96,7 @@ internal sealed partial class RapidClusterService : BackgroundService
     private async Task JoinClusterAsync(CancellationToken cancellationToken)
     {
 
-        var currentIdentifier = RapidUtils.NodeIdFromUuid(Guid.NewGuid());
+        var currentIdentifier = RapidUtils.NodeIdFromUuid(_sharedResources.NewGuid());
 
         // Phase 1: Contact seed for observers
         var preJoinMessage = new PreJoinMessage
