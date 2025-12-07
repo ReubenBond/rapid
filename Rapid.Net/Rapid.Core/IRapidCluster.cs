@@ -57,7 +57,7 @@ internal sealed class RapidCluster(RapidClusterService clusterService, IMembersh
     {
         if (clusterService.MembershipService != null)
         {
-            await clusterService.MembershipService.LeaveAsync().ConfigureAwait(false);
+            await clusterService.MembershipService.LeaveAsync().ConfigureAwait(true);
         }
     }
 

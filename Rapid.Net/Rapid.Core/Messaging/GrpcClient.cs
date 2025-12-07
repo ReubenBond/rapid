@@ -50,7 +50,7 @@ internal sealed partial class GrpcClient : IMessagingClient, IHostedService
             LogStopping(pendingTasks.Length);
             try
             {
-                await Task.WhenAll(pendingTasks).WaitAsync(cancellationToken).ConfigureAwait(false);
+                await Task.WhenAll(pendingTasks).WaitAsync(cancellationToken).ConfigureAwait(true);
             }
             catch (OperationCanceledException)
             {
@@ -85,7 +85,7 @@ internal sealed partial class GrpcClient : IMessagingClient, IHostedService
 #pragma warning disable CA1031
         try
         {
-            return await SendMessageAsync(remote, request, cancellationToken).ConfigureAwait(false);
+            return await SendMessageAsync(remote, request, cancellationToken).ConfigureAwait(true);
         }
         catch
         {
@@ -154,7 +154,7 @@ internal sealed partial class GrpcClient : IMessagingClient, IHostedService
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             try
             {
-                await Task.WhenAll(pendingTasks).WaitAsync(cts.Token).ConfigureAwait(false);
+                await Task.WhenAll(pendingTasks).WaitAsync(cts.Token).ConfigureAwait(true);
             }
             catch (OperationCanceledException)
             {

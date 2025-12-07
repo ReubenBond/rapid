@@ -7,80 +7,19 @@ namespace Rapid;
 /// <summary>
 /// Holds all resources that are shared across a single instance of Rapid.
 /// </summary>
-public sealed partial class SharedResources : IDisposable
+public sealed partial class SharedResources(ILoggerFactory? loggerFactory = null, TimeProvider? timeProvider = null) : IDisposable
 {
-    private readonly ILogger<SharedResources> _logger;
+    private readonly ILogger<SharedResources> _logger = (loggerFactory ?? NullLoggerFactory.Instance).CreateLogger<SharedResources>();
     private readonly CancellationTokenSource _shutdownCts = new();
-    private readonly Channel<Func<Task>> _protocolExecutor;
     private readonly List<Task> _backgroundTasks = [];
     private readonly Lock _backgroundTasksLock = new();
 
     /// <summary>
     /// Gets the TimeProvider used for all time-related operations.
     /// </summary>
-    public TimeProvider TimeProvider { get; }
+    public TimeProvider TimeProvider { get; } = timeProvider ?? TimeProvider.System;
 
     public CancellationToken ShuttingDown => _shutdownCts.Token;
-
-    private Channel<Func<Task>> ProtocolExecutor => _protocolExecutor;
-
-    [LoggerMessage(Level = LogLevel.Error, Message = "Error executing protocol message")]
-    private partial void LogProtocolMessageError(Exception ex);
-
-    [LoggerMessage(Level = LogLevel.Error, Message = "Error executing protocol task")]
-    private partial void LogProtocolTaskError(Exception ex);
-
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to queue protocol action - channel may be closed")]
-    private partial void LogFailedToQueueAction();
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Waiting for {Count} background tasks to complete")]
-    private partial void LogWaitingForBackgroundTasks(int Count);
-
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Timeout waiting for background tasks to complete")]
-    private partial void LogBackgroundTaskTimeout();
-
-    public SharedResources(ILoggerFactory? loggerFactory = null, TimeProvider? timeProvider = null)
-    {
-        _logger = (loggerFactory ?? NullLoggerFactory.Instance).CreateLogger<SharedResources>();
-        TimeProvider = timeProvider ?? TimeProvider.System;
-
-        // Create protocol executor channel for async tasks
-        _protocolExecutor = Channel.CreateUnbounded<Func<Task>>(new UnboundedChannelOptions
-        {
-            SingleReader = true,
-            SingleWriter = false
-        });
-
-        // Start the protocol executor and track it
-        var protocolTask = Task.Run(ProcessProtocolMessagesAsync);
-        TrackBackgroundTask(protocolTask);
-    }
-
-    private async Task ProcessProtocolMessagesAsync()
-    {
-        try
-        {
-            await foreach (var taskFunc in _protocolExecutor.Reader.ReadAllAsync(_shutdownCts.Token).ConfigureAwait(false))
-            {
-#pragma warning disable CA1031 // Do not catch general exception types
-                try
-                {
-                    await taskFunc().ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    LogProtocolTaskError(ex);
-                }
-#pragma warning restore CA1031 // Do not catch general exception types
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            // Expected during shutdown
-        }
-    }
-
-    public void ScheduleCallback(Func<Task> asyncFunc) => ProtocolExecutor.Writer.TryWrite(asyncFunc);
 
     /// <summary>
     /// Tracks a background task to ensure it can be awaited during shutdown.
@@ -122,7 +61,7 @@ public sealed partial class SharedResources : IDisposable
 
         try
         {
-            await Task.WhenAll(tasks).WaitAsync(timeout, cancellationToken).ConfigureAwait(false);
+            await Task.WhenAll(tasks).WaitAsync(timeout, cancellationToken).ConfigureAwait(true);
         }
         catch (TimeoutException)
         {
@@ -137,7 +76,12 @@ public sealed partial class SharedResources : IDisposable
     public void Dispose()
     {
         _shutdownCts.Cancel();
-        _protocolExecutor.Writer.Complete();
         _shutdownCts.Dispose();
     }
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Waiting for {Count} background tasks to complete")]
+    private partial void LogWaitingForBackgroundTasks(int Count);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Timeout waiting for background tasks to complete")]
+    private partial void LogBackgroundTaskTimeout();
 }

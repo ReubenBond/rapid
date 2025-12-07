@@ -58,18 +58,18 @@ internal sealed partial class RapidClusterService : BackgroundService
             if (_options.SeedAddress == null || _options.ListenAddress.Equals(_options.SeedAddress))
             {
                 // Start a new cluster
-                await StartClusterAsync(stoppingToken).ConfigureAwait(false);
+                await StartClusterAsync(stoppingToken).ConfigureAwait(true);
             }
             else
             {
                 // Join an existing cluster
-                await JoinClusterAsync(stoppingToken).ConfigureAwait(false);
+                await JoinClusterAsync(stoppingToken).ConfigureAwait(true);
             }
 
             LogStarted();
 
             // Keep running until cancellation
-            await Task.Delay(Timeout.Infinite, stoppingToken).ConfigureAwait(false);
+            await Task.Delay(Timeout.Infinite, stoppingToken).ConfigureAwait(true);
         }
         catch (OperationCanceledException)
         {
@@ -108,7 +108,7 @@ internal sealed partial class RapidClusterService : BackgroundService
         var preJoinResponse = await _messagingClient.SendMessageAsync(
             _options.SeedAddress!,
             RapidUtils.ToRapidRequest(preJoinMessage),
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken).ConfigureAwait(true);
         var joinResponse = preJoinResponse.JoinResponse;
 
         if (joinResponse.StatusCode != JoinStatusCode.SafeToJoin &&
@@ -149,10 +149,10 @@ internal sealed partial class RapidClusterService : BackgroundService
             return await _messagingClient.SendMessageAsync(
                 entry.Key,
                 RapidUtils.ToRapidRequest(joinMessageForObserver),
-                cancellationToken).WithDefaultOnException().ConfigureAwait(false);
+                cancellationToken).WithDefaultOnException().ConfigureAwait(true);
         });
 
-        var responses = await Task.WhenAll(tasks).ConfigureAwait(false);
+        var responses = await Task.WhenAll(tasks).ConfigureAwait(true);
         var successfulResponse = responses.FirstOrDefault(r => r?.JoinResponse?.StatusCode == JoinStatusCode.SafeToJoin)?.JoinResponse;
 
         if (successfulResponse == null)
@@ -187,14 +187,14 @@ internal sealed partial class RapidClusterService : BackgroundService
         {
             _sharedResources.StartShutdown();
             await _sharedResources.WaitForBackgroundTasksAsync(TimeSpan.FromSeconds(5), cancellationToken)
-                .ConfigureAwait(false);
+                .ConfigureAwait(true);
         }
         catch (OperationCanceledException)
         {
             // Expected if forced shutdown
         }
 
-        await base.StopAsync(cancellationToken).ConfigureAwait(false);
+        await base.StopAsync(cancellationToken).ConfigureAwait(true);
     }
 
     public override void Dispose()

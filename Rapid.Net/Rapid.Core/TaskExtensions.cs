@@ -11,7 +11,7 @@ internal static class TaskExtensions
         await ((Task)task).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
         return task switch
         {
-            { IsCompletedSuccessfully: true } => await task.ConfigureAwait(false),
+            { IsCompletedSuccessfully: true } => await task.ConfigureAwait(true),
             _ => default
         };
     }
@@ -51,7 +51,7 @@ internal static class TaskExtensions
 #pragma warning disable CA1031 // Do not catch general exception types
         try
         {
-            await task.ConfigureAwait(false);
+            await task.ConfigureAwait(true);
         }
         catch
         {

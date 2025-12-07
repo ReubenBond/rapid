@@ -47,13 +47,13 @@ internal sealed class TestCluster : IAsyncDisposable
         var app = builder.Build();
         app.MapRapidMembershipService();
 
-        await app.StartAsync(cancellationToken).ConfigureAwait(false);
+        await app.StartAsync(cancellationToken).ConfigureAwait(true);
         _apps.Add(app);
 
         var cluster = app.Services.GetRequiredService<IRapidCluster>();
 
         // Wait for the cluster to be initialized
-        await WaitForClusterInitializedAsync(cluster, cancellationToken).ConfigureAwait(false);
+        await WaitForClusterInitializedAsync(cluster, cancellationToken).ConfigureAwait(true);
 
         return (app, cluster);
     }
@@ -81,13 +81,13 @@ internal sealed class TestCluster : IAsyncDisposable
         var app = builder.Build();
         app.MapRapidMembershipService();
 
-        await app.StartAsync(cancellationToken).ConfigureAwait(false);
+        await app.StartAsync(cancellationToken).ConfigureAwait(true);
         _apps.Add(app);
 
         var cluster = app.Services.GetRequiredService<IRapidCluster>();
 
         // Wait for the cluster to be initialized
-        await WaitForClusterInitializedAsync(cluster, cancellationToken).ConfigureAwait(false);
+        await WaitForClusterInitializedAsync(cluster, cancellationToken).ConfigureAwait(true);
 
         return (app, cluster);
     }
@@ -114,13 +114,13 @@ internal sealed class TestCluster : IAsyncDisposable
         var app = builder.Build();
         app.MapRapidMembershipService();
 
-        await app.StartAsync(cancellationToken).ConfigureAwait(false);
+        await app.StartAsync(cancellationToken).ConfigureAwait(true);
         _apps.Add(app);
 
         var cluster = app.Services.GetRequiredService<IRapidCluster>();
 
         // Wait for the cluster to be initialized
-        await WaitForClusterInitializedAsync(cluster, cancellationToken).ConfigureAwait(false);
+        await WaitForClusterInitializedAsync(cluster, cancellationToken).ConfigureAwait(true);
 
         return (app, cluster);
     }
@@ -149,13 +149,13 @@ internal sealed class TestCluster : IAsyncDisposable
         var app = builder.Build();
         app.MapRapidMembershipService();
 
-        await app.StartAsync(cancellationToken).ConfigureAwait(false);
+        await app.StartAsync(cancellationToken).ConfigureAwait(true);
         _apps.Add(app);
 
         var cluster = app.Services.GetRequiredService<IRapidCluster>();
 
         // Wait for the cluster to be initialized
-        await WaitForClusterInitializedAsync(cluster, cancellationToken).ConfigureAwait(false);
+        await WaitForClusterInitializedAsync(cluster, cancellationToken).ConfigureAwait(true);
 
         return (app, cluster);
     }
@@ -167,7 +167,7 @@ internal sealed class TestCluster : IAsyncDisposable
     {
         while (cluster.ViewAccessor.CurrentView.Size == 0)
         {
-            await Task.Delay(10, cancellationToken).ConfigureAwait(false);
+            await Task.Delay(10, cancellationToken).ConfigureAwait(true);
         }
     }
 
@@ -181,7 +181,7 @@ internal sealed class TestCluster : IAsyncDisposable
         {
             if (cluster.GetMembershipSize() >= expectedSize)
                 return;
-            await Task.Delay(10).ConfigureAwait(false);
+            await Task.Delay(10).ConfigureAwait(true);
         }
         throw new TimeoutException($"Cluster did not reach expected size {expectedSize} within {timeout}");
     }
@@ -196,7 +196,7 @@ internal sealed class TestCluster : IAsyncDisposable
         {
             if (cluster.GetMembershipSize() == expectedSize)
                 return;
-            await Task.Delay(10).ConfigureAwait(false);
+            await Task.Delay(10).ConfigureAwait(true);
         }
         throw new TimeoutException($"Cluster did not reach expected size {expectedSize} within {timeout}. Current size: {cluster.GetMembershipSize()}");
     }
@@ -208,8 +208,8 @@ internal sealed class TestCluster : IAsyncDisposable
 #pragma warning disable CA1031
             try
             {
-                await app.StopAsync().ConfigureAwait(false);
-                await app.DisposeAsync().ConfigureAwait(false);
+                await app.StopAsync().ConfigureAwait(true);
+                await app.DisposeAsync().ConfigureAwait(true);
             }
             catch
             {

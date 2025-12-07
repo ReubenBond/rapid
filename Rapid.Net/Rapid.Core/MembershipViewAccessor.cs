@@ -30,7 +30,7 @@ internal sealed class MembershipViewAccessor : IMembershipViewAccessor
     /// <inheritdoc/>
     public async IAsyncEnumerable<MembershipView> ListenForViewUpdatesAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        await foreach (var view in _viewChangeChannel.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+        await foreach (var view in _viewChangeChannel.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(true))
         {
             yield return view;
         }

@@ -53,8 +53,8 @@ public sealed partial class PingPongFailureDetectorFactory(Endpoint localEndpoin
             {
                 try
                 {
-                    await Task.Delay(TimeSpan.FromSeconds(1), _sharedResources.TimeProvider, _cts.Token).ConfigureAwait(false);
-                    await ProbeOnceAsync().ConfigureAwait(false);
+                    await Task.Delay(TimeSpan.FromSeconds(1), _sharedResources.TimeProvider, _cts.Token).ConfigureAwait(true);
+                    await ProbeOnceAsync().ConfigureAwait(true);
                 }
                 catch (OperationCanceledException)
                 {
@@ -69,7 +69,7 @@ public sealed partial class PingPongFailureDetectorFactory(Endpoint localEndpoin
             try
             {
                 var request = RapidUtils.ToRapidRequest(new ProbeMessage { Sender = _observer });
-                var response = await _client.SendMessageAsync(_subject, request, _cts.Token).ConfigureAwait(false);
+                var response = await _client.SendMessageAsync(_subject, request, _cts.Token).ConfigureAwait(true);
 
                 if (response.ProbeResponse == null)
                 {

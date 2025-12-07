@@ -12,7 +12,7 @@ public sealed class ClusterIntegrationTests(ITestOutputHelper outputHelper) : IA
 
     public async ValueTask DisposeAsync()
     {
-        await _cluster.DisposeAsync().ConfigureAwait(false);
+        await _cluster.DisposeAsync().ConfigureAwait(true);
         GC.SuppressFinalize(this);
     }
 

@@ -303,7 +303,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         return msg.ContentCase switch
         {
             RapidRequest.ContentOneofCase.PreJoinMessage => HandlePreJoinMessage(msg.PreJoinMessage, cancellationToken),
-            RapidRequest.ContentOneofCase.JoinMessage => await HandleJoinMessageAsync(msg.JoinMessage, cancellationToken).ConfigureAwait(false),
+            RapidRequest.ContentOneofCase.JoinMessage => await HandleJoinMessageAsync(msg.JoinMessage, cancellationToken).ConfigureAwait(true),
             RapidRequest.ContentOneofCase.BatchedAlertMessage => HandleBatchedAlertMessage(msg.BatchedAlertMessage, cancellationToken),
             RapidRequest.ContentOneofCase.ProbeMessage => HandleProbeMessage(msg.ProbeMessage, cancellationToken),
             RapidRequest.ContentOneofCase.FastRoundPhase2BMessage or
@@ -427,7 +427,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
             }
         }
 
-        return await tcs.Task.ConfigureAwait(false);
+        return await tcs.Task.ConfigureAwait(true);
     }
 
     /// <summary>
@@ -721,7 +721,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
             using var timeoutCts = new CancellationTokenSource(_options.LeaveMessageTimeout);
             try
             {
-                await Task.WhenAll(tasks).WaitAsync(timeoutCts.Token).ConfigureAwait(false);
+                await Task.WhenAll(tasks).WaitAsync(timeoutCts.Token).ConfigureAwait(true);
             }
             catch (OperationCanceledException)
             {
@@ -765,7 +765,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         {
             try
             {
-                await Task.Delay(_options.BatchingWindow, _sharedResources.TimeProvider, _shutdownCts.Token).ConfigureAwait(false);
+                await Task.Delay(_options.BatchingWindow, _sharedResources.TimeProvider, _shutdownCts.Token).ConfigureAwait(true);
 
                 lock (_batchSchedulerLock)
                 {
