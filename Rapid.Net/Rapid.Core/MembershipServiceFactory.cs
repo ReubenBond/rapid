@@ -15,6 +15,7 @@ internal sealed class MembershipServiceFactory : IMembershipServiceFactory
     private readonly IMessagingClient _messagingClient;
     private readonly IEdgeFailureDetectorFactory _edgeFailureDetectorFactory;
     private readonly IBroadcasterFactory _broadcasterFactory;
+    private readonly IFastPaxosFactory _fastPaxosFactory;
     private readonly SharedResources _sharedResources;
     private readonly IOptions<RapidProtocolOptions> _protocolOptions;
     private readonly ILoggerFactory _loggerFactory;
@@ -28,6 +29,7 @@ internal sealed class MembershipServiceFactory : IMembershipServiceFactory
         IMessagingClient messagingClient,
         IEdgeFailureDetectorFactory edgeFailureDetectorFactory,
         IBroadcasterFactory broadcasterFactory,
+        IFastPaxosFactory fastPaxosFactory,
         SharedResources sharedResources,
         IOptions<RapidProtocolOptions> protocolOptions,
         ILoggerFactory loggerFactory)
@@ -35,6 +37,7 @@ internal sealed class MembershipServiceFactory : IMembershipServiceFactory
         _messagingClient = messagingClient;
         _edgeFailureDetectorFactory = edgeFailureDetectorFactory;
         _broadcasterFactory = broadcasterFactory;
+        _fastPaxosFactory = fastPaxosFactory;
         _sharedResources = sharedResources;
         _protocolOptions = protocolOptions;
         _loggerFactory = loggerFactory;
@@ -62,6 +65,7 @@ internal sealed class MembershipServiceFactory : IMembershipServiceFactory
             _messagingClient,
             broadcaster,
             _edgeFailureDetectorFactory,
+            _fastPaxosFactory,
             metadataMap,
             subscriptions,
             _loggerFactory);
@@ -74,8 +78,12 @@ internal sealed class MembershipServiceFactory : IMembershipServiceFactory
         Dictionary<Endpoint, Metadata> metadataMap,
         Dictionary<ClusterEvents, List<Action<ClusterStatusChange>>> subscriptions)
     {
+        // Convert to collections as MembershipView requires ICollection
+        var nodeIdList = nodeIds.ToList();
+        var endpointList = endpoints.ToList();
+        
 #pragma warning disable CA2000 // Dispose objects before losing scope - MembershipView ownership transferred to MembershipService
-        var membershipView = new MembershipView(K, nodeIds, endpoints);
+        var membershipView = new MembershipView(K, nodeIdList, endpointList);
 #pragma warning restore CA2000
         var cutDetector = new MultiNodeCutDetector(K, H, L);
         var broadcaster = _broadcasterFactory.Create();
@@ -89,6 +97,7 @@ internal sealed class MembershipServiceFactory : IMembershipServiceFactory
             _messagingClient,
             broadcaster,
             _edgeFailureDetectorFactory,
+            _fastPaxosFactory,
             metadataMap,
             subscriptions,
             _loggerFactory);

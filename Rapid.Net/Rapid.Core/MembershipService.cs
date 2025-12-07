@@ -21,12 +21,13 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
     private readonly MembershipView _membershipView;
     private readonly MultiNodeCutDetector _cutDetection;
     private readonly Endpoint _myAddr;
-    private readonly UnicastToAllBroadcaster _broadcaster;
+    private readonly IBroadcaster _broadcaster;
     private readonly Dictionary<Endpoint, Channel<TaskCompletionSource<RapidResponse>>> _joinersToRespondTo = [];
     private readonly Dictionary<Endpoint, NodeId> _joinerUuid = [];
     private readonly Dictionary<Endpoint, Metadata> _joinerMetadata = [];
     private readonly IMessagingClient _messagingClient;
     private readonly MetadataManager _metadataManager;
+    private readonly IFastPaxosFactory _fastPaxosFactory;
 
     // Event subscriptions
     private readonly Dictionary<ClusterEvents, List<Action<ClusterStatusChange>>> _subscriptions;
@@ -48,7 +49,6 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
     private bool _announcedProposal;
     private readonly Lock _membershipUpdateLock = new();
     private readonly RapidProtocolOptions _options;
-    private readonly IOptions<RapidProtocolOptions> _protocolOptions;
 
     private readonly struct LoggableEndpoint(Endpoint endpoint)
     {
@@ -126,10 +126,12 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         SharedResources sharedResources,
         IOptions<RapidProtocolOptions> options,
         IMessagingClient messagingClient,
+        IBroadcaster broadcaster,
         IEdgeFailureDetectorFactory edgeFailureDetector,
+        IFastPaxosFactory fastPaxosFactory,
         ILoggerFactory? loggerFactory = null)
         : this(myAddr, cutDetection, membershipView, sharedResources, options, messagingClient,
-              edgeFailureDetector, [],
+              broadcaster, edgeFailureDetector, fastPaxosFactory, [],
               [], loggerFactory)
     {
     }
@@ -137,13 +139,14 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
     public MembershipService(Endpoint myAddr, MultiNodeCutDetector cutDetection,
                             MembershipView membershipView, SharedResources sharedResources,
                             IOptions<RapidProtocolOptions> options, IMessagingClient messagingClient,
+                            IBroadcaster broadcaster,
                             IEdgeFailureDetectorFactory edgeFailureDetector,
+                            IFastPaxosFactory fastPaxosFactory,
                             Dictionary<Endpoint, Metadata> metadataMap,
                             Dictionary<ClusterEvents, List<Action<ClusterStatusChange>>> subscriptions,
                             ILoggerFactory? loggerFactory = null)
     {
         _myAddr = myAddr;
-        _protocolOptions = options;
         _options = options.Value;
         _membershipView = membershipView;
         _cutDetection = cutDetection;
@@ -151,9 +154,10 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         _metadataManager = new MetadataManager();
         _metadataManager.AddMetadata(metadataMap);
         _messagingClient = messagingClient;
-        _broadcaster = new UnicastToAllBroadcaster(messagingClient);
+        _broadcaster = broadcaster;
         _subscriptions = subscriptions;
         _fdFactory = edgeFailureDetector;
+        _fastPaxosFactory = fastPaxosFactory;
         _logger = (loggerFactory ?? NullLoggerFactory.Instance).CreateLogger<MembershipService>();
         _sendQueue = Channel.CreateUnbounded<AlertMessage>();
 
@@ -175,10 +179,8 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         // to an observer is marked faulty.
 
         // Prepare consensus instance
-        _fastPaxosInstance = new FastPaxos(_myAddr, _membershipView.GetCurrentConfigurationId(),
-                                          _membershipView.GetMembershipSize(), _messagingClient,
-                                          _broadcaster,
-                                          _protocolOptions, _sharedResources, loggerFactory);
+        _fastPaxosInstance = _fastPaxosFactory.Create(_myAddr, _membershipView.GetCurrentConfigurationId(),
+                                          _membershipView.GetMembershipSize(), _broadcaster);
         _fastPaxosInstance.Decided.ContinueWith(t => DecideViewChange(t.Result), scheduler: TaskScheduler.Default);
 
         CreateFailureDetectorsForCurrentConfiguration();
@@ -487,14 +489,11 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         }
         _failureDetectors.Clear();
 
-        _fastPaxosInstance = new FastPaxos(
+        _fastPaxosInstance = _fastPaxosFactory.Create(
             _myAddr,
             _membershipView.GetCurrentConfigurationId(),
             _membershipView.GetMembershipSize(),
-            _messagingClient,
-            _broadcaster,
-            _protocolOptions,
-            _sharedResources);
+            _broadcaster);
         _fastPaxosInstance.Decided.ContinueWith(t => DecideViewChange(t.Result), scheduler: TaskScheduler.Default);
 
         // Inform EdgeFailureDetector about membership change

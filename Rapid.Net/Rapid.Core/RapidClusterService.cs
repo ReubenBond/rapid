@@ -159,12 +159,7 @@ internal sealed partial class RapidClusterService : BackgroundService
             throw new JoinException("Failed to get successful response from any observer");
         }
 
-        // Initialize membership view from response
-#pragma warning disable CA2000 // Dispose objects before losing scope - MembershipView ownership transferred to MembershipService
-        var membershipView = new MembershipView(K, successfulResponse.Identifiers, successfulResponse.Endpoints);
-#pragma warning restore CA2000
-        var cutDetector = new MultiNodeCutDetector(K, H, L);
-
+        // Initialize membership from response
         var metadataMap = new Dictionary<Endpoint, Metadata>();
         for (var i = 0; i < successfulResponse.MetadataKeys.Count && i < successfulResponse.MetadataValues.Count; i++)
         {
@@ -173,17 +168,12 @@ internal sealed partial class RapidClusterService : BackgroundService
             metadataMap[endpoint] = metadata;
         }
 
-        _membershipService = new MembershipService(
+        _membershipService = _membershipServiceFactory.CreateForJoin(
             _options.ListenAddress,
-            cutDetector,
-            membershipView,
-            _sharedResources,
-            _protocolOptions,
-            _messagingClient,
-            _edgeFailureDetectorFactory,
+            successfulResponse.Identifiers,
+            successfulResponse.Endpoints,
             metadataMap,
-            _options.Subscriptions,
-            _loggerFactory);
+            _options.Subscriptions);
     }
 
     public override async Task StopAsync(CancellationToken cancellationToken)

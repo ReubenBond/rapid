@@ -1,0 +1,67 @@
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using Rapid.Messaging;
+using Rapid.Pb;
+
+namespace Rapid;
+
+/// <summary>
+/// Factory for creating FastPaxos instances.
+/// This exists because FastPaxos instances are created per consensus round and need runtime configuration.
+/// </summary>
+internal interface IFastPaxosFactory
+{
+    /// <summary>
+    /// Creates a new FastPaxos instance for a consensus round.
+    /// </summary>
+    /// <param name="myAddr">The local endpoint.</param>
+    /// <param name="configurationId">The current configuration ID.</param>
+    /// <param name="membershipSize">The current membership size.</param>
+    /// <param name="broadcaster">The broadcaster to use for message distribution.</param>
+    /// <returns>A new FastPaxos instance.</returns>
+    FastPaxos Create(
+        Endpoint myAddr,
+        long configurationId,
+        int membershipSize,
+        IBroadcaster broadcaster);
+}
+
+/// <summary>
+/// Default implementation of IFastPaxosFactory.
+/// </summary>
+internal sealed class FastPaxosFactory : IFastPaxosFactory
+{
+    private readonly IMessagingClient _messagingClient;
+    private readonly IOptions<RapidProtocolOptions> _protocolOptions;
+    private readonly SharedResources _sharedResources;
+    private readonly ILoggerFactory _loggerFactory;
+
+    public FastPaxosFactory(
+        IMessagingClient messagingClient,
+        IOptions<RapidProtocolOptions> protocolOptions,
+        SharedResources sharedResources,
+        ILoggerFactory loggerFactory)
+    {
+        _messagingClient = messagingClient;
+        _protocolOptions = protocolOptions;
+        _sharedResources = sharedResources;
+        _loggerFactory = loggerFactory;
+    }
+
+    public FastPaxos Create(
+        Endpoint myAddr,
+        long configurationId,
+        int membershipSize,
+        IBroadcaster broadcaster)
+    {
+        return new FastPaxos(
+            myAddr,
+            configurationId,
+            membershipSize,
+            _messagingClient,
+            broadcaster,
+            _protocolOptions,
+            _sharedResources,
+            _loggerFactory);
+    }
+}

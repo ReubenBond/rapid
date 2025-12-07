@@ -54,7 +54,12 @@ public static class RapidServiceCollectionExtensions
             new SharedResources(
                 sp.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>(),
                 sp.GetRequiredService<TimeProvider>()));
+        
+        // Register messaging infrastructure
         services.AddSingleton<IMessagingClient, GrpcClient>();
+        services.AddSingleton<IBroadcasterFactory, UnicastToAllBroadcasterFactory>();
+        
+        // Register failure detector factory
         services.AddSingleton<IEdgeFailureDetectorFactory>(sp =>
         {
             var options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<RapidOptions>>().Value;
@@ -63,6 +68,12 @@ public static class RapidServiceCollectionExtensions
             var loggerFactory = sp.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>();
             return new PingPongFailureDetectorFactory(options.ListenAddress, client, sharedResources, loggerFactory);
         });
+        
+        // Register FastPaxos factory
+        services.AddSingleton<IFastPaxosFactory, FastPaxosFactory>();
+        
+        // Register MembershipService factory
+        services.AddSingleton<IMembershipServiceFactory, MembershipServiceFactory>();
 
         // Register the membership service handler
         services.AddSingleton<IMembershipServiceHandler>(sp =>

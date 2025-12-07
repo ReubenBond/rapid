@@ -7,7 +7,7 @@ namespace Rapid;
 /// This exists because MembershipService needs runtime data (MembershipView, configuration, etc.)
 /// that is only available after cluster join/bootstrap.
 /// </summary>
-public interface IMembershipServiceFactory
+internal interface IMembershipServiceFactory
 {
     /// <summary>
     /// Creates a MembershipService instance for starting a new cluster.
