@@ -44,8 +44,8 @@ internal sealed partial class SimulationTimeProvider : TimeProvider
             ArgumentOutOfRangeException.ThrowIfLessThan(startDateTime.Value.Ticks, 0);
         }
 
-        // Initialize the task queue's time to match our start time
-        _taskQueue.CurrentTimeTicks = Start.Ticks;
+        // Initialize the task queue's time to zero (start time is tracked separately)
+        _taskQueue.CurrentTime = TimeSpan.Zero;
     }
 
     /// <summary>
@@ -54,7 +54,7 @@ internal sealed partial class SimulationTimeProvider : TimeProvider
     public DateTimeOffset Start { get; }
 
     /// <inheritdoc />
-    public override DateTimeOffset GetUtcNow() => new DateTimeOffset(_taskQueue.CurrentTimeTicks, TimeSpan.Zero);
+    public override DateTimeOffset GetUtcNow() => Start + _taskQueue.CurrentTime;
 
     /// <summary>
     /// Advances the date and time in the UTC time zone.
@@ -67,14 +67,13 @@ internal sealed partial class SimulationTimeProvider : TimeProvider
     /// </remarks>
     public void SetUtcNow(DateTimeOffset value)
     {
-        var currentTicks = _taskQueue.CurrentTimeTicks;
-        if (value.Ticks < currentTicks)
+        var currentTime = GetUtcNow();
+        if (value < currentTime)
         {
-            var currentTime = new DateTimeOffset(currentTicks, TimeSpan.Zero);
             throw new ArgumentOutOfRangeException(nameof(value), $"Cannot go back in time. Current time is {currentTime}.");
         }
 
-        _taskQueue.CurrentTimeTicks = value.Ticks;
+        _taskQueue.CurrentTime = value - Start;
     }
 
     /// <summary>
@@ -88,18 +87,18 @@ internal sealed partial class SimulationTimeProvider : TimeProvider
     /// <exception cref="ArgumentOutOfRangeException">The time value is less than <see cref="TimeSpan.Zero"/>.</exception>
     public void Advance(TimeSpan delta)
     {
-        ArgumentOutOfRangeException.ThrowIfLessThan(delta.Ticks, 0);
+        ArgumentOutOfRangeException.ThrowIfLessThan(delta, TimeSpan.Zero);
 
-        var fromTicks = _taskQueue.CurrentTimeTicks;
-        var toTicks = fromTicks + delta.Ticks;
+        var fromTime = GetUtcNow();
+        var toTime = fromTime + delta;
         LogAdvance(delta,
-            new DateTimeOffset(fromTicks, TimeSpan.Zero).ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture),
-            new DateTimeOffset(toTicks, TimeSpan.Zero).ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture));
-        _taskQueue.CurrentTimeTicks = toTicks;
+            fromTime.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture),
+            toTime.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture));
+        _taskQueue.CurrentTime += delta;
     }
 
     /// <inheritdoc />
-    public override long GetTimestamp() => _taskQueue.CurrentTimeTicks;
+    public override long GetTimestamp() => (Start + _taskQueue.CurrentTime).Ticks;
 
     /// <inheritdoc />
     public override TimeZoneInfo LocalTimeZone => TimeZoneInfo.Utc;
@@ -119,12 +118,12 @@ internal sealed partial class SimulationTimeProvider : TimeProvider
     {
         get
         {
-            var nextDueTime = _taskQueue.NextWaitingDueTimeTicks;
+            var nextDueTime = _taskQueue.NextWaitingDueTime;
             if (!nextDueTime.HasValue)
                 return null;
 
-            var currentTicks = _taskQueue.CurrentTimeTicks;
-            var duration = TimeSpan.FromTicks(nextDueTime.Value - currentTicks);
+            var currentTime = _taskQueue.CurrentTime;
+            var duration = nextDueTime.Value - currentTime;
             return duration > TimeSpan.Zero ? duration : TimeSpan.Zero;
         }
     }
@@ -135,13 +134,13 @@ internal sealed partial class SimulationTimeProvider : TimeProvider
     /// <returns>True if time was advanced, false if no timers were pending.</returns>
     public bool AdvanceToNextTimer()
     {
-        var nextDueTime = _taskQueue.NextWaitingDueTimeTicks;
+        var nextDueTime = _taskQueue.NextWaitingDueTime;
         if (!nextDueTime.HasValue)
             return false;
 
-        if (nextDueTime.Value > _taskQueue.CurrentTimeTicks)
+        if (nextDueTime.Value > _taskQueue.CurrentTime)
         {
-            _taskQueue.CurrentTimeTicks = nextDueTime.Value;
+            _taskQueue.CurrentTime = nextDueTime.Value;
         }
 
         return true;
@@ -160,7 +159,7 @@ internal sealed partial class SimulationTimeProvider : TimeProvider
         foreach (var (_, dueTime) in waiting)
         {
             result.Add(new TimerInfo(
-                new DateTimeOffset(dueTime, TimeSpan.Zero),
+                Start + dueTime,
                 TimeSpan.Zero)); // Period info not available from snapshot
         }
 
@@ -173,8 +172,7 @@ internal sealed partial class SimulationTimeProvider : TimeProvider
     /// <returns>A string representing the provider's current time.</returns>
     public override string ToString()
     {
-        var currentTime = new DateTimeOffset(_taskQueue.CurrentTimeTicks, TimeSpan.Zero);
-        return currentTime.ToString("yyyy-MM-ddTHH:mm:ss.fff", CultureInfo.InvariantCulture);
+        return GetUtcNow().ToString("yyyy-MM-ddTHH:mm:ss.fff", CultureInfo.InvariantCulture);
     }
 
     /// <inheritdoc />
@@ -259,15 +257,15 @@ internal sealed class SimulationTimer : ITimer
         }
 
         // Schedule the new timer
-        var currentTime = timeProvider.GetUtcNow().Ticks;
-        var dueTimeTicks = currentTime + dueTime.Ticks;
+        var currentTime = taskQueue.CurrentTime;
+        var scheduledDueTime = currentTime + dueTime;
         var callback = _callback!;
         var state = _state;
 
         _timerId = taskQueue.ScheduleTimer(
             () => callback(state),
-            dueTimeTicks,
-            period.Ticks);
+            scheduledDueTime,
+            period);
 
         return true;
     }

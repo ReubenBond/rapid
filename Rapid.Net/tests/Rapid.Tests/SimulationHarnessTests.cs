@@ -154,7 +154,7 @@ public sealed class SimulationHarnessTests(ITestOutputHelper output) : IAsyncLif
         var initialTime = _harness.TimeProvider.GetUtcNow();
 
         // Schedule a task for 1 minute in the future
-        _harness.TaskQueue.EnqueueAfter(() => executed = true, TimeSpan.FromMinutes(1).Ticks);
+        _harness.TaskQueue.EnqueueAfter(() => executed = true, TimeSpan.FromMinutes(1));
 
         var result = _harness.RunUntilIdle();
 
@@ -169,7 +169,7 @@ public sealed class SimulationHarnessTests(ITestOutputHelper output) : IAsyncLif
         var initialTime = _harness.TimeProvider.GetUtcNow();
 
         // Schedule a task for 10 minutes in the future
-        _harness.TaskQueue.EnqueueAfter(() => { }, TimeSpan.FromMinutes(10).Ticks);
+        _harness.TaskQueue.EnqueueAfter(() => { }, TimeSpan.FromMinutes(10));
 
         // Limit to 5 minutes
         var result = _harness.RunUntilIdle(maxSimulatedTime: TimeSpan.FromMinutes(5));

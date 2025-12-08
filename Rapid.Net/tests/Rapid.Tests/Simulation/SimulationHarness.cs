@@ -580,8 +580,8 @@ internal sealed class SimulationHarness : IAsyncDisposable
 
     private DateTimeOffset? GetNextScheduledTime()
     {
-        var nextDueTime = _taskQueue.NextWaitingDueTimeTicks;
-        return nextDueTime.HasValue ? new DateTimeOffset(nextDueTime.Value, TimeSpan.Zero) : null;
+        var nextDueTime = _taskQueue.NextWaitingDueTime;
+        return nextDueTime.HasValue ? TimeProvider.Start + nextDueTime.Value : null;
     }
 
     #endregion

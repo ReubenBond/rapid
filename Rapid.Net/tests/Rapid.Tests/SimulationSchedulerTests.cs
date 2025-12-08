@@ -171,7 +171,7 @@ public sealed class SimulationSchedulerTests
         task1.Start(scheduler);
 
         // Advance time and queue second task
-        taskQueue.AdvanceTime(TimeSpan.FromSeconds(1).Ticks);
+        taskQueue.AdvanceTime(TimeSpan.FromSeconds(1));
         var task2 = new Task(() => order.Add("second"));
         task2.Start(scheduler);
 
