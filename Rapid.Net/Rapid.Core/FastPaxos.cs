@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
+
 using Microsoft.Extensions.Options;
 using Rapid.Messaging;
 using Rapid.Pb;
@@ -10,7 +10,7 @@ namespace Rapid;
 /// <summary>
 /// Single-decree consensus. We always start with a Fast round.
 /// </summary>
-internal sealed partial class FastPaxos : IDisposable
+internal sealed partial class FastPaxos : IAsyncDisposable
 {
     private readonly ILogger<FastPaxos> _logger;
     private readonly double _jitterRate;
@@ -25,6 +25,8 @@ internal sealed partial class FastPaxos : IDisposable
     private readonly RapidProtocolOptions _options;
     private readonly SharedResources _sharedResources;
     private readonly CancellationTokenSource _scheduledClassicRoundCts = new();
+    private int _disposed;
+    private Task? _classicRoundTask;
 
     private readonly struct LoggableEndpoints(IEnumerable<Endpoint> endpoints)
     {
@@ -95,7 +97,7 @@ internal sealed partial class FastPaxos : IDisposable
     private readonly TaskCompletionSource<List<Endpoint>> _onDecidedTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public Task<List<Endpoint>> Decided => _onDecidedTcs.Task;
 
-    public FastPaxos(
+public FastPaxos(
         Endpoint myAddr,
         long configurationId,
         int membershipSize,
@@ -103,7 +105,8 @@ internal sealed partial class FastPaxos : IDisposable
         IBroadcaster broadcaster,
         IOptions<RapidProtocolOptions> options,
         SharedResources sharedResources,
-        ILoggerFactory? loggerFactory = null)
+        ILogger<FastPaxos> logger,
+        ILogger<Paxos> paxosLogger)
     {
         _myAddr = myAddr;
         _configurationId = configurationId;
@@ -111,7 +114,7 @@ internal sealed partial class FastPaxos : IDisposable
         _broadcaster = broadcaster;
         _options = options.Value;
         _sharedResources = sharedResources;
-        _logger = (loggerFactory ?? NullLoggerFactory.Instance).CreateLogger<FastPaxos>();
+        _logger = logger;
 
         // The rate of a random expovariate variable, used to determine a jitter over a base delay to start classic
         // rounds. This determines how many classic rounds we want to start per second on average. Does not
@@ -120,7 +123,7 @@ internal sealed partial class FastPaxos : IDisposable
         _jitterRate = 1 / (double)membershipSize;
 
         _paxos = new Paxos(myAddr, configurationId, membershipSize, client, broadcaster,
-                          _onDecidedTcs, loggerFactory);
+                          _onDecidedTcs, paxosLogger);
 
         LogFastPaxosInitialized(new LoggableEndpoint(myAddr), configurationId, membershipSize);
     }
@@ -159,8 +162,7 @@ internal sealed partial class FastPaxos : IDisposable
         _broadcaster.Broadcast(proposalMessage, cancellationToken);
 
         LogSchedulingClassicRound(recoveryDelay);
-        var classicRoundTask = ScheduleClassicRoundAsync(recoveryDelay, _sharedResources.ShuttingDownToken);
-        _sharedResources.TrackBackgroundTask(classicRoundTask);
+        _classicRoundTask = ScheduleClassicRoundAsync(recoveryDelay, _sharedResources.ShuttingDownToken);
     }
 
     /// <summary>
@@ -291,9 +293,21 @@ internal sealed partial class FastPaxos : IDisposable
         return totalDelay;
     }
 
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return; // Already disposed
+        }
+
         LogDispose();
-        _scheduledClassicRoundCts?.Dispose();
+        await _scheduledClassicRoundCts.CancelAsync();
+        _scheduledClassicRoundCts.Dispose();
+        if (_classicRoundTask is { } task)
+        {
+            await task.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        }
+
+        _onDecidedTcs.TrySetCanceled();
     }
 }

@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
+
 using Rapid.Messaging;
 using Rapid.Pb;
 
@@ -134,7 +134,7 @@ internal sealed partial class Paxos
         IMessagingClient client,
         IBroadcaster broadcaster,
         TaskCompletionSource<List<Endpoint>> completion,
-        ILoggerFactory? loggerFactory = null)
+        ILogger<Paxos> logger)
     {
         _myAddr = myAddr;
         _configurationId = configurationId;
@@ -142,7 +142,7 @@ internal sealed partial class Paxos
         _broadcaster = broadcaster;
         _client = client;
         _completion = completion;
-        _logger = (loggerFactory ?? NullLoggerFactory.Instance).CreateLogger<Paxos>();
+        _logger = logger;
 
         _crnd = new Rank { Round = 0, NodeIndex = 0 };
         _rnd = new Rank { Round = 0, NodeIndex = 0 };

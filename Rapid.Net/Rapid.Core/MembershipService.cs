@@ -45,7 +45,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     private readonly Lock _membershipUpdateLock = new();
     private readonly RapidProtocolOptions _options;
     private bool _announcedProposal;
-    private FastPaxos? _fastPaxosInstance;
+    private FastPaxos _fastPaxosInstance;
 
     // View change accessor for publishing updates
     private readonly MembershipViewAccessor _viewAccessor;
@@ -226,10 +226,10 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
         IEdgeFailureDetectorFactory edgeFailureDetector,
         IFastPaxosFactory fastPaxosFactory,
         MembershipViewAccessor viewAccessor,
-        ILoggerFactory? loggerFactory = null)
+        ILogger<MembershipService> logger)
         : this(myAddr, cutDetection, membershipView, sharedResources, options, messagingClient,
               broadcaster, edgeFailureDetector, fastPaxosFactory, viewAccessor, [],
-              [], loggerFactory)
+              [], logger)
     {
     }
 
@@ -242,7 +242,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
                             MembershipViewAccessor viewAccessor,
                             Dictionary<Endpoint, Metadata> metadataMap,
                             Dictionary<ClusterEvents, List<Action<ClusterStatusChange>>> subscriptions,
-                            ILoggerFactory? loggerFactory = null)
+                            ILogger<MembershipService> logger)
     {
         _myAddr = myAddr;
         _options = options.Value;
@@ -278,8 +278,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
         // to an observer is marked faulty.
 
         // Prepare consensus instance
-        _fastPaxosInstance = _fastPaxosFactory.Create(_myAddr, _membershipView.ConfigurationId,
-                                          _membershipView.Size, _broadcaster);
+        _fastPaxosInstance = _fastPaxosFactory.Create(_myAddr, _membershipView.ConfigurationId, _membershipView.Size, _broadcaster);
         RegisterFastPaxosDecidedContinuation(_fastPaxosInstance);
 
         CreateFailureDetectorsForCurrentConfiguration();
@@ -496,7 +495,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
                         cb(clusterStatusChange);
                     }
 
-                    _fastPaxosInstance?.Propose(proposals, cancellationToken);
+                    _fastPaxosInstance.Propose(proposals, cancellationToken);
                 }
             }
 
@@ -512,7 +511,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     private RapidResponse HandleConsensusMessages(RapidRequest request, CancellationToken cancellationToken)
     {
         LogHandleConsensusMessages();
-        _fastPaxosInstance?.HandleMessages(request, cancellationToken);
+        _fastPaxosInstance.HandleMessages(request, cancellationToken);
         return RapidUtils.ToRapidResponse(new ConsensusResponse());
     }
 
@@ -542,12 +541,14 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     /// Any node that is not in the membership list will be added to the cluster,
     /// and any node that is currently in the membership list will be removed from it.
     /// </summary>
-    private void DecideViewChange(List<Endpoint> proposal)
+    private async Task DecideViewChange(List<Endpoint> proposal)
     {
         LogDecideViewChange(proposal.Count);
 
+        FastPaxos previousPaxosInstance;
         lock (_membershipUpdateLock)
         {
+            previousPaxosInstance = _fastPaxosInstance;
             _announcedProposal = false;
 
             // Track nodes that were added so we can notify their joiners after ALL nodes are processed
@@ -639,12 +640,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
             _failureDetectors.Clear();
 
             LogDecideViewChangeCleanup();
-
-            _fastPaxosInstance = _fastPaxosFactory.Create(
-                _myAddr,
-                _membershipView.ConfigurationId,
-                _membershipView.Size,
-                _broadcaster);
+            _fastPaxosInstance = _fastPaxosFactory.Create(_myAddr, _membershipView.ConfigurationId, _membershipView.Size, _broadcaster);
             RegisterFastPaxosDecidedContinuation(_fastPaxosInstance);
 
             // Inform EdgeFailureDetector about membership change
@@ -663,6 +659,8 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
                 cb(clusterStatusChange);
             }
         }
+
+        await previousPaxosInstance.DisposeAsync();
     }
 
     /// <summary>
@@ -925,15 +923,15 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     /// </summary>
     private void RegisterFastPaxosDecidedContinuation(FastPaxos fastPaxosInstance)
     {
-        var continuationTask = fastPaxosInstance.Decided.ContinueWith(t =>
+        var continuationTask = fastPaxosInstance.Decided.ContinueWith(async decision =>
         {
-            if (t.IsFaulted)
+            if (decision.IsFaulted)
             {
-                LogFastPaxosDecidedFaulted(t.Exception!);
+                LogFastPaxosDecidedFaulted(decision.Exception!);
                 return;
             }
 
-            DecideViewChange(t.Result);
+            await DecideViewChange(await decision);
         }, CancellationToken.None, TaskContinuationOptions.None, _sharedResources.TaskScheduler);
     }
 
@@ -954,7 +952,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
         // The SharedResources.WaitForBackgroundTasksAsync handles this
         await Task.CompletedTask.ConfigureAwait(false);
 
-        _fastPaxosInstance?.Dispose();
+        await _fastPaxosInstance.DisposeAsync();
     }
 
     /// <summary>
@@ -969,6 +967,6 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
 
         LogDispose();
         Shutdown();
-        _fastPaxosInstance?.Dispose();
+        _fastPaxosInstance.DisposeAsync().AsTask().GetAwaiter().GetResult();
     }
 }

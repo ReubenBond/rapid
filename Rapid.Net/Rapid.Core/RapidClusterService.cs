@@ -186,12 +186,7 @@ internal sealed partial class RapidClusterService(
 
     public override void Dispose()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0)
-        {
-            return; // Already disposed
-        }
-
-        MembershipService?.Dispose();
+        DisposeAsync().AsTask().GetAwaiter().GetResult();
         base.Dispose();
     }
 
@@ -207,7 +202,6 @@ internal sealed partial class RapidClusterService(
             await MembershipService.DisposeAsync().ConfigureAwait(false);
         }
 
-        // Call base Dispose (BackgroundService.Dispose)
         base.Dispose();
     }
 }
