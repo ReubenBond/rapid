@@ -1,5 +1,4 @@
 using System.Diagnostics.CodeAnalysis;
-using Microsoft.Extensions.Logging;
 using Rapid.Tests.Simulation;
 
 namespace Rapid.Tests.SimulationTests;
@@ -9,25 +8,17 @@ namespace Rapid.Tests.SimulationTests;
 /// Verifies that the cluster maintains safety properties under random faults.
 /// </summary>
 [SuppressMessage("Naming", "CA1707:Identifiers should not contain underscores", Justification = "Test naming convention")]
-public sealed class ChaosTests : IAsyncLifetime
+public sealed class ChaosTests(ITestOutputHelper output) : IAsyncLifetime
 {
-    private readonly ITestOutputHelper _output;
-    private readonly ILoggerFactory _loggerFactory;
     private SimulationHarness _harness = null!;
     private ChaosInjector _chaos = null!;
     private InvariantChecker _checker = null!;
     private const int TestSeed = 78901;
 
-    public ChaosTests(ITestOutputHelper output)
-    {
-        _output = output;
-        _loggerFactory = LoggerFactory.Create(builder => builder.AddXUnit(output).SetMinimumLevel(LogLevel.Debug));
-    }
-
     public ValueTask InitializeAsync()
     {
-        _output.WriteLine($"[ChaosTests] Initializing with seed {TestSeed}");
-        _harness = new SimulationHarness(seed: TestSeed, loggerFactory: _loggerFactory, testOutput: _output);
+        output.WriteLine($"[ChaosTests] Initializing with seed {TestSeed}");
+        _harness = new SimulationHarness(seed: TestSeed, output);
         _chaos = new ChaosInjector(_harness);
         _checker = new InvariantChecker(_harness);
         return ValueTask.CompletedTask;
@@ -35,9 +26,8 @@ public sealed class ChaosTests : IAsyncLifetime
 
     public async ValueTask DisposeAsync()
     {
-        _output.WriteLine("[ChaosTests] Disposing harness");
+        output.WriteLine("[ChaosTests] Disposing harness");
         await _harness.DisposeAsync();
-        _loggerFactory.Dispose();
     }
 
     #region Random Fault Injection (CHAOS-001 to CHAOS-004)
