@@ -82,18 +82,6 @@ public sealed class SimulationTestHarnessTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task AdvanceTimeMovesTimeProviderForward()
-    {
-        // Create a harness (always uses fake time now)
-        await using var fakeTimeHarness = new SimulationHarness(seed: 99999);
-        var initialTime = fakeTimeHarness.TimeProvider.GetUtcNow();
-        fakeTimeHarness.AdvanceTime(TimeSpan.FromMinutes(5));
-        var newTime = fakeTimeHarness.TimeProvider.GetUtcNow();
-
-        Assert.Equal(initialTime + TimeSpan.FromMinutes(5), newTime);
-    }
-
-    [Fact]
     public void NetworkPartitionBlocksMessages()
     {
         var seedNode = _harness.CreateSeedNode();

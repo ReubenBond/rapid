@@ -92,63 +92,6 @@ public sealed class DeterminismTests : IAsyncLifetime
 
     #endregion
 
-    #region Scheduler Tests (DET-010 to DET-013)
-
-    [Fact]
-    public void StepExecutesExactlyOneTask()
-    {
-        var executionCount = 0;
-
-        var task1 = new Task(() => Interlocked.Increment(ref executionCount));
-        var task2 = new Task(() => Interlocked.Increment(ref executionCount));
-
-        task1.Start(_harness.Scheduler);
-        task2.Start(_harness.Scheduler);
-
-        _harness.Step();
-
-        Assert.Equal(1, executionCount);
-    }
-
-    [Fact]
-    public void StepAllExecutesAllPendingTasks()
-    {
-        var executionCount = 0;
-
-        for (var i = 0; i < 5; i++)
-        {
-            var task = new Task(() => Interlocked.Increment(ref executionCount));
-            task.Start(_harness.Scheduler);
-        }
-
-        _harness.StepAll();
-
-        Assert.Equal(5, executionCount);
-    }
-
-    [Fact]
-    public void StepReturnsCorrectCount()
-    {
-        for (var i = 0; i < 3; i++)
-        {
-            var task = new Task(() => { });
-            task.Start(_harness.Scheduler);
-        }
-
-        var executed = _harness.Step(5); // Request 5, only 3 available
-
-        Assert.Equal(3, executed);
-    }
-
-    [Fact]
-    public void StepWithZeroTasksReturnsFalse()
-    {
-        var executed = _harness.Step();
-        Assert.False(executed);
-    }
-
-    #endregion
-
     #region Event Logging (DET-020 to DET-023)
 
     [Fact]
@@ -202,51 +145,6 @@ public sealed class DeterminismTests : IAsyncLifetime
 
     #endregion
 
-    #region Logical Time Tests
-
-    [Fact]
-    public void LogicalTimeStartsAtZero()
-    {
-        Assert.Equal(0, _harness.LogicalTime);
-    }
-
-    [Fact]
-    public void LogicalTimeIncrementsWithStep()
-    {
-        var task = new Task(() => { });
-        task.Start(_harness.Scheduler);
-
-        _harness.Step();
-
-        Assert.Equal(1, _harness.LogicalTime);
-    }
-
-    [Fact]
-    public void LogicalTimeIncrementsWithStepAll()
-    {
-        for (var i = 0; i < 5; i++)
-        {
-            var task = new Task(() => { });
-            task.Start(_harness.Scheduler);
-        }
-
-        _harness.StepAll();
-
-        Assert.Equal(5, _harness.LogicalTime);
-    }
-
-    [Fact]
-    public void LogicalTimeNotIncrementedWhenNoTasks()
-    {
-        var initialTime = _harness.LogicalTime;
-
-        _harness.Step(); // No tasks to execute
-
-        Assert.Equal(initialTime, _harness.LogicalTime);
-    }
-
-    #endregion
-
     #region RunUntil Tests
 
     [Fact]
@@ -281,18 +179,6 @@ public sealed class DeterminismTests : IAsyncLifetime
         Assert.True(result);
     }
 
-    [Fact]
-    public void AdvanceTimeAndStepWorks()
-    {
-        var initialTime = _harness.TimeProvider.GetUtcNow();
-
-        var executed = _harness.AdvanceTimeAndStep(TimeSpan.FromMinutes(1));
-
-        var newTime = _harness.TimeProvider.GetUtcNow();
-        Assert.Equal(initialTime + TimeSpan.FromMinutes(1), newTime);
-        Assert.Equal(0, executed); // No tasks were queued
-    }
-
     #endregion
 
     #region Seed Access Tests
@@ -315,5 +201,3 @@ public sealed class DeterminismTests : IAsyncLifetime
 
     #endregion
 }
-
-

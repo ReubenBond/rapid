@@ -28,37 +28,6 @@ public sealed class SimulationHarnessTests : IAsyncLifetime
     }
 
     [Fact]
-    public void LogicalTimeStartsAtZero() => Assert.Equal(0, _harness.LogicalTime);
-
-    [Fact]
-    public void StepIncrementsLogicalTime()
-    {
-        var scheduler = _harness.Scheduler;
-        var task = new Task(() => { });
-        task.Start(scheduler);
-
-        _harness.Step();
-
-        Assert.Equal(1, _harness.LogicalTime);
-    }
-
-    [Fact]
-    public void StepAllIncrementsLogicalTimeByExecutedCount()
-    {
-        var scheduler = _harness.Scheduler;
-
-        for (var i = 0; i < 5; i++)
-        {
-            var task = new Task(() => { });
-            task.Start(scheduler);
-        }
-
-        _harness.StepAll();
-
-        Assert.Equal(5, _harness.LogicalTime);
-    }
-
-    [Fact]
     public void EventLogRecordsEvents()
     {
         _harness.CreateSeedNode();
@@ -71,17 +40,6 @@ public sealed class SimulationHarnessTests : IAsyncLifetime
 
     [Fact]
     public void TimeProviderIsAvailable() => Assert.NotNull(_harness.TimeProvider);
-
-    [Fact]
-    public void AdvanceTimeAndStepAdvancesTimeProvider()
-    {
-        var initialTime = _harness.TimeProvider.GetUtcNow();
-
-        _harness.AdvanceTimeAndStep(TimeSpan.FromMinutes(5));
-
-        var newTime = _harness.TimeProvider.GetUtcNow();
-        Assert.Equal(initialTime + TimeSpan.FromMinutes(5), newTime);
-    }
 
     [Fact]
     public void SeedIsAccessible() => Assert.Equal(54321, _harness.Seed);
@@ -231,7 +189,7 @@ public sealed class SimulationHarnessTests : IAsyncLifetime
 
         Assert.False(_harness.Scheduler.IsIdle);
 
-        _harness.StepAll();
+        _harness.Scheduler.StepAll();
 
         Assert.True(_harness.Scheduler.IsIdle);
     }
