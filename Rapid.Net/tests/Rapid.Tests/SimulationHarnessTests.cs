@@ -51,8 +51,10 @@ public sealed class SimulationHarnessTests : IAsyncLifetime
         await using var harness1 = new SimulationHarness(seed: 99999);
         await using var harness2 = new SimulationHarness(seed: 99999);
 
+#pragma warning disable CA5394 // Do not use insecure randomness
         var values1 = Enumerable.Range(0, 10).Select(_ => harness1.Random.Next()).ToList();
         var values2 = Enumerable.Range(0, 10).Select(_ => harness2.Random.Next()).ToList();
+#pragma warning restore CA5394 // Do not use insecure randomness
 
         Assert.Equal(values1, values2);
     }

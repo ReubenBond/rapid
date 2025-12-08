@@ -13,56 +13,19 @@ namespace Rapid.Tests.Simulation;
 /// </remarks>
 /// <param name="seed">The seed for reproducible random sequences.</param>
 #pragma warning disable CA5394 // Do not use insecure randomness - intentionally deterministic for simulation testing
-internal sealed class SimulationRandom(int seed)
+internal sealed class SimulationRandom(int seed) : Random
 {
-    private readonly Random _random = new(seed);
-
     /// <summary>
     /// Gets the seed used to initialize this random instance.
     /// </summary>
     public int Seed { get; } = seed;
 
     /// <summary>
-    /// Returns a non-negative random integer.
-    /// </summary>
-    public int Next() => _random.Next();
-
-    /// <summary>
-    /// Returns a non-negative random integer less than the specified maximum.
-    /// </summary>
-    public int Next(int maxValue) => _random.Next(maxValue);
-
-    /// <summary>
-    /// Returns a random integer within the specified range.
-    /// </summary>
-    public int Next(int minValue, int maxValue) => _random.Next(minValue, maxValue);
-
-    /// <summary>
-    /// Returns a random double between 0.0 and 1.0.
-    /// </summary>
-    public double NextDouble() => _random.NextDouble();
-
-    /// <summary>
-    /// Fills the specified byte array with random bytes.
-    /// </summary>
-    public void NextBytes(byte[] buffer) => _random.NextBytes(buffer);
-
-    /// <summary>
-    /// Fills the specified span with random bytes.
-    /// </summary>
-    public void NextBytes(Span<byte> buffer) => _random.NextBytes(buffer);
-
-    /// <summary>
-    /// Returns a random boolean value.
-    /// </summary>
-    public bool NextBool() => _random.Next(2) == 1;
-
-    /// <summary>
     /// Returns a random TimeSpan between zero and maxValue.
     /// </summary>
     public TimeSpan NextTimeSpan(TimeSpan maxValue)
     {
-        var ticks = (long)(_random.NextDouble() * maxValue.Ticks);
+        var ticks = (long)(base.NextDouble() * maxValue.Ticks);
         return TimeSpan.FromTicks(ticks);
     }
 
@@ -72,7 +35,7 @@ internal sealed class SimulationRandom(int seed)
     public TimeSpan NextTimeSpan(TimeSpan minValue, TimeSpan maxValue)
     {
         var range = maxValue.Ticks - minValue.Ticks;
-        var ticks = minValue.Ticks + (long)(_random.NextDouble() * range);
+        var ticks = minValue.Ticks + (long)(base.NextDouble() * range);
         return TimeSpan.FromTicks(ticks);
     }
 
@@ -86,7 +49,7 @@ internal sealed class SimulationRandom(int seed)
         while (n > 1)
         {
             n--;
-            var k = _random.Next(n + 1);
+            var k = base.Next(n + 1);
             (list[k], list[n]) = (list[n], list[k]);
         }
     }
@@ -99,7 +62,7 @@ internal sealed class SimulationRandom(int seed)
         ArgumentNullException.ThrowIfNull(list);
         if (list.Count == 0)
             throw new ArgumentException("List cannot be empty", nameof(list));
-        return list[_random.Next(list.Count)];
+        return list[base.Next(list.Count)];
     }
 
     /// <summary>
@@ -109,13 +72,23 @@ internal sealed class SimulationRandom(int seed)
     {
         if (probability <= 0) return false;
         if (probability >= 1) return true;
-        return _random.NextDouble() < probability;
+        return base.NextDouble() < probability;
     }
 
     /// <summary>
     /// Creates a new SimulationRandom derived from this one.
     /// Useful for creating independent random streams.
     /// </summary>
-    public SimulationRandom Fork() => new(_random.Next());
+    public SimulationRandom Fork() => new(base.Next());
+
+    /// <summary>
+    /// Returns a deterministic GUID based on the random sequence.
+    /// </summary>
+    public Guid NextGuid()
+    {
+        var bytes = new byte[16];
+        base.NextBytes(bytes);
+        return new Guid(bytes);
+    }
 }
 #pragma warning restore CA5394

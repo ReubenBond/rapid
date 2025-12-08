@@ -78,14 +78,14 @@ public sealed class MessageDeliveryTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ClusterFormsWithDelaysEnabled()
+    public void ClusterFormsWithDelaysEnabled()
     {
         _harness.Network.EnableDelays = true;
         _harness.Network.BaseMessageDelay = TimeSpan.FromMilliseconds(5);
         _harness.Network.MaxJitter = TimeSpan.FromMilliseconds(5);
 
         var seedNode = _harness.CreateSeedNode();
-        var joiner = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
+        var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
 
         Assert.True(joiner.IsInitialized);
         Assert.Equal(2, joiner.MembershipSize);
@@ -158,7 +158,7 @@ public sealed class MessageDeliveryTests : IAsyncLifetime
     /// against unreliable networks.
     /// </summary>
     [Fact(Skip = "Requires timeout-based retry mechanism in join protocol")]
-    public async Task MessageLossDuringJoinRetried()
+    public void MessageLossDuringJoinRetried()
     {
         // Enable moderate message loss
         _harness.Network.MessageDropRate = 0.3; // 30% loss
@@ -167,15 +167,9 @@ public sealed class MessageDeliveryTests : IAsyncLifetime
 
         // Join should eventually succeed despite message loss
         // This requires the protocol to have retry logic
-        var joiner = await _harness.CreateJoinerNodeAsync(
-            seedNode,
-            nodeId: 1,
-            cancellationToken: TestContext.Current.CancellationToken);
+        var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
 
-        await _harness.WaitForConvergenceAsync(
-            expectedSize: 2,
-            timeout: TimeSpan.FromSeconds(30),
-            cancellationToken: TestContext.Current.CancellationToken);
+        _harness.WaitForConvergence(expectedSize: 2);
 
         Assert.True(joiner.IsInitialized);
         Assert.Equal(2, joiner.MembershipSize);
@@ -188,32 +182,20 @@ public sealed class MessageDeliveryTests : IAsyncLifetime
     /// can grow even under adverse network conditions.
     /// </summary>
     [Fact(Skip = "Requires consensus retry mechanism")]
-    public async Task MessageLossDuringConsensusRetried()
+    public void MessageLossDuringConsensusRetried()
     {
         // Enable low message loss
         _harness.Network.MessageDropRate = 0.1; // 10% loss
 
         var seedNode = _harness.CreateSeedNode();
-        var joiner1 = await _harness.CreateJoinerNodeAsync(
-            seedNode,
-            nodeId: 1,
-            cancellationToken: TestContext.Current.CancellationToken);
+        var joiner1 = _harness.CreateJoinerNode(seedNode, nodeId: 1);
 
-        await _harness.WaitForConvergenceAsync(
-            expectedSize: 2,
-            timeout: TimeSpan.FromSeconds(10),
-            cancellationToken: TestContext.Current.CancellationToken);
+        _harness.WaitForConvergence(expectedSize: 2);
 
         // Add another node with message loss active
-        var joiner2 = await _harness.CreateJoinerNodeAsync(
-            seedNode,
-            nodeId: 2,
-            cancellationToken: TestContext.Current.CancellationToken);
+        var joiner2 = _harness.CreateJoinerNode(seedNode, nodeId: 2);
 
-        await _harness.WaitForConvergenceAsync(
-            expectedSize: 3,
-            timeout: TimeSpan.FromSeconds(15),
-            cancellationToken: TestContext.Current.CancellationToken);
+        _harness.WaitForConvergence(expectedSize: 3);
 
         Assert.All(_harness.Nodes, n => Assert.Equal(3, n.MembershipSize));
     }
@@ -296,4 +278,3 @@ public sealed class MessageDeliveryTests : IAsyncLifetime
 
     #endregion
 }
-

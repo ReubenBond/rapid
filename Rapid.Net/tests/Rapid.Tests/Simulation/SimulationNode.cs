@@ -78,11 +78,10 @@ internal sealed class SimulationNode : IDisposable
         var options = protocolOptions ?? new RapidProtocolOptions();
         _protocolOptions = Options.Create(options);
 
-        // Create shared resources with the simulation's time provider and task scheduler
+        // Create shared resources with the simulation's time provider, task scheduler, random, and guid factory
         var sharedResourcesLogger = factory?.CreateLogger<SharedResources>()
             ?? NullLogger<SharedResources>.Instance;
-        _sharedResources = new SharedResources(sharedResourcesLogger, harness.TimeProvider, harness.Scheduler);
-
+        _sharedResources = new SharedResources(sharedResourcesLogger, harness.TimeProvider, harness.Scheduler, Random, Random.NextGuid);
 
         // Create in-memory messaging client with a shorter timeout for simulations
         MessagingClient = new InMemoryMessagingClient(harness, address)
@@ -157,7 +156,7 @@ internal sealed class SimulationNode : IDisposable
             throw new InvalidOperationException("Node is already initialized");
         }
 
-        var nodeId = RapidUtils.NodeIdFromUuid(CreateDeterministicGuid());
+        var nodeId = RapidUtils.NodeIdFromUuid(Random.NextGuid());
         var actualMetadata = metadata ?? new Metadata();
 
         _logger.LogDebug("Node {Address} generated node ID {NodeId}", RapidUtils.Loggable(Address), nodeId);
@@ -206,7 +205,7 @@ internal sealed class SimulationNode : IDisposable
             throw new InvalidOperationException("Node is already initialized");
         }
 
-        var nodeId = RapidUtils.NodeIdFromUuid(CreateDeterministicGuid());
+        var nodeId = RapidUtils.NodeIdFromUuid(Random.NextGuid());
         var actualMetadata = metadata ?? new Metadata();
 
         _logger.LogDebug("Node {Address} generated node ID {NodeId} for join", RapidUtils.Loggable(Address), nodeId);
@@ -442,16 +441,6 @@ internal sealed class SimulationNode : IDisposable
         {
             _logger.LogDebug("Node {Address} Shutdown called but node is not initialized", RapidUtils.Loggable(Address));
         }
-    }
-
-    /// <summary>
-    /// Creates a deterministic GUID using the node's random instance.
-    /// </summary>
-    private Guid CreateDeterministicGuid()
-    {
-        var bytes = new byte[16];
-        Random.NextBytes(bytes);
-        return new Guid(bytes);
     }
 
     public void Dispose()

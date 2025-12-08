@@ -39,18 +39,12 @@ public sealed class ConsensusProtocolTests : IAsyncLifetime
     #region Fast Paxos Basic Operations (CONS-001 to CONS-004)
 
     [Fact]
-    public async Task SingleProposalAcceptedInTwoNodeCluster()
+    public void SingleProposalAcceptedInTwoNodeCluster()
     {
         var seedNode = _harness.CreateSeedNode();
-        var joiner = await _harness.CreateJoinerNodeAsync(
-            seedNode,
-            nodeId: 1,
-            cancellationToken: TestContext.Current.CancellationToken);
+        var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
 
-        await _harness.WaitForConvergenceAsync(
-            expectedSize: 2,
-            timeout: TimeSpan.FromSeconds(5),
-            cancellationToken: TestContext.Current.CancellationToken);
+        _harness.WaitForConvergence(expectedSize: 2);
 
         // Both nodes should have accepted the membership change via consensus
         Assert.Equal(2, seedNode.MembershipSize);
@@ -61,28 +55,16 @@ public sealed class ConsensusProtocolTests : IAsyncLifetime
     }
 
     [Fact(Skip = "Hanging - concurrent joins have consensus issues to debug")]
-    public async Task ConflictingProposalsResolvedInSequentialJoins()
+    public void ConflictingProposalsResolvedInSequentialJoins()
     {
         var seedNode = _harness.CreateSeedNode();
 
-        // Start two joins nearly simultaneously (conflicting proposals)
-        var join1Task = _harness.CreateJoinerNodeAsync(
-            seedNode,
-            nodeId: 1,
-            cancellationToken: TestContext.Current.CancellationToken);
-        var join2Task = _harness.CreateJoinerNodeAsync(
-            seedNode,
-            nodeId: 2,
-            cancellationToken: TestContext.Current.CancellationToken);
-
-        var joiner1 = await join1Task;
-        var joiner2 = await join2Task;
+        // Sequential joins (not truly concurrent in sync mode)
+        var joiner1 = _harness.CreateJoinerNode(seedNode, nodeId: 1);
+        var joiner2 = _harness.CreateJoinerNode(seedNode, nodeId: 2);
 
         // Wait for full convergence
-        await _harness.WaitForConvergenceAsync(
-            expectedSize: 3,
-            timeout: TimeSpan.FromSeconds(10),
-            cancellationToken: TestContext.Current.CancellationToken);
+        _harness.WaitForConvergence(expectedSize: 3);
 
         // All nodes should eventually reach consensus on membership
         Assert.Equal(3, seedNode.MembershipSize);
@@ -91,15 +73,12 @@ public sealed class ConsensusProtocolTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ConsensusCompletesWithinTimeout()
+    public void ConsensusCompletesWithinTimeout()
     {
         var seedNode = _harness.CreateSeedNode();
         var startTime = DateTime.UtcNow;
 
-        var joiner = await _harness.CreateJoinerNodeAsync(
-            seedNode,
-            nodeId: 1,
-            cancellationToken: TestContext.Current.CancellationToken);
+        var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
 
         var elapsed = DateTime.UtcNow - startTime;
 
@@ -110,26 +89,13 @@ public sealed class ConsensusProtocolTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task DecisionPropagatedToAllNodes()
+    public void DecisionPropagatedToAllNodes()
     {
         var seedNode = _harness.CreateSeedNode();
-        var joiner1 = await _harness.CreateJoinerNodeAsync(
-            seedNode,
-            nodeId: 1,
-            cancellationToken: TestContext.Current.CancellationToken);
+        var joiner1 = _harness.CreateJoinerNode(seedNode, nodeId: 1);
+        var joiner2 = _harness.CreateJoinerNode(seedNode, nodeId: 2);
 
-        // Small delay between joins
-        await Task.Delay(50, TestContext.Current.CancellationToken);
-
-        var joiner2 = await _harness.CreateJoinerNodeAsync(
-            seedNode,
-            nodeId: 2,
-            cancellationToken: TestContext.Current.CancellationToken);
-
-        await _harness.WaitForConvergenceAsync(
-            expectedSize: 3,
-            timeout: TimeSpan.FromSeconds(10),
-            cancellationToken: TestContext.Current.CancellationToken);
+        _harness.WaitForConvergence(expectedSize: 3);
 
         // All nodes should have the same view of membership (consensus decision)
         var seedMembers = seedNode.CurrentView.Members.Select(m => $"{m.Hostname}:{m.Port}").OrderBy(x => x).ToList();
@@ -145,42 +111,29 @@ public sealed class ConsensusProtocolTests : IAsyncLifetime
     #region Fast Paxos Failure Cases (CONS-010 to CONS-013)
 
     [Fact]
-    public async Task ConsensusSucceedsWithMinorityFailure()
+    public void ConsensusSucceedsWithMinorityFailure()
     {
         // Create 5-node cluster
-        var nodes = await _harness.CreateClusterAsync(
-            size: 5,
-            cancellationToken: TestContext.Current.CancellationToken);
+        var nodes = _harness.CreateCluster(size: 5);
 
-        await _harness.WaitForConvergenceAsync(
-            expectedSize: 5,
-            timeout: TimeSpan.FromSeconds(15),
-            cancellationToken: TestContext.Current.CancellationToken);
+        _harness.WaitForConvergence(expectedSize: 5);
 
         // Crash 1 node (minority)
         _harness.CrashNode(nodes[4]);
 
         // Add a new node - consensus should still work with 4 healthy nodes
-        var newJoiner = await _harness.CreateJoinerNodeAsync(
-            nodes[0],
-            nodeId: 5,
-            cancellationToken: TestContext.Current.CancellationToken);
+        var newJoiner = _harness.CreateJoinerNode(nodes[0], nodeId: 5);
 
         Assert.True(newJoiner.IsInitialized);
     }
 
     [Fact(Skip = "Requires advanced consensus failure simulation")]
-    public async Task ConsensusBlockedWithMajorityFailure()
+    public void ConsensusBlockedWithMajorityFailure()
     {
         // Create 5-node cluster
-        var nodes = await _harness.CreateClusterAsync(
-            size: 5,
-            cancellationToken: TestContext.Current.CancellationToken);
+        var nodes = _harness.CreateCluster(size: 5);
 
-        await _harness.WaitForConvergenceAsync(
-            expectedSize: 5,
-            timeout: TimeSpan.FromSeconds(15),
-            cancellationToken: TestContext.Current.CancellationToken);
+        _harness.WaitForConvergence(expectedSize: 5);
 
         // Crash 3 nodes (majority)
         _harness.CrashNode(nodes[2]);
@@ -193,56 +146,29 @@ public sealed class ConsensusProtocolTests : IAsyncLifetime
     }
 
     [Fact(Skip = "Hanging - sequential joins have consensus issues to debug")]
-    public async Task NodeFailureDuringMembershipChangeHandled()
+    public void NodeFailureDuringMembershipChangeHandled()
     {
         var seedNode = _harness.CreateSeedNode();
-        var joiner1 = await _harness.CreateJoinerNodeAsync(
-            seedNode,
-            nodeId: 1,
-            cancellationToken: TestContext.Current.CancellationToken);
+        var joiner1 = _harness.CreateJoinerNode(seedNode, nodeId: 1);
 
-        await _harness.WaitForConvergenceAsync(
-            expectedSize: 2,
-            timeout: TimeSpan.FromSeconds(5),
-            cancellationToken: TestContext.Current.CancellationToken);
+        _harness.WaitForConvergence(expectedSize: 2);
 
-        // Start a new join
-        var join2Task = _harness.CreateJoinerNodeAsync(
-            seedNode,
-            nodeId: 2,
-            cancellationToken: TestContext.Current.CancellationToken);
-
-        // Crash joiner1 during the join
-        await Task.Delay(10, TestContext.Current.CancellationToken);
-        _harness.CrashNode(joiner1);
-
-        // The new join should still succeed
-        var joiner2 = await join2Task;
-        Assert.True(joiner2.IsInitialized);
+        // This test would require async behavior for race conditions
+        // Skipped in sync mode
     }
 
     [Fact(Skip = "Hanging - concurrent joins have consensus issues to debug")]
-    public async Task MultipleSimultaneousProposalsEventuallyResolve()
+    public void MultipleSimultaneousProposalsEventuallyResolve()
     {
         var seedNode = _harness.CreateSeedNode();
 
-        // Start 3 joins simultaneously
-        var joinTasks = new List<Task<SimulationNode>>();
-        for (var i = 1; i <= 3; i++)
-        {
-            joinTasks.Add(_harness.CreateJoinerNodeAsync(
-                seedNode,
-                nodeId: i,
-                cancellationToken: TestContext.Current.CancellationToken));
-        }
-
-        var joiners = await Task.WhenAll(joinTasks);
+        // Sequential joins in sync mode
+        var joiner1 = _harness.CreateJoinerNode(seedNode, nodeId: 1);
+        var joiner2 = _harness.CreateJoinerNode(seedNode, nodeId: 2);
+        var joiner3 = _harness.CreateJoinerNode(seedNode, nodeId: 3);
 
         // Wait for convergence
-        await _harness.WaitForConvergenceAsync(
-            expectedSize: 4,
-            timeout: TimeSpan.FromSeconds(15),
-            cancellationToken: TestContext.Current.CancellationToken);
+        _harness.WaitForConvergence(expectedSize: 4);
 
         // All nodes should eventually agree
         Assert.All(_harness.Nodes, n => Assert.Equal(4, n.MembershipSize));
@@ -253,7 +179,7 @@ public sealed class ConsensusProtocolTests : IAsyncLifetime
     #region Configuration Changes (CONS-020 to CONS-022)
 
     [Fact]
-    public async Task ConfigurationIdChangesWithEachMembershipChange()
+    public void ConfigurationIdChangesWithEachMembershipChange()
     {
         var seedNode = _harness.CreateSeedNode();
         var configIds = new HashSet<long> { seedNode.CurrentView.ConfigurationId };
@@ -261,27 +187,14 @@ public sealed class ConsensusProtocolTests : IAsyncLifetime
         // Join 3 nodes, tracking config ID changes
         for (var i = 1; i <= 3; i++)
         {
-            var joiner = await _harness.CreateJoinerNodeAsync(
-                seedNode,
-                nodeId: i,
-                cancellationToken: TestContext.Current.CancellationToken);
+            var joiner = _harness.CreateJoinerNode(seedNode, nodeId: i);
 
-            await _harness.WaitForNodeSizeAsync(
-                seedNode,
-                expectedSize: i + 1,
-                timeout: TimeSpan.FromSeconds(5),
-                cancellationToken: TestContext.Current.CancellationToken);
+            _harness.WaitForNodeSize(seedNode, expectedSize: i + 1);
 
             var newConfigId = seedNode.CurrentView.ConfigurationId;
             // Each membership change should produce a unique configuration ID
             Assert.DoesNotContain(newConfigId, configIds);
             configIds.Add(newConfigId);
-
-            // Small delay between joins
-            if (i < 3)
-            {
-                await Task.Delay(50, TestContext.Current.CancellationToken);
-            }
         }
 
         // We should have 4 unique configuration IDs (initial + 3 joins)
@@ -289,42 +202,28 @@ public sealed class ConsensusProtocolTests : IAsyncLifetime
     }
 
     [Fact(Skip = "Requires stale proposal injection")]
-    public async Task OldConfigurationProposalsRejected()
+    public void OldConfigurationProposalsRejected()
     {
         var seedNode = _harness.CreateSeedNode();
-        var joiner = await _harness.CreateJoinerNodeAsync(
-            seedNode,
-            nodeId: 1,
-            cancellationToken: TestContext.Current.CancellationToken);
+        var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
 
-        await _harness.WaitForConvergenceAsync(
-            expectedSize: 2,
-            timeout: TimeSpan.FromSeconds(5),
-            cancellationToken: TestContext.Current.CancellationToken);
+        _harness.WaitForConvergence(expectedSize: 2);
 
         // This would require injecting a proposal with an old configuration ID
         // and verifying it's rejected - needs low-level protocol access
     }
 
     [Fact(Skip = "Hanging - concurrent joins have consensus issues to debug")]
-    public async Task ConcurrentConfigChangesEventuallySerialize()
+    public void ConcurrentConfigChangesEventuallySerialize()
     {
         var seedNode = _harness.CreateSeedNode();
 
-        // Create multiple concurrent membership changes
-        var join1Task = _harness.CreateJoinerNodeAsync(
-            seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
-        var join2Task = _harness.CreateJoinerNodeAsync(
-            seedNode, nodeId: 2, cancellationToken: TestContext.Current.CancellationToken);
-        var join3Task = _harness.CreateJoinerNodeAsync(
-            seedNode, nodeId: 3, cancellationToken: TestContext.Current.CancellationToken);
+        // Sequential joins in sync mode
+        var joiner1 = _harness.CreateJoinerNode(seedNode, nodeId: 1);
+        var joiner2 = _harness.CreateJoinerNode(seedNode, nodeId: 2);
+        var joiner3 = _harness.CreateJoinerNode(seedNode, nodeId: 3);
 
-        await Task.WhenAll(join1Task, join2Task, join3Task);
-
-        await _harness.WaitForConvergenceAsync(
-            expectedSize: 4,
-            timeout: TimeSpan.FromSeconds(15),
-            cancellationToken: TestContext.Current.CancellationToken);
+        _harness.WaitForConvergence(expectedSize: 4);
 
         // All nodes should have the same final configuration
         var configId = seedNode.CurrentView.ConfigurationId;
@@ -337,7 +236,7 @@ public sealed class ConsensusProtocolTests : IAsyncLifetime
     #region Consensus Under Network Conditions
 
     [Fact]
-    public async Task ConsensusWithMessageDelaysCompletesCorrectly()
+    public void ConsensusWithMessageDelaysCompletesCorrectly()
     {
         // Enable message delays
         _harness.Network.EnableDelays = true;
@@ -345,17 +244,14 @@ public sealed class ConsensusProtocolTests : IAsyncLifetime
         _harness.Network.MaxJitter = TimeSpan.FromMilliseconds(20);
 
         var seedNode = _harness.CreateSeedNode();
-        var joiner = await _harness.CreateJoinerNodeAsync(
-            seedNode,
-            nodeId: 1,
-            cancellationToken: TestContext.Current.CancellationToken);
+        var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
 
         Assert.True(joiner.IsInitialized);
         Assert.Equal(2, joiner.MembershipSize);
     }
 
     [Fact]
-    public async Task ConsensusWithLowMessageLossSucceeds()
+    public void ConsensusWithLowMessageLossSucceeds()
     {
         // Enable 5% message loss - this tests the retry logic in join protocol
         _harness.Network.MessageDropRate = 0.05;
@@ -363,18 +259,12 @@ public sealed class ConsensusProtocolTests : IAsyncLifetime
         var seedNode = _harness.CreateSeedNode();
 
         // The join should succeed despite message loss due to retry logic
-        var joiner = await _harness.CreateJoinerNodeAsync(
-            seedNode,
-            nodeId: 1,
-            cancellationToken: TestContext.Current.CancellationToken);
+        var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
 
         Assert.True(joiner.IsInitialized, "Joiner should be initialized after join with retries");
 
         // Wait for convergence
-        await _harness.WaitForConvergenceAsync(
-            expectedSize: 2,
-            timeout: TimeSpan.FromSeconds(10),
-            cancellationToken: TestContext.Current.CancellationToken);
+        _harness.WaitForConvergence(expectedSize: 2);
 
         Assert.Equal(2, seedNode.MembershipSize);
         Assert.Equal(2, joiner.MembershipSize);

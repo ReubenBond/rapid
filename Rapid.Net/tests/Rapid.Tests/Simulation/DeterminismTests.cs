@@ -44,8 +44,12 @@ public sealed class DeterminismTests : IAsyncLifetime
         await using var harness1 = new SimulationHarness(seed: 11111);
         await using var harness2 = new SimulationHarness(seed: 11111);
 
+#pragma warning disable CA5394 // Do not use insecure randomness
         var seq1 = Enumerable.Range(0, 100).Select(_ => harness1.Random.Next()).ToList();
+#pragma warning restore CA5394 // Do not use insecure randomness
+#pragma warning disable CA5394 // Do not use insecure randomness
         var seq2 = Enumerable.Range(0, 100).Select(_ => harness2.Random.Next()).ToList();
+#pragma warning restore CA5394 // Do not use insecure randomness
 
         Assert.Equal(seq1, seq2);
     }
@@ -56,8 +60,12 @@ public sealed class DeterminismTests : IAsyncLifetime
         await using var harness1 = new SimulationHarness(seed: 11111);
         await using var harness2 = new SimulationHarness(seed: 22222);
 
+#pragma warning disable CA5394 // Do not use insecure randomness
         var seq1 = Enumerable.Range(0, 100).Select(_ => harness1.Random.Next()).ToList();
+#pragma warning restore CA5394 // Do not use insecure randomness
+#pragma warning disable CA5394 // Do not use insecure randomness
         var seq2 = Enumerable.Range(0, 100).Select(_ => harness2.Random.Next()).ToList();
+#pragma warning restore CA5394 // Do not use insecure randomness
 
         Assert.NotEqual(seq1, seq2);
     }
@@ -69,12 +77,18 @@ public sealed class DeterminismTests : IAsyncLifetime
 
         // Fork at same state should produce same results
         var fork1 = random.Fork();
+#pragma warning disable CA5394 // Do not use insecure randomness
         var state = random.Next(); // Consume one value
+#pragma warning restore CA5394 // Do not use insecure randomness
         var fork2 = random.Fork();
 
         // fork1 and fork2 should produce different sequences (since base random advanced)
+#pragma warning disable CA5394 // Do not use insecure randomness
         var seq1 = Enumerable.Range(0, 10).Select(_ => fork1.Next()).ToList();
+#pragma warning restore CA5394 // Do not use insecure randomness
+#pragma warning disable CA5394 // Do not use insecure randomness
         var seq2 = Enumerable.Range(0, 10).Select(_ => fork2.Next()).ToList();
+#pragma warning restore CA5394 // Do not use insecure randomness
 
         Assert.NotEqual(seq1, seq2);
     }

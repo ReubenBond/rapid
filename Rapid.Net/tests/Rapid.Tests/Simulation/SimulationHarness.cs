@@ -153,7 +153,9 @@ internal sealed class SimulationHarness : IAsyncDisposable
     {
         lock (_randomLock)
         {
+#pragma warning disable CA5394 // Do not use insecure randomness
             return new SimulationRandom(Random.Next());
+#pragma warning restore CA5394 // Do not use insecure randomness
         }
     }
 

@@ -26,7 +26,9 @@ public sealed class SimulationTestHarnessTests : IAsyncLifetime
 
         for (var i = 0; i < 100; i++)
         {
+#pragma warning disable CA5394 // Do not use insecure randomness
             Assert.Equal(random1.Next(), random2.Next());
+#pragma warning restore CA5394 // Do not use insecure randomness
         }
     }
 
@@ -56,10 +58,10 @@ public sealed class SimulationTestHarnessTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task JoinNodeIncreasesMembershipSize()
+    public void JoinNodeIncreasesMembershipSize()
     {
         var seedNode = _harness.CreateSeedNode();
-        var joiner = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
+        var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
 
         Assert.NotNull(joiner);
         Assert.True(joiner.IsInitialized);
@@ -67,9 +69,9 @@ public sealed class SimulationTestHarnessTests : IAsyncLifetime
     }
 
     [Fact(Skip = "Slow test - consensus roundtrips with batching delays. Use for integration testing only.")]
-    public async Task CreateClusterCreatesCorrectNumberOfNodes()
+    public void CreateClusterCreatesCorrectNumberOfNodes()
     {
-        var nodes = await _harness.CreateClusterAsync(size: 3, cancellationToken: TestContext.Current.CancellationToken);
+        var nodes = _harness.CreateCluster(size: 3);
 
         Assert.Equal(3, nodes.Count);
         Assert.All(nodes, node => Assert.True(node.IsInitialized));
@@ -100,8 +102,12 @@ public sealed class SimulationTestHarnessTests : IAsyncLifetime
         var derived2 = _harness.CreateDerivedRandom();
 
         // Different derived randoms should produce different sequences
+#pragma warning disable CA5394 // Do not use insecure randomness
         var seq1 = Enumerable.Range(0, 10).Select(_ => derived1.Next()).ToList();
+#pragma warning restore CA5394 // Do not use insecure randomness
+#pragma warning disable CA5394 // Do not use insecure randomness
         var seq2 = Enumerable.Range(0, 10).Select(_ => derived2.Next()).ToList();
+#pragma warning restore CA5394 // Do not use insecure randomness
 
         Assert.NotEqual(seq1, seq2);
     }
@@ -147,7 +153,7 @@ public sealed class SimulationTestHarnessTests : IAsyncLifetime
         }, cts.Token);
 
         // Join a new node
-        var joiner = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
+        var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
 
         // Wait a bit for the view change to propagate
         await Task.Delay(100, TestContext.Current.CancellationToken);
