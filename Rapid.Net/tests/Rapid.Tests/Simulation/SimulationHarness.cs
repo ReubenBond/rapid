@@ -197,19 +197,6 @@ internal sealed class SimulationHarness : IAsyncDisposable
     }
 
     /// <summary>
-    /// Creates and joins a new node to the cluster (async version for compatibility).
-    /// </summary>
-    public Task<SimulationNode> CreateJoinerNodeAsync(
-        SimulationNode seedNode,
-        int nodeId,
-        RapidProtocolOptions? options = null,
-        CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(CreateJoinerNode(seedNode, nodeId, options));
-    }
-
-    /// <summary>
     /// Creates a cluster of the specified size.
     /// </summary>
     public IReadOnlyList<SimulationNode> CreateCluster(int size, RapidProtocolOptions? options = null)
@@ -236,17 +223,6 @@ internal sealed class SimulationHarness : IAsyncDisposable
     }
 
     /// <summary>
-    /// Creates a cluster of the specified size (async version for compatibility).
-    /// </summary>
-    public Task<IReadOnlyList<SimulationNode>> CreateClusterAsync(
-        int size,
-        RapidProtocolOptions? options = null,
-        CancellationToken cancellationToken = default)
-    {
-        return Task.FromResult(CreateCluster(size, options));
-    }
-
-    /// <summary>
     /// Crashes a node (simulates sudden failure).
     /// </summary>
     public void CrashNode(SimulationNode node)
@@ -269,15 +245,6 @@ internal sealed class SimulationHarness : IAsyncDisposable
         node.Dispose();
         _nodes.Remove(node);
         LogEvent(SimulationEventType.NodeLeft, $"Node left gracefully");
-    }
-
-    /// <summary>
-    /// Gracefully removes a node (async version for compatibility).
-    /// </summary>
-    public Task RemoveNodeGracefullyAsync(SimulationNode node)
-    {
-        RemoveNodeGracefully(node);
-        return Task.CompletedTask;
     }
 
     private static RapidProtocolOptions ConfigureOptions(RapidProtocolOptions? options)
@@ -545,19 +512,6 @@ internal sealed class SimulationHarness : IAsyncDisposable
     }
 
     /// <summary>
-    /// Waits for convergence (async version for compatibility).
-    /// </summary>
-    public Task WaitForConvergenceAsync(
-        int expectedSize,
-        TimeSpan timeout,
-        TimeSpan? stepSize = null,
-        CancellationToken cancellationToken = default)
-    {
-        WaitForConvergence(expectedSize);
-        return Task.CompletedTask;
-    }
-
-    /// <summary>
     /// Waits for a specific node to reach the expected membership size.
     /// </summary>
     public void WaitForNodeSize(SimulationNode node, int expectedSize, int maxIterations = 100000)
@@ -567,20 +521,6 @@ internal sealed class SimulationHarness : IAsyncDisposable
         {
             throw new TimeoutException($"Node did not reach size {expectedSize}. Current size: {node.MembershipSize}");
         }
-    }
-
-    /// <summary>
-    /// Waits for a specific node to reach the expected membership size (async version for compatibility).
-    /// </summary>
-    public Task WaitForNodeSizeAsync(
-        SimulationNode node,
-        int expectedSize,
-        TimeSpan timeout,
-        TimeSpan? stepSize = null,
-        CancellationToken cancellationToken = default)
-    {
-        WaitForNodeSize(node, expectedSize);
-        return Task.CompletedTask;
     }
 
     private DateTimeOffset? GetNextScheduledTime()
@@ -604,22 +544,6 @@ internal sealed class SimulationHarness : IAsyncDisposable
         }
 
         return nextDueTime.HasValue ? new DateTimeOffset(nextDueTime.Value, TimeSpan.Zero) : null;
-    }
-
-    private bool AdvanceToNextScheduledTime()
-    {
-        var nextScheduledTime = GetNextScheduledTime();
-        if (!nextScheduledTime.HasValue)
-        {
-            return false;
-        }
-
-        if (nextScheduledTime.Value > TimeProvider.GetUtcNow())
-        {
-            TimeProvider.SetUtcNow(nextScheduledTime.Value);
-        }
-
-        return true;
     }
 
     #endregion
