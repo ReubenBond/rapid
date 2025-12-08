@@ -231,12 +231,12 @@ public sealed class EdgeCaseTests : IAsyncLifetime
     {
         // Test a large cluster (20 nodes)
         var nodes = await _harness.CreateClusterAsync(
-            size: 20, 
+            size: 20,
             cancellationToken: TestContext.Current.CancellationToken);
 
         await _harness.WaitForConvergenceAsync(
-            expectedSize: 20, 
-            timeout: TimeSpan.FromMinutes(2), 
+            expectedSize: 20,
+            timeout: TimeSpan.FromMinutes(2),
             cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.All(nodes, n => Assert.Equal(20, n.MembershipSize));
@@ -251,12 +251,12 @@ public sealed class EdgeCaseTests : IAsyncLifetime
     public async Task TenNodeClusterFormation()
     {
         var nodes = await _harness.CreateClusterAsync(
-            size: 10, 
+            size: 10,
             cancellationToken: TestContext.Current.CancellationToken);
 
         await _harness.WaitForConvergenceAsync(
-            expectedSize: 10, 
-            timeout: TimeSpan.FromSeconds(60), 
+            expectedSize: 10,
+            timeout: TimeSpan.FromSeconds(60),
             cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(10, nodes.Count);

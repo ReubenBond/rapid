@@ -16,10 +16,10 @@ internal sealed class SimulationTaskQueue
 {
     // Ready tasks: ordered by sequence number only (FIFO)
     private readonly SortedList<long, ScheduledItem> _readyQueue = new();
-    
+
     // Waiting tasks: ordered by due time, then sequence number
     private readonly SortedList<long, ScheduledItem> _waitingQueue = new();
-    
+
     private readonly Lock _lock = new();
     private long _sequenceNumber;
     private long _currentTimeTicks;

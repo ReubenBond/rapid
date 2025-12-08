@@ -222,7 +222,7 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
 
         // CheckLiveness should succeed when there are tasks to execute
         var result = _checker.CheckLiveness(maxSteps: 100);
-        
+
         Assert.True(result);
         Assert.False(_checker.HasViolations);
     }
@@ -237,7 +237,7 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
     {
         // With no pending tasks and no time-based triggers, liveness check should fail
         var result = _checker.CheckLiveness(maxSteps: 100);
-        
+
         // Should fail since no progress can be made
         Assert.False(result);
         Assert.True(_checker.HasViolations);
@@ -252,7 +252,7 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
     public void JoinEventuallyCompletes()
     {
         var seedNode = _harness.CreateSeedNode();
-        
+
         // Start a join operation and drive to completion
         var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
 

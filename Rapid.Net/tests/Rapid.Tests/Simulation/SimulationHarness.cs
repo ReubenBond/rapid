@@ -44,7 +44,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
         // Create deterministic components
         Random = new SimulationRandom(seed);
         Scheduler = new SimulationTaskScheduler();
-        
+
         // Create time provider that shares the task queue with the scheduler
         var timeProviderLogger = loggerFactory?.CreateLogger<SimulationTimeProvider>();
         TimeProvider = new SimulationTimeProvider(Scheduler.TaskQueue, DateTimeOffset.UtcNow, timeProviderLogger);

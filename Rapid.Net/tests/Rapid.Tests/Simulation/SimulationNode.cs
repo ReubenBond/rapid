@@ -150,7 +150,7 @@ internal sealed class SimulationNode : IDisposable
     public void StartCluster(Metadata? metadata = null)
     {
         _logger.LogInformation("Starting cluster for node {Address}", RapidUtils.Loggable(Address));
-        
+
         if (_membershipService != null)
         {
             _logger.LogError("Cannot start cluster - node {Address} is already initialized", RapidUtils.Loggable(Address));
@@ -184,7 +184,7 @@ internal sealed class SimulationNode : IDisposable
             subscriptions,
             _membershipServiceLogger);
 
-        _logger.LogInformation("Cluster started for node {Address} with {MembershipSize} members", 
+        _logger.LogInformation("Cluster started for node {Address} with {MembershipSize} members",
             RapidUtils.Loggable(Address), membershipView.Size);
     }
 
@@ -197,7 +197,7 @@ internal sealed class SimulationNode : IDisposable
         ArgumentNullException.ThrowIfNull(seedNode);
         cancellationToken.ThrowIfCancellationRequested();
 
-        _logger.LogInformation("Node {Address} attempting to join cluster via seed {SeedAddress}", 
+        _logger.LogInformation("Node {Address} attempting to join cluster via seed {SeedAddress}",
             RapidUtils.Loggable(Address), RapidUtils.Loggable(seedNode.Address));
 
         if (_membershipService != null)
@@ -236,7 +236,7 @@ internal sealed class SimulationNode : IDisposable
 
         if (successfulResponse == null)
         {
-            _logger.LogError("Node {Address} failed to join cluster after {MaxRetries} retries", 
+            _logger.LogError("Node {Address} failed to join cluster after {MaxRetries} retries",
                 RapidUtils.Loggable(Address), maxRetries + 1);
             throw new InvalidOperationException($"Failed to join cluster after {maxRetries + 1} attempts");
         }
@@ -284,9 +284,9 @@ internal sealed class SimulationNode : IDisposable
     private async Task<JoinResponse?> TryJoinClusterAsync(SimulationNode seedNode, NodeId nodeId, Metadata metadata, CancellationToken cancellationToken)
     {
         // Phase 1: Contact seed for observers
-        _logger.LogDebug("Node {Address} sending PreJoinMessage to seed {SeedAddress}", 
+        _logger.LogDebug("Node {Address} sending PreJoinMessage to seed {SeedAddress}",
             RapidUtils.Loggable(Address), RapidUtils.Loggable(seedNode.Address));
-        
+
         var preJoinMessage = new PreJoinMessage
         {
             Sender = Address,
@@ -306,7 +306,7 @@ internal sealed class SimulationNode : IDisposable
         if (joinResponse.StatusCode != JoinStatusCode.SafeToJoin &&
             joinResponse.StatusCode != JoinStatusCode.HostnameAlreadyInRing)
         {
-            _logger.LogError("Node {Address} join failed with status: {StatusCode}", 
+            _logger.LogError("Node {Address} join failed with status: {StatusCode}",
                 RapidUtils.Loggable(Address), joinResponse.StatusCode);
             throw new InvalidOperationException($"Join failed with status: {joinResponse.StatusCode}");
         }
@@ -319,7 +319,7 @@ internal sealed class SimulationNode : IDisposable
         }
 
         // Phase 2: Contact observers
-        _logger.LogDebug("Node {Address} contacting {ObserverCount} observers", 
+        _logger.LogDebug("Node {Address} contacting {ObserverCount} observers",
             RapidUtils.Loggable(Address), observers.Count);
 
         var ringNumbersPerObserver = new Dictionary<Endpoint, List<int>>();
@@ -400,7 +400,7 @@ internal sealed class SimulationNode : IDisposable
             throw new InvalidOperationException("Node is not initialized");
         }
 
-        _logger.LogTrace("Node {Address} handling request of type {RequestType}", 
+        _logger.LogTrace("Node {Address} handling request of type {RequestType}",
             RapidUtils.Loggable(Address), request.ContentCase);
 
         return _membershipService.HandleMessageAsync(request, cancellationToken);
@@ -466,7 +466,7 @@ internal sealed class SimulationNode : IDisposable
         _sharedResources.Dispose();
         MessagingClient.Dispose();
         _harness.UnregisterNode(this);
-        
+
         _logger.LogDebug("Node {Address} disposed", RapidUtils.Loggable(Address));
     }
 }

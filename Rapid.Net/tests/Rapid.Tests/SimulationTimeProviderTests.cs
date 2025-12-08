@@ -77,7 +77,7 @@ public class SimulationTimeProviderTests
     {
         var timeProvider = new SimulationTimeProvider();
         var timestamp1 = timeProvider.GetTimestamp();
-        
+
         timeProvider.Advance(TimeSpan.FromSeconds(1));
         var timestamp2 = timeProvider.GetTimestamp();
 
@@ -89,7 +89,7 @@ public class SimulationTimeProviderTests
     {
         var timeProvider = new SimulationTimeProvider();
         var start = timeProvider.GetTimestamp();
-        
+
         timeProvider.Advance(TimeSpan.FromSeconds(1));
         var elapsed = timeProvider.GetElapsedTime(start);
 
@@ -191,7 +191,7 @@ public class SimulationTimeProviderTests
     {
         var timeProvider = new SimulationTimeProvider();
 
-        Assert.Throws<ArgumentOutOfRangeException>(() => 
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
             timeProvider.SetUtcNow(timeProvider.GetUtcNow() - TimeSpan.FromTicks(1)));
     }
 
@@ -403,7 +403,7 @@ public class SimulationTimeProviderTests
     {
         var timeProvider = new SimulationTimeProvider();
 
-        using var timer1 = timeProvider.CreateTimer(_ => throw new InvalidOperationException("Test exception"), 
+        using var timer1 = timeProvider.CreateTimer(_ => throw new InvalidOperationException("Test exception"),
             null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
 
         // This should throw due to timer1's callback - exceptions propagate from timer callbacks
@@ -808,7 +808,7 @@ public class SimulationTimeProviderTests
         var timeProvider = new SimulationTimeProvider();
         var callCount = 0;
 
-        using var timer = timeProvider.CreateTimer(_ => Interlocked.Increment(ref callCount), 
+        using var timer = timeProvider.CreateTimer(_ => Interlocked.Increment(ref callCount),
             null, TimeSpan.FromMilliseconds(1), TimeSpan.FromMilliseconds(1));
 
         var tasks = new List<Task>();
@@ -920,7 +920,7 @@ public class SimulationTimeProviderTests
     {
         var timeProvider = new SimulationTimeProvider();
 
-        Assert.Throws<ArgumentOutOfRangeException>(() => 
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
             timeProvider.AutoAdvanceAmount = TimeSpan.FromTicks(-1));
     }
 

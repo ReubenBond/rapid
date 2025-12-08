@@ -228,10 +228,10 @@ public sealed class ClusterBasicTests : IAsyncLifetime
     {
         var seedNode = _harness.CreateSeedNode();
         var joiner1 = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
-        
+
         // Small delay between joins
         await Task.Delay(50, TestContext.Current.CancellationToken);
-        
+
         var joiner2 = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 2, cancellationToken: TestContext.Current.CancellationToken);
 
         await _harness.WaitForConvergenceAsync(expectedSize: 3, timeout: TimeSpan.FromSeconds(10), cancellationToken: TestContext.Current.CancellationToken);
@@ -256,7 +256,7 @@ public sealed class ClusterBasicTests : IAsyncLifetime
         // Configuration ID should have changed after membership change
         // Note: Configuration IDs are hashes, so they change but don't necessarily increase monotonically
         Assert.NotEqual(initialConfigId, joiner.CurrentView.ConfigurationId);
-        
+
         // Both nodes should eventually have the same configuration ID
         // Give a moment for the seed to process the view change
         var deadline = DateTime.UtcNow.AddSeconds(2);
@@ -264,7 +264,7 @@ public sealed class ClusterBasicTests : IAsyncLifetime
         {
             await Task.Delay(50, TestContext.Current.CancellationToken);
         }
-        
+
         Assert.Equal(joiner.CurrentView.ConfigurationId, seedNode.CurrentView.ConfigurationId);
     }
 
@@ -273,10 +273,10 @@ public sealed class ClusterBasicTests : IAsyncLifetime
     {
         var seedNode = _harness.CreateSeedNode();
         var joiner1 = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
-        
+
         // Small delay between joins
         await Task.Delay(50, TestContext.Current.CancellationToken);
-        
+
         var joiner2 = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 2, cancellationToken: TestContext.Current.CancellationToken);
 
         await _harness.WaitForConvergenceAsync(expectedSize: 3, timeout: TimeSpan.FromSeconds(10), cancellationToken: TestContext.Current.CancellationToken);

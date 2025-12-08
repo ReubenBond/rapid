@@ -164,17 +164,17 @@ public sealed class MessageDeliveryTests : IAsyncLifetime
         _harness.Network.MessageDropRate = 0.3; // 30% loss
 
         var seedNode = _harness.CreateSeedNode();
-        
+
         // Join should eventually succeed despite message loss
         // This requires the protocol to have retry logic
         var joiner = await _harness.CreateJoinerNodeAsync(
-            seedNode, 
-            nodeId: 1, 
+            seedNode,
+            nodeId: 1,
             cancellationToken: TestContext.Current.CancellationToken);
 
         await _harness.WaitForConvergenceAsync(
-            expectedSize: 2, 
-            timeout: TimeSpan.FromSeconds(30), 
+            expectedSize: 2,
+            timeout: TimeSpan.FromSeconds(30),
             cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.True(joiner.IsInitialized);
@@ -195,24 +195,24 @@ public sealed class MessageDeliveryTests : IAsyncLifetime
 
         var seedNode = _harness.CreateSeedNode();
         var joiner1 = await _harness.CreateJoinerNodeAsync(
-            seedNode, 
-            nodeId: 1, 
+            seedNode,
+            nodeId: 1,
             cancellationToken: TestContext.Current.CancellationToken);
 
         await _harness.WaitForConvergenceAsync(
-            expectedSize: 2, 
-            timeout: TimeSpan.FromSeconds(10), 
+            expectedSize: 2,
+            timeout: TimeSpan.FromSeconds(10),
             cancellationToken: TestContext.Current.CancellationToken);
 
         // Add another node with message loss active
         var joiner2 = await _harness.CreateJoinerNodeAsync(
-            seedNode, 
-            nodeId: 2, 
+            seedNode,
+            nodeId: 2,
             cancellationToken: TestContext.Current.CancellationToken);
 
         await _harness.WaitForConvergenceAsync(
-            expectedSize: 3, 
-            timeout: TimeSpan.FromSeconds(15), 
+            expectedSize: 3,
+            timeout: TimeSpan.FromSeconds(15),
             cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.All(_harness.Nodes, n => Assert.Equal(3, n.MembershipSize));

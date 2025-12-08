@@ -168,7 +168,7 @@ internal sealed partial class SimulationTimeProvider : TimeProvider
 
         lock (Waiters)
         {
-            LogAdvance(delta, _now.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture), 
+            LogAdvance(delta, _now.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture),
                 (_now + delta).ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture), Waiters.Count);
             _now += delta;
             SyncTaskQueueTime();

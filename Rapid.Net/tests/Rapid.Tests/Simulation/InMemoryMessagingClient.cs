@@ -47,7 +47,7 @@ internal sealed class InMemoryMessagingClient : IMessagingClient
         var localAddr = RapidUtils.Loggable(_localEndpoint);
         var remoteAddr = RapidUtils.Loggable(remote);
 
-        _logger.LogTrace("Attempting to send {MessageType} from {Local} to {Remote}", 
+        _logger.LogTrace("Attempting to send {MessageType} from {Local} to {Remote}",
             request.ContentCase, localAddr, remoteAddr);
 
         // Check if message can be delivered
@@ -178,13 +178,13 @@ internal sealed class InMemoryMessagingClient : IMessagingClient
         }
         catch (TimeoutException ex)
         {
-            _logger.LogDebug("Best-effort message to {Remote} timed out: {Message}", 
+            _logger.LogDebug("Best-effort message to {Remote} timed out: {Message}",
                 RapidUtils.Loggable(remote), ex.Message);
             return RapidResponse.Parser.ParseFrom([]);
         }
         catch (Exception ex)
         {
-            _logger.LogTrace("Best-effort message to {Remote} failed: {Message}", 
+            _logger.LogTrace("Best-effort message to {Remote} failed: {Message}",
                 RapidUtils.Loggable(remote), ex.Message);
             return RapidResponse.Parser.ParseFrom([]);
         }

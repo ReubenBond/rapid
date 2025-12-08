@@ -97,16 +97,16 @@ internal sealed partial class FastPaxos : IAsyncDisposable
     private readonly TaskCompletionSource<List<Endpoint>> _onDecidedTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public Task<List<Endpoint>> Decided => _onDecidedTcs.Task;
 
-public FastPaxos(
-        Endpoint myAddr,
-        long configurationId,
-        int membershipSize,
-        IMessagingClient client,
-        IBroadcaster broadcaster,
-        IOptions<RapidProtocolOptions> options,
-        SharedResources sharedResources,
-        ILogger<FastPaxos> logger,
-        ILogger<Paxos> paxosLogger)
+    public FastPaxos(
+            Endpoint myAddr,
+            long configurationId,
+            int membershipSize,
+            IMessagingClient client,
+            IBroadcaster broadcaster,
+            IOptions<RapidProtocolOptions> options,
+            SharedResources sharedResources,
+            ILogger<FastPaxos> logger,
+            ILogger<Paxos> paxosLogger)
     {
         _myAddr = myAddr;
         _configurationId = configurationId;

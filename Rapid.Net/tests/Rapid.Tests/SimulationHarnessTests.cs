@@ -240,10 +240,10 @@ public sealed class SimulationHarnessTests : IAsyncLifetime
     public void DriveToCompletionWorks()
     {
         var seedNode = _harness.CreateSeedNode();
-        
+
         // DriveToCompletion should complete synchronously for already-started tasks
         var result = _harness.DriveToCompletion(() => Task.FromResult(42));
-        
+
         Assert.Equal(42, result);
     }
 
