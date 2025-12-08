@@ -6,15 +6,33 @@ namespace Rapid.Tests.Simulation;
 /// A deterministic task scheduler that queues tasks and executes them only when explicitly stepped.
 /// This enables fully deterministic simulation testing by controlling task execution order.
 /// </summary>
-/// <remarks>
-/// Creates a new deterministic task scheduler.
-/// </remarks>
-/// <param name="timeProvider">Optional time provider for time-based ordering.</param>
-internal sealed class DeterministicTaskScheduler(FakeTimeProvider? timeProvider = null) : TaskScheduler
+internal sealed class DeterministicTaskScheduler : TaskScheduler
 {
     private readonly PriorityQueue<ScheduledTask, long> _taskQueue = new();
     private readonly Lock _lock = new();
     private long _sequenceNumber;
+    private FakeTimeProvider? _timeProvider;
+
+    /// <summary>
+    /// Creates a new deterministic task scheduler.
+    /// </summary>
+    /// <param name="timeProvider">Optional time provider for time-based ordering.</param>
+    public DeterministicTaskScheduler(FakeTimeProvider? timeProvider = null)
+    {
+        _timeProvider = timeProvider;
+    }
+
+    /// <summary>
+    /// Sets the time provider for time-based ordering.
+    /// Call this after the harness is created if the time provider wasn't available at construction.
+    /// </summary>
+    public void SetTimeProvider(FakeTimeProvider timeProvider)
+    {
+        lock (_lock)
+        {
+            _timeProvider = timeProvider;
+        }
+    }
 
     /// <summary>
     /// Gets the number of pending tasks in the queue.
@@ -59,7 +77,7 @@ internal sealed class DeterministicTaskScheduler(FakeTimeProvider? timeProvider 
     {
         lock (_lock)
         {
-            var scheduledTask = new ScheduledTask(task, timeProvider?.GetUtcNow().Ticks ?? 0);
+            var scheduledTask = new ScheduledTask(task, _timeProvider?.GetUtcNow().Ticks ?? 0);
             var priority = GetPriority(scheduledTask);
             _taskQueue.Enqueue(scheduledTask, priority);
         }

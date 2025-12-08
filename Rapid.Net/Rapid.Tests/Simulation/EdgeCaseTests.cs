@@ -205,8 +205,9 @@ public sealed class EdgeCaseTests : IAsyncLifetime
     [Fact]
     public async Task MultipleNodesWithDifferentOptions()
     {
-        var options1 = new RapidProtocolOptions { RingCount = 3 };
-        var options2 = new RapidProtocolOptions { RingCount = 3 };
+        // Use lower ring count with compatible watermark settings
+        var options1 = new RapidProtocolOptions { RingCount = 3, HighWaterMark = 2, LowWaterMark = 1 };
+        var options2 = new RapidProtocolOptions { RingCount = 3, HighWaterMark = 2, LowWaterMark = 1 };
 
         var seedNode = _harness.CreateSeedNode(options: options1);
         var joiner = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, options: options2, cancellationToken: TestContext.Current.CancellationToken);

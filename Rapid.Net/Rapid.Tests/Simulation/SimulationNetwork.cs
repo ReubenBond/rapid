@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Microsoft.Extensions.Logging;
 
 namespace Rapid.Tests.Simulation;
 
@@ -11,6 +12,7 @@ internal sealed class SimulationNetwork
     private readonly SimulationEnvironment _environment;
     private readonly ConcurrentDictionary<string, HashSet<string>> _partitions = new();
     private readonly Lock _partitionLock = new();
+    private readonly ILogger<SimulationNetwork> _logger;
 
     /// <summary>
     /// Gets or sets the base message delay for all messages.
@@ -35,8 +37,11 @@ internal sealed class SimulationNetwork
     internal SimulationNetwork(SimulationEnvironment environment)
     {
         _environment = environment;
+        _logger = environment.LoggerFactory?.CreateLogger<SimulationNetwork>()
+            ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<SimulationNetwork>.Instance;
         // Disable delays by default for faster tests
         EnableDelays = false;
+        _logger.LogDebug("SimulationNetwork created with delays {DelaysEnabled}", EnableDelays);
     }
 
     /// <summary>
@@ -49,6 +54,7 @@ internal sealed class SimulationNetwork
         {
             var blocked = _partitions.GetOrAdd(sourceAddress, _ => []);
             blocked.Add(targetAddress);
+            _logger.LogInformation("Created partition: {Source} -> {Target}", sourceAddress, targetAddress);
         }
     }
 
@@ -57,6 +63,7 @@ internal sealed class SimulationNetwork
     /// </summary>
     public void CreateBidirectionalPartition(string node1, string node2)
     {
+        _logger.LogInformation("Creating bidirectional partition between {Node1} and {Node2}", node1, node2);
         CreatePartition(node1, node2);
         CreatePartition(node2, node1);
     }
@@ -71,6 +78,7 @@ internal sealed class SimulationNetwork
             if (_partitions.TryGetValue(sourceAddress, out var blocked))
             {
                 blocked.Remove(targetAddress);
+                _logger.LogInformation("Healed partition: {Source} -> {Target}", sourceAddress, targetAddress);
             }
         }
     }
@@ -80,6 +88,7 @@ internal sealed class SimulationNetwork
     /// </summary>
     public void HealBidirectionalPartition(string node1, string node2)
     {
+        _logger.LogInformation("Healing bidirectional partition between {Node1} and {Node2}", node1, node2);
         HealPartition(node1, node2);
         HealPartition(node2, node1);
     }
@@ -91,7 +100,9 @@ internal sealed class SimulationNetwork
     {
         lock (_partitionLock)
         {
+            var count = _partitions.Count;
             _partitions.Clear();
+            _logger.LogInformation("Healed all {Count} partitions", count);
         }
     }
 
@@ -100,6 +111,7 @@ internal sealed class SimulationNetwork
     /// </summary>
     public void IsolateNode(string nodeAddress)
     {
+        _logger.LogInformation("Isolating node {Node}", nodeAddress);
         foreach (var node in _environment.Nodes)
         {
             var addr = RapidUtils.Loggable(node.Address);
@@ -115,6 +127,7 @@ internal sealed class SimulationNetwork
     /// </summary>
     public void ReconnectNode(string nodeAddress)
     {
+        _logger.LogInformation("Reconnecting isolated node {Node}", nodeAddress);
         foreach (var node in _environment.Nodes)
         {
             var addr = RapidUtils.Loggable(node.Address);
@@ -133,6 +146,7 @@ internal sealed class SimulationNetwork
         // Check for message drop
         if (MessageDropRate > 0 && _environment.Random.Chance(MessageDropRate))
         {
+            _logger.LogTrace("Message from {Source} to {Target} dropped (random)", sourceAddress, targetAddress);
             return false;
         }
 
@@ -141,6 +155,7 @@ internal sealed class SimulationNetwork
         {
             if (_partitions.TryGetValue(sourceAddress, out var blocked) && blocked.Contains(targetAddress))
             {
+                _logger.LogTrace("Message from {Source} to {Target} blocked (partition)", sourceAddress, targetAddress);
                 return false;
             }
         }

@@ -27,8 +27,17 @@ internal sealed class DeterministicSimulationHarness : IAsyncDisposable
         ITestOutputHelper? testOutput = null)
     {
         _testOutput = testOutput;
-        InnerHarness = new SimulationTestHarness(seed, loggerFactory, useFakeTime: true);
-        Scheduler = new DeterministicTaskScheduler(InnerHarness.FakeTimeProvider);
+        
+        // Create the scheduler first without a time provider
+        // The time provider will be set after the harness creates it
+        Scheduler = new DeterministicTaskScheduler(null);
+        
+        // Create the inner harness with fake time and our deterministic scheduler
+        InnerHarness = new SimulationTestHarness(seed, loggerFactory, useFakeTime: true, taskScheduler: Scheduler);
+        
+        // Now set the time provider on the scheduler for proper time-based ordering
+        Scheduler.SetTimeProvider(InnerHarness.FakeTimeProvider!);
+        
         _syncContext = new DeterministicSynchronizationContext(Scheduler);
         _previousSyncContext = _syncContext.Install();
 
@@ -206,6 +215,82 @@ internal sealed class DeterministicSimulationHarness : IAsyncDisposable
     /// Runs until all nodes have the expected membership size.
     /// </summary>
     public bool RunUntilConverged(int expectedSize, int maxSteps = 10000) => RunUntil(() => Nodes.All(n => n.MembershipSize == expectedSize), maxSteps);
+
+    /// <summary>
+    /// Drives an async task to completion by interleaving task execution with time advancement.
+    /// This method properly handles tasks that use Task.Delay with the fake time provider.
+    /// </summary>
+    /// <typeparam name="T">The result type of the task.</typeparam>
+    /// <param name="taskFactory">A factory function that starts the async operation.</param>
+    /// <param name="maxSimulatedTime">Maximum simulated time to advance before giving up.</param>
+    /// <param name="timeStepSize">Size of each time advancement step.</param>
+    /// <returns>The result of the task.</returns>
+    /// <exception cref="TimeoutException">Thrown if the task does not complete within maxSimulatedTime.</exception>
+    public async Task<T> DriveToCompletionAsync<T>(
+        Func<Task<T>> taskFactory,
+        TimeSpan? maxSimulatedTime = null,
+        TimeSpan? timeStepSize = null)
+    {
+        ArgumentNullException.ThrowIfNull(taskFactory);
+        
+        var maxTime = maxSimulatedTime ?? TimeSpan.FromMinutes(5);
+        var timeStep = timeStepSize ?? TimeSpan.FromMilliseconds(10);
+        var startTime = TimeProvider.GetUtcNow();
+        
+        // Start the task
+        var task = taskFactory();
+        
+        // Drive the simulation until the task completes
+        while (!task.IsCompleted)
+        {
+            var elapsed = TimeProvider.GetUtcNow() - startTime;
+            if (elapsed >= maxTime)
+            {
+                LogEvent(SimulationEventType.MaxStepsReached, $"Task did not complete within {maxTime} simulated time");
+                throw new TimeoutException($"Task did not complete within {maxTime} simulated time. Elapsed: {elapsed}");
+            }
+            
+            // Execute all pending tasks first
+            while (Scheduler.HasPendingTasks && !task.IsCompleted)
+            {
+                Scheduler.TryExecuteOne();
+                LogicalTime++;
+            }
+            
+            // If task is complete, break out
+            if (task.IsCompleted)
+            {
+                break;
+            }
+            
+            // No more pending tasks, advance time to trigger timers
+            TimeProvider.Advance(timeStep);
+        }
+        
+        LogEvent(SimulationEventType.ConditionMet, $"Task completed after {TimeProvider.GetUtcNow() - startTime} simulated time");
+        
+        // Return the result (this will also propagate any exception from the task)
+        return await task;
+    }
+
+    /// <summary>
+    /// Drives an async task to completion by interleaving task execution with time advancement.
+    /// This is the non-generic version for tasks that don't return a value.
+    /// </summary>
+    /// <param name="taskFactory">A factory function that starts the async operation.</param>
+    /// <param name="maxSimulatedTime">Maximum simulated time to advance before giving up.</param>
+    /// <param name="timeStepSize">Size of each time advancement step.</param>
+    /// <exception cref="TimeoutException">Thrown if the task does not complete within maxSimulatedTime.</exception>
+    public async Task DriveToCompletionAsync(
+        Func<Task> taskFactory,
+        TimeSpan? maxSimulatedTime = null,
+        TimeSpan? timeStepSize = null)
+    {
+        await DriveToCompletionAsync(
+            async () => { await taskFactory(); return 0; },
+            maxSimulatedTime,
+            timeStepSize);
+    }
 
     /// <summary>
     /// Advances simulation time and executes any tasks that become ready.

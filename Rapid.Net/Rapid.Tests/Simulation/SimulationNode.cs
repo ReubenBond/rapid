@@ -74,8 +74,9 @@ internal sealed class SimulationNode : IDisposable
         var options = protocolOptions ?? new RapidProtocolOptions();
         _protocolOptions = Options.Create(options);
 
-        // Create shared resources with the simulation's time provider
-        _sharedResources = new SharedResources(logger, environment.TimeProvider);
+        // Create shared resources with the simulation's time provider and task scheduler
+        _sharedResources = new SharedResources(logger, environment.TimeProvider, environment.TaskScheduler);
+
 
         // Create in-memory messaging client
         MessagingClient = new InMemoryMessagingClient(environment, address);
@@ -130,13 +131,18 @@ internal sealed class SimulationNode : IDisposable
     /// </summary>
     public void StartCluster(Metadata? metadata = null)
     {
+        _logger.LogInformation("Starting cluster for node {Address}", RapidUtils.Loggable(Address));
+        
         if (_membershipService != null)
         {
+            _logger.LogError("Cannot start cluster - node {Address} is already initialized", RapidUtils.Loggable(Address));
             throw new InvalidOperationException("Node is already initialized");
         }
 
         var nodeId = RapidUtils.NodeIdFromUuid(CreateDeterministicGuid());
         var actualMetadata = metadata ?? new Metadata();
+
+        _logger.LogDebug("Node {Address} generated node ID {NodeId}", RapidUtils.Loggable(Address), nodeId);
 
         var opts = _protocolOptions.Value;
         var membershipView = new MembershipViewBuilder(opts.RingCount, [nodeId], [Address]).Build();
@@ -159,84 +165,62 @@ internal sealed class SimulationNode : IDisposable
             metadataMap,
             subscriptions,
             _environment.LoggerFactory);
+
+        _logger.LogInformation("Cluster started for node {Address} with {MembershipSize} members", 
+            RapidUtils.Loggable(Address), membershipView.Size);
     }
 
     /// <summary>
     /// Joins this node to an existing cluster through the specified seed node.
+    /// Implements retry logic with exponential backoff for resilience against message loss.
     /// </summary>
     public async Task JoinClusterAsync(SimulationNode seedNode, Metadata? metadata = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(seedNode);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        _logger.LogInformation("Node {Address} attempting to join cluster via seed {SeedAddress}", 
+            RapidUtils.Loggable(Address), RapidUtils.Loggable(seedNode.Address));
 
         if (_membershipService != null)
         {
+            _logger.LogError("Cannot join cluster - node {Address} is already initialized", RapidUtils.Loggable(Address));
             throw new InvalidOperationException("Node is already initialized");
         }
 
         var nodeId = RapidUtils.NodeIdFromUuid(CreateDeterministicGuid());
         var actualMetadata = metadata ?? new Metadata();
 
-        // Phase 1: Contact seed for observers
-        var preJoinMessage = new PreJoinMessage
+        _logger.LogDebug("Node {Address} generated node ID {NodeId} for join", RapidUtils.Loggable(Address), nodeId);
+
+        var maxRetries = _protocolOptions.Value.GrpcDefaultRetries;
+        var retryDelay = TimeSpan.FromMilliseconds(100);
+        JoinResponse? successfulResponse = null;
+
+        for (var attempt = 0; attempt <= maxRetries; attempt++)
         {
-            Sender = Address,
-            NodeId = nodeId
-        };
-
-        var preJoinResponse = await MessagingClient.SendMessageAsync(
-            seedNode.Address,
-            RapidUtils.ToRapidRequest(preJoinMessage),
-            cancellationToken).ConfigureAwait(true);
-
-        var joinResponse = preJoinResponse.JoinResponse;
-
-        if (joinResponse.StatusCode != JoinStatusCode.SafeToJoin &&
-            joinResponse.StatusCode != JoinStatusCode.HostnameAlreadyInRing)
-        {
-            throw new InvalidOperationException($"Join failed with status: {joinResponse.StatusCode}");
-        }
-
-        var observers = joinResponse.Endpoints.ToList();
-        if (observers.Count == 0)
-        {
-            throw new InvalidOperationException("No observers returned from seed");
-        }
-
-        // Phase 2: Contact observers
-        var ringNumbersPerObserver = new Dictionary<Endpoint, List<int>>();
-        for (var ringNumber = 0; ringNumber < observers.Count; ringNumber++)
-        {
-            var observer = observers[ringNumber];
-            if (!ringNumbersPerObserver.ContainsKey(observer))
+            try
             {
-                ringNumbersPerObserver[observer] = [];
+                successfulResponse = await TryJoinClusterAsync(seedNode, nodeId, actualMetadata, cancellationToken).ConfigureAwait(true);
+                if (successfulResponse != null)
+                {
+                    break;
+                }
             }
-            ringNumbersPerObserver[observer].Add(ringNumber);
-        }
-
-        var tasks = ringNumbersPerObserver.Select(async entry =>
-        {
-            var joinMessageForObserver = new JoinMessage
+            catch (InvalidOperationException ex) when (attempt < maxRetries && IsRetryableJoinError(ex))
             {
-                Sender = Address,
-                NodeId = nodeId,
-                Metadata = actualMetadata,
-                ConfigurationId = joinResponse.ConfigurationId
-            };
-            joinMessageForObserver.RingNumber.AddRange(entry.Value);
-
-            return await MessagingClient.SendMessageAsync(
-                entry.Key,
-                RapidUtils.ToRapidRequest(joinMessageForObserver),
-                cancellationToken).ConfigureAwait(true);
-        });
-
-        var responses = await Task.WhenAll(tasks).ConfigureAwait(true);
-        var successfulResponse = responses.FirstOrDefault(r => r?.JoinResponse?.StatusCode == JoinStatusCode.SafeToJoin)?.JoinResponse;
+                _logger.LogWarning("Node {Address} join attempt {Attempt} failed: {Message}. Retrying in {Delay}ms",
+                    RapidUtils.Loggable(Address), attempt + 1, ex.Message, retryDelay.TotalMilliseconds);
+                await Task.Delay(retryDelay, _environment.TimeProvider, cancellationToken).ConfigureAwait(true);
+                retryDelay *= 2; // Exponential backoff
+            }
+        }
 
         if (successfulResponse == null)
         {
-            throw new InvalidOperationException("Failed to get successful response from any observer");
+            _logger.LogError("Node {Address} failed to join cluster after {MaxRetries} retries", 
+                RapidUtils.Loggable(Address), maxRetries + 1);
+            throw new InvalidOperationException($"Failed to join cluster after {maxRetries + 1} attempts");
         }
 
         // Initialize membership from response
@@ -271,6 +255,120 @@ internal sealed class SimulationNode : IDisposable
             metadataMap,
             subscriptions,
             _environment.LoggerFactory);
+
+        _logger.LogInformation("Node {Address} successfully joined cluster with {MembershipSize} members, ConfigId={ConfigId}",
+            RapidUtils.Loggable(Address), membershipView.Size, membershipView.ConfigurationId);
+    }
+
+    /// <summary>
+    /// Attempts a single join operation. Returns the successful JoinResponse or null if retry is needed.
+    /// </summary>
+    private async Task<JoinResponse?> TryJoinClusterAsync(SimulationNode seedNode, NodeId nodeId, Metadata metadata, CancellationToken cancellationToken)
+    {
+        // Phase 1: Contact seed for observers
+        _logger.LogDebug("Node {Address} sending PreJoinMessage to seed {SeedAddress}", 
+            RapidUtils.Loggable(Address), RapidUtils.Loggable(seedNode.Address));
+        
+        var preJoinMessage = new PreJoinMessage
+        {
+            Sender = Address,
+            NodeId = nodeId
+        };
+
+        var preJoinResponse = await MessagingClient.SendMessageAsync(
+            seedNode.Address,
+            RapidUtils.ToRapidRequest(preJoinMessage),
+            cancellationToken).ConfigureAwait(true);
+
+        var joinResponse = preJoinResponse.JoinResponse;
+
+        _logger.LogDebug("Node {Address} received join response with status {StatusCode} and {ObserverCount} observers",
+            RapidUtils.Loggable(Address), joinResponse.StatusCode, joinResponse.Endpoints.Count);
+
+        if (joinResponse.StatusCode != JoinStatusCode.SafeToJoin &&
+            joinResponse.StatusCode != JoinStatusCode.HostnameAlreadyInRing)
+        {
+            _logger.LogError("Node {Address} join failed with status: {StatusCode}", 
+                RapidUtils.Loggable(Address), joinResponse.StatusCode);
+            throw new InvalidOperationException($"Join failed with status: {joinResponse.StatusCode}");
+        }
+
+        var observers = joinResponse.Endpoints.ToList();
+        if (observers.Count == 0)
+        {
+            _logger.LogError("Node {Address} received no observers from seed", RapidUtils.Loggable(Address));
+            throw new InvalidOperationException("No observers returned from seed");
+        }
+
+        // Phase 2: Contact observers
+        _logger.LogDebug("Node {Address} contacting {ObserverCount} observers", 
+            RapidUtils.Loggable(Address), observers.Count);
+
+        var ringNumbersPerObserver = new Dictionary<Endpoint, List<int>>();
+        for (var ringNumber = 0; ringNumber < observers.Count; ringNumber++)
+        {
+            var observer = observers[ringNumber];
+            if (!ringNumbersPerObserver.ContainsKey(observer))
+            {
+                ringNumbersPerObserver[observer] = [];
+            }
+            ringNumbersPerObserver[observer].Add(ringNumber);
+        }
+
+        var tasks = ringNumbersPerObserver.Select(async entry =>
+        {
+            var joinMessageForObserver = new JoinMessage
+            {
+                Sender = Address,
+                NodeId = nodeId,
+                Metadata = metadata,
+                ConfigurationId = joinResponse.ConfigurationId
+            };
+            joinMessageForObserver.RingNumber.AddRange(entry.Value);
+
+            _logger.LogTrace("Node {Address} sending JoinMessage to observer {Observer} for rings {Rings}",
+                RapidUtils.Loggable(Address), RapidUtils.Loggable(entry.Key), string.Join(",", entry.Value));
+
+            // Use best-effort for observer messages - some may be dropped but we only need one success
+            return await MessagingClient.SendMessageBestEffortAsync(
+                entry.Key,
+                RapidUtils.ToRapidRequest(joinMessageForObserver),
+                cancellationToken).ConfigureAwait(true);
+        });
+
+        var responses = await Task.WhenAll(tasks).ConfigureAwait(true);
+        var successfulResponse = responses.FirstOrDefault(r => r?.JoinResponse?.StatusCode == JoinStatusCode.SafeToJoin)?.JoinResponse;
+
+        if (successfulResponse == null)
+        {
+            // Check if we got a ConfigChanged response - this means we should retry
+            var configChangedResponse = responses.FirstOrDefault(r => r?.JoinResponse?.StatusCode == JoinStatusCode.ConfigChanged);
+            if (configChangedResponse != null)
+            {
+                _logger.LogDebug("Node {Address} received ConfigChanged response, will retry", RapidUtils.Loggable(Address));
+                throw new InvalidOperationException("Configuration changed during join, retry needed");
+            }
+
+            _logger.LogWarning("Node {Address} failed to get successful response from any observer", RapidUtils.Loggable(Address));
+            throw new InvalidOperationException("Failed to get successful response from any observer");
+        }
+
+        _logger.LogDebug("Node {Address} received successful join response with {MemberCount} members",
+            RapidUtils.Loggable(Address), successfulResponse.Endpoints.Count);
+
+        return successfulResponse;
+    }
+
+    /// <summary>
+    /// Determines if a join error is retryable (transient network issues vs permanent errors).
+    /// </summary>
+    private static bool IsRetryableJoinError(Exception ex)
+    {
+        // Network partition errors, message drops, and config changes are retryable
+        return ex.Message.Contains("Network partition", StringComparison.OrdinalIgnoreCase) ||
+               ex.Message.Contains("cannot reach", StringComparison.OrdinalIgnoreCase) ||
+               ex.Message.Contains("Configuration changed", StringComparison.OrdinalIgnoreCase) ||
+               ex.Message.Contains("Failed to get successful response", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -280,8 +378,12 @@ internal sealed class SimulationNode : IDisposable
     {
         if (_membershipService == null)
         {
+            _logger.LogError("Node {Address} received request but is not initialized", RapidUtils.Loggable(Address));
             throw new InvalidOperationException("Node is not initialized");
         }
+
+        _logger.LogTrace("Node {Address} handling request of type {RequestType}", 
+            RapidUtils.Loggable(Address), request.ContentCase);
 
         return _membershipService.HandleMessageAsync(request, cancellationToken);
     }
@@ -298,14 +400,31 @@ internal sealed class SimulationNode : IDisposable
     {
         if (_membershipService != null)
         {
+            _logger.LogInformation("Node {Address} leaving cluster gracefully", RapidUtils.Loggable(Address));
             await _membershipService.LeaveAsync().ConfigureAwait(true);
+            _logger.LogInformation("Node {Address} completed graceful leave", RapidUtils.Loggable(Address));
+        }
+        else
+        {
+            _logger.LogWarning("Node {Address} LeaveAsync called but node is not initialized", RapidUtils.Loggable(Address));
         }
     }
 
     /// <summary>
     /// Shuts down the node.
     /// </summary>
-    public void Shutdown() => _membershipService?.Shutdown();
+    public void Shutdown()
+    {
+        if (_membershipService != null)
+        {
+            _logger.LogInformation("Node {Address} shutting down", RapidUtils.Loggable(Address));
+            _membershipService.Shutdown();
+        }
+        else
+        {
+            _logger.LogDebug("Node {Address} Shutdown called but node is not initialized", RapidUtils.Loggable(Address));
+        }
+    }
 
     /// <summary>
     /// Creates a deterministic GUID using the node's random instance.
@@ -322,10 +441,14 @@ internal sealed class SimulationNode : IDisposable
         if (_disposed) return;
         _disposed = true;
 
+        _logger.LogDebug("Node {Address} disposing", RapidUtils.Loggable(Address));
+
         _membershipService?.Shutdown();
         _membershipService?.Dispose();
         _sharedResources.Dispose();
         MessagingClient.Dispose();
         _environment.UnregisterNode(this);
+        
+        _logger.LogDebug("Node {Address} disposed", RapidUtils.Loggable(Address));
     }
 }

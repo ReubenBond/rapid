@@ -1,8 +1,10 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
 		<OutputType>Exe</OutputType>
 		<IsPackable>false</IsPackable>
+		<!-- Suppress logging performance warnings for test projects -->
+		<NoWarn>$(NoWarn);CA1848;CA1873</NoWarn>
 	</PropertyGroup>
 
 	<ItemGroup>

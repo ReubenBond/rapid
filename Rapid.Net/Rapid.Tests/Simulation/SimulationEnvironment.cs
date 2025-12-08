@@ -20,13 +20,15 @@ internal sealed class SimulationEnvironment : IDisposable
     /// <param name="seed">The seed for deterministic random number generation.</param>
     /// <param name="loggerFactory">Optional logger factory for logging simulation events.</param>
     /// <param name="useFakeTime">Whether to use fake time provider. Default is false for basic tests.</param>
-    public SimulationEnvironment(int seed, ILoggerFactory? loggerFactory = null, bool useFakeTime = false)
+    /// <param name="taskScheduler">Optional task scheduler for deterministic task execution.</param>
+    public SimulationEnvironment(int seed, ILoggerFactory? loggerFactory = null, bool useFakeTime = false, TaskScheduler? taskScheduler = null)
     {
         Seed = seed;
         Random = new DeterministicRandom(seed);
         LoggerFactory = loggerFactory;
         Network = new SimulationNetwork(this);
         UseFakeTime = useFakeTime;
+        TaskScheduler = taskScheduler;
 
         if (useFakeTime)
         {
@@ -60,6 +62,11 @@ internal sealed class SimulationEnvironment : IDisposable
     /// Gets whether this environment uses fake time.
     /// </summary>
     public bool UseFakeTime { get; }
+
+    /// <summary>
+    /// Gets the task scheduler used by simulation nodes, or null for default.
+    /// </summary>
+    public TaskScheduler? TaskScheduler { get; }
 
     /// <summary>
     /// Gets the logger factory used by simulation nodes.

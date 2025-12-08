@@ -209,6 +209,9 @@ public sealed class ChaosTests : IAsyncLifetime
         var addr1 = RapidUtils.Loggable(node1.Address);
         var addr2 = RapidUtils.Loggable(node2.Address);
 
+        // Disable random healing so only scheduled heals occur
+        _chaos.PartitionHealRate = 0;
+
         // Create partition immediately
         _harness.PartitionNodes(node1, node2);
         Assert.False(_harness.Network.CanDeliver(addr1, addr2));

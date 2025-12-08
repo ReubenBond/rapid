@@ -13,7 +13,8 @@ namespace Rapid.Tests.Simulation;
 /// <param name="seed">The seed for deterministic random number generation.</param>
 /// <param name="loggerFactory">Optional logger factory for logging simulation events.</param>
 /// <param name="useFakeTime">Whether to use fake time provider for deterministic time control. Default is false.</param>
-internal sealed class SimulationTestHarness(int seed, ILoggerFactory? loggerFactory = null, bool useFakeTime = false) : IAsyncDisposable
+/// <param name="taskScheduler">Optional task scheduler for deterministic task execution.</param>
+internal sealed class SimulationTestHarness(int seed, ILoggerFactory? loggerFactory = null, bool useFakeTime = false, TaskScheduler? taskScheduler = null) : IAsyncDisposable
 {
     private readonly List<SimulationNode> _nodes = [];
 
@@ -30,7 +31,7 @@ internal sealed class SimulationTestHarness(int seed, ILoggerFactory? loggerFact
     /// <summary>
     /// Gets the simulation environment.
     /// </summary>
-    public SimulationEnvironment Environment { get; } = new SimulationEnvironment(seed, loggerFactory, useFakeTime);
+    public SimulationEnvironment Environment { get; } = new SimulationEnvironment(seed, loggerFactory, useFakeTime, taskScheduler);
 
     /// <summary>
     /// Gets the deterministic random number generator.
@@ -115,11 +116,19 @@ internal sealed class SimulationTestHarness(int seed, ILoggerFactory? loggerFact
         var seedNode = CreateSeedNode(0, options);
         result.Add(seedNode);
 
-        // Create joiner nodes
+        // Create joiner nodes with a small delay between each to allow
+        // membership views to propagate through the cluster
         for (var i = 1; i < size; i++)
         {
             var joiner = await CreateJoinerNodeAsync(seedNode, i, options, cancellationToken).ConfigureAwait(true);
             result.Add(joiner);
+            
+            // Wait for the cluster to stabilize before adding next node
+            // This gives time for consensus messages to propagate
+            if (i < size - 1)
+            {
+                await Task.Delay(50, cancellationToken).ConfigureAwait(true);
+            }
         }
 
         return result;
@@ -211,11 +220,13 @@ internal sealed class SimulationTestHarness(int seed, ILoggerFactory? loggerFact
 
     /// <summary>
     /// Removes a node from the simulation (simulates crash).
+    /// The node is fully disposed, so messages to it will fail with "Target node not found".
     /// </summary>
     public void CrashNode(SimulationNode node)
     {
         ArgumentNullException.ThrowIfNull(node);
         node.Shutdown();
+        node.Dispose(); // Unregister from environment so messages fail
         _nodes.Remove(node);
     }
 
@@ -227,6 +238,7 @@ internal sealed class SimulationTestHarness(int seed, ILoggerFactory? loggerFact
         ArgumentNullException.ThrowIfNull(node);
         await node.LeaveAsync().ConfigureAwait(true);
         node.Shutdown();
+        node.Dispose(); // Unregister from environment so messages fail
         _nodes.Remove(node);
     }
 

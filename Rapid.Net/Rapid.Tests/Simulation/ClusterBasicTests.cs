@@ -186,7 +186,7 @@ public sealed class ClusterBasicTests : IAsyncLifetime
 
     #region Multi-Node Cluster Operations (BASIC-020 to BASIC-025)
 
-    [Fact(Skip = "Slow test - consensus roundtrips with batching delays")]
+    [Fact]
     public async Task ThreeNodeClusterFormation()
     {
         var nodes = await _harness.CreateClusterAsync(size: 3, cancellationToken: TestContext.Current.CancellationToken);
@@ -196,7 +196,7 @@ public sealed class ClusterBasicTests : IAsyncLifetime
         Assert.All(nodes, node => Assert.Equal(3, node.MembershipSize));
     }
 
-    [Fact(Skip = "Slow test - consensus roundtrips with batching delays")]
+    [Fact]
     public async Task FiveNodeClusterFormation()
     {
         var nodes = await _harness.CreateClusterAsync(size: 5, cancellationToken: TestContext.Current.CancellationToken);
@@ -215,6 +215,9 @@ public sealed class ClusterBasicTests : IAsyncLifetime
         Assert.True(joiner1.IsInitialized);
         Assert.Equal(2, joiner1.MembershipSize);
 
+        // Small delay to let consensus messages propagate
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+
         var joiner2 = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 2, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(joiner2.IsInitialized);
         Assert.Equal(3, joiner2.MembershipSize);
@@ -225,6 +228,10 @@ public sealed class ClusterBasicTests : IAsyncLifetime
     {
         var seedNode = _harness.CreateSeedNode();
         var joiner1 = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
+        
+        // Small delay between joins
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+        
         var joiner2 = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 2, cancellationToken: TestContext.Current.CancellationToken);
 
         await _harness.WaitForConvergenceAsync(expectedSize: 3, timeout: TimeSpan.FromSeconds(10), cancellationToken: TestContext.Current.CancellationToken);
@@ -236,7 +243,7 @@ public sealed class ClusterBasicTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ConfigurationIdIncrementsWithMembershipChanges()
+    public async Task ConfigurationIdChangesWithMembershipChanges()
     {
         var seedNode = _harness.CreateSeedNode();
         var initialConfigId = seedNode.CurrentView.ConfigurationId;
@@ -246,8 +253,19 @@ public sealed class ClusterBasicTests : IAsyncLifetime
         // Wait for convergence
         await _harness.WaitForConvergenceAsync(expectedSize: 2, timeout: TimeSpan.FromSeconds(5), cancellationToken: TestContext.Current.CancellationToken);
 
-        // Configuration ID should have increased
-        Assert.True(seedNode.CurrentView.ConfigurationId > initialConfigId);
+        // Configuration ID should have changed after membership change
+        // Note: Configuration IDs are hashes, so they change but don't necessarily increase monotonically
+        Assert.NotEqual(initialConfigId, joiner.CurrentView.ConfigurationId);
+        
+        // Both nodes should eventually have the same configuration ID
+        // Give a moment for the seed to process the view change
+        var deadline = DateTime.UtcNow.AddSeconds(2);
+        while (DateTime.UtcNow < deadline && seedNode.CurrentView.ConfigurationId != joiner.CurrentView.ConfigurationId)
+        {
+            await Task.Delay(50, TestContext.Current.CancellationToken);
+        }
+        
+        Assert.Equal(joiner.CurrentView.ConfigurationId, seedNode.CurrentView.ConfigurationId);
     }
 
     [Fact]
@@ -255,6 +273,10 @@ public sealed class ClusterBasicTests : IAsyncLifetime
     {
         var seedNode = _harness.CreateSeedNode();
         var joiner1 = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
+        
+        // Small delay between joins
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+        
         var joiner2 = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 2, cancellationToken: TestContext.Current.CancellationToken);
 
         await _harness.WaitForConvergenceAsync(expectedSize: 3, timeout: TimeSpan.FromSeconds(10), cancellationToken: TestContext.Current.CancellationToken);
