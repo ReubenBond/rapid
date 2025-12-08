@@ -3,15 +3,15 @@ using Rapid.Tests.Simulation;
 namespace Rapid.Tests;
 
 /// <summary>
-/// Tests for the deterministic simulation harness.
+/// Tests for the simulation harness.
 /// </summary>
-public sealed class DeterministicSimulationHarnessTests : IAsyncLifetime
+public sealed class SimulationHarnessTests : IAsyncLifetime
 {
-    private DeterministicSimulationHarness _harness = null!;
+    private SimulationHarness _harness = null!;
 
     public ValueTask InitializeAsync()
     {
-        _harness = new DeterministicSimulationHarness(seed: 54321);
+        _harness = new SimulationHarness(seed: 54321);
         return ValueTask.CompletedTask;
     }
 
@@ -90,8 +90,8 @@ public sealed class DeterministicSimulationHarnessTests : IAsyncLifetime
     public async Task RandomIsDeterministic()
     {
         // Create two harnesses with same seed
-        await using var harness1 = new DeterministicSimulationHarness(seed: 99999);
-        await using var harness2 = new DeterministicSimulationHarness(seed: 99999);
+        await using var harness1 = new SimulationHarness(seed: 99999);
+        await using var harness2 = new SimulationHarness(seed: 99999);
 
         var values1 = Enumerable.Range(0, 10).Select(_ => harness1.Random.Next()).ToList();
         var values2 = Enumerable.Range(0, 10).Select(_ => harness2.Random.Next()).ToList();
@@ -118,7 +118,7 @@ public sealed class DeterministicSimulationHarnessTests : IAsyncLifetime
     [Fact]
     public void RunUntilReturnsFalseWhenMaxStepsReached()
     {
-        var result = _harness.RunUntil(() => false, maxSteps: 10);
+        var result = _harness.RunUntil(() => false, maxIterations: 10);
 
         Assert.False(result);
     }
@@ -159,4 +159,93 @@ public sealed class DeterministicSimulationHarnessTests : IAsyncLifetime
         var events = _harness.EventLog;
         Assert.Contains(events, e => e.Type == SimulationEventType.NodeCrashed);
     }
+
+    #region RunUntilIdle Tests
+
+    [Fact]
+    public void RunUntilIdleReturnsTrueWhenNoTasks()
+    {
+        var result = _harness.RunUntilIdle();
+        Assert.True(result);
+    }
+
+    [Fact]
+    public void RunUntilIdleExecutesAllPendingTasks()
+    {
+        var executionCount = 0;
+        var scheduler = _harness.Scheduler;
+
+        for (var i = 0; i < 5; i++)
+        {
+            var task = new Task(() => Interlocked.Increment(ref executionCount));
+            task.Start(scheduler);
+        }
+
+        var result = _harness.RunUntilIdle();
+
+        Assert.True(result);
+        Assert.Equal(5, executionCount);
+    }
+
+    [Fact]
+    public void RunUntilIdleAdvancesTimeForDelayedTasks()
+    {
+        var executed = false;
+        var scheduler = _harness.Scheduler;
+        var initialTime = _harness.TimeProvider.GetUtcNow();
+
+        // Schedule a task for 1 minute in the future
+        scheduler.TaskQueue.EnqueueAfter(() => executed = true, TimeSpan.FromMinutes(1).Ticks);
+
+        var result = _harness.RunUntilIdle();
+
+        Assert.True(result);
+        Assert.True(executed);
+        Assert.True(_harness.TimeProvider.GetUtcNow() >= initialTime + TimeSpan.FromMinutes(1));
+    }
+
+    [Fact]
+    public void RunUntilIdleRespectsMaxSimulatedTime()
+    {
+        var scheduler = _harness.Scheduler;
+        var initialTime = _harness.TimeProvider.GetUtcNow();
+
+        // Schedule a task for 10 minutes in the future
+        scheduler.TaskQueue.EnqueueAfter(() => { }, TimeSpan.FromMinutes(10).Ticks);
+
+        // Limit to 5 minutes
+        var result = _harness.RunUntilIdle(maxSimulatedTime: TimeSpan.FromMinutes(5));
+
+        Assert.False(result);
+        // Time should not have advanced beyond 5 minutes
+        Assert.True(_harness.TimeProvider.GetUtcNow() < initialTime + TimeSpan.FromMinutes(10));
+    }
+
+    [Fact]
+    public void SchedulerIsIdlePropertyWorks()
+    {
+        Assert.True(_harness.Scheduler.IsIdle);
+
+        var task = new Task(() => { });
+        task.Start(_harness.Scheduler);
+
+        Assert.False(_harness.Scheduler.IsIdle);
+
+        _harness.StepAll();
+
+        Assert.True(_harness.Scheduler.IsIdle);
+    }
+
+    [Fact]
+    public void DriveToCompletionWorks()
+    {
+        var seedNode = _harness.CreateSeedNode();
+        
+        // DriveToCompletion should complete synchronously for already-started tasks
+        var result = _harness.DriveToCompletion(() => Task.FromResult(42));
+        
+        Assert.Equal(42, result);
+    }
+
+    #endregion
 }

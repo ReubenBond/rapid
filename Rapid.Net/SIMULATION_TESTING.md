@@ -97,12 +97,12 @@ network.MaxJitter = TimeSpan.FromMilliseconds(10);
 network.MessageDropRate = 0.1; // 10% drop rate
 ```
 
-### DeterministicRandom
+### SimulationRandom
 
 Seeded random number generator for reproducible tests.
 
 ```csharp
-var random = new DeterministicRandom(seed: 42);
+var random = new SimulationRandom(seed: 42);
 
 // Standard random operations
 int n = random.Next();
@@ -262,7 +262,7 @@ var harness = new SimulationTestHarness(seed: <failed_seed>);
                             ▼
 ┌─────────────────────────────────────────────────────────┐
 │                 SimulationEnvironment                   │
-│  - DeterministicRandom                                  │
+│  - SimulationRandom                                     │
 │  - TimeProvider (real or fake)                          │
 │  - Node registry                                        │
 └─────────────────────────────────────────────────────────┘
@@ -292,7 +292,7 @@ var harness = new SimulationTestHarness(seed: <failed_seed>);
 Provides step-by-step execution with breakpoints:
 
 ```csharp
-await using var harness = new DeterministicSimulationHarness(seed: 12345, testOutput: output);
+await using var harness = new SimulationHarness(seed: 12345, testOutput: output);
 var debugger = new SimulationDebugger(harness, output);
 
 // Set breakpoints
@@ -430,13 +430,13 @@ var sharedResources = new SharedResources(
 - `Rapid.Tests/Simulation/SimulationNetwork.cs` - Network simulation
 - `Rapid.Tests/Simulation/InMemoryMessagingClient.cs` - In-memory transport
 - `Rapid.Tests/Simulation/SimulationFailureDetector.cs` - Failure detector
-- `Rapid.Tests/Simulation/DeterministicRandom.cs` - Seeded random
-- `Rapid.Tests/Simulation/DeterministicTaskScheduler.cs` - Task scheduler for deterministic execution
-- `Rapid.Tests/Simulation/DeterministicSynchronizationContext.cs` - Routes async continuations to scheduler
-- `Rapid.Tests/Simulation/DeterministicSimulationHarness.cs` - Extended harness for fully deterministic tests
+- `Rapid.Tests/Simulation/SimulationRandom.cs` - Seeded random
+- `Rapid.Tests/Simulation/SimulationTaskScheduler.cs` - Task scheduler for deterministic execution
+- `Rapid.Tests/Simulation/SimulationSynchronizationContext.cs` - Routes async continuations to scheduler
+- `Rapid.Tests/Simulation/SimulationHarness.cs` - Extended harness for fully deterministic tests
 - `Rapid.Tests/Simulation/InvariantChecker.cs` - Cluster invariant verification
 - `Rapid.Tests/Simulation/ChaosInjector.cs` - Random fault injection
-- `Rapid.Tests/Simulation/DeterministicMessageQueue.cs` - Priority queue for deterministic message ordering
+- `Rapid.Tests/Simulation/SimulationMessageQueue.cs` - Priority queue for deterministic message ordering
 - `Rapid.Tests/Simulation/SimulationRecorder.cs` - Event recording for replay and debugging
 - `Rapid.Tests/Simulation/SimulationReplayer.cs` - Event replay with stepping and breakpoints
 - `Rapid.Tests/Simulation/SequenceDiagramGenerator.cs` - Message sequence diagram generation
@@ -447,16 +447,16 @@ var sharedResources = new SharedResources(
 
 The following tasks are required to implement a fully deterministic simulation test suite (similar to FoundationDB's approach):
 
-### Phase 1: Deterministic Task Scheduler
+### Phase 1: Simulation Task Scheduler
 
-- [x] **Create `DeterministicTaskScheduler`** - A custom `TaskScheduler` implementation that queues tasks and only executes them when explicitly stepped
+- [x] **Create `SimulationTaskScheduler`** - A custom `TaskScheduler` implementation that queues tasks and only executes them when explicitly stepped
   - [x] Maintain a priority queue of pending tasks
   - [x] Support `QueueTask`, `TryDequeue`, and `Step(int count)` methods
   - [x] Integrate with `FakeTimeProvider` for time-based task ordering
   - [x] Handle `TaskCreationOptions.LongRunning` appropriately
 
-- [x] **Create `DeterministicSynchronizationContext`** - Companion to the scheduler for capturing async continuations
-  - [x] Ensure `await` continuations are routed through the deterministic scheduler
+- [x] **Create `SimulationSynchronizationContext`** - Companion to the scheduler for capturing async continuations
+  - [x] Ensure `await` continuations are routed through the simulation scheduler
 
 ### Phase 2: Remaining Non-Determinism Sources
 
@@ -481,16 +481,16 @@ The following tasks are required to implement a fully deterministic simulation t
 ### Phase 3: Network Simulation Enhancements
 
 - [x] **Deterministic message delivery ordering** - Messages should be delivered in a deterministic order based on simulated time
-  - [x] Priority queue for pending messages sorted by delivery time (via `DeterministicMessageQueue`)
+  - [x] Priority queue for pending messages sorted by delivery time (via `SimulationMessageQueue`)
   - [x] Tie-breaking by sender/receiver addresses and sequence numbers
 
 - [x] **Deterministic network delay calculation** - Use seeded random for jitter
-  - [x] `SimulationNetwork` already uses `DeterministicRandom` for jitter calculation
+  - [x] `SimulationNetwork` already uses `SimulationRandom` for jitter calculation
 
 ### Phase 4: Test Infrastructure
 
-- [x] **Create `DeterministicSimulationHarness`** - Extended harness for fully deterministic tests
-  - [x] Wraps `SharedResources` with deterministic scheduler
+- [x] **Create `SimulationHarness`** - Extended harness for fully deterministic tests
+  - [x] Wraps `SharedResources` with simulation scheduler
   - [x] Provides `Step()` method to advance simulation by one logical step
   - [x] Provides `RunUntil(Func<bool> condition)` for running until a condition is met
 
@@ -500,7 +500,7 @@ The following tasks are required to implement a fully deterministic simulation t
   - [x] Support replaying a recorded execution (via `SimulationRecorder` and `SimulationReplayer`)
 
 - [x] **Seed logging in test failures** - Automatically log the seed when a test fails
-  - [x] xUnit `ITestOutputHelper` integration via `DeterministicSimulationHarness`
+  - [x] xUnit `ITestOutputHelper` integration via `SimulationHarness`
   - [x] Clear instructions for reproducing failures via `LogSeedForReproduction()` and `DumpEventLog()`
 
 ### Phase 5: Chaos Testing
@@ -521,7 +521,7 @@ The following tasks are required to implement a fully deterministic simulation t
   - [x] Automatically advance `FakeTimeProvider` to next scheduled event (via `FastForwardToNextEvent`)
 
 - [x] **Parallel test execution** - Ensure deterministic tests can run in parallel
-  - [x] Each test gets isolated `SharedResources` instance (via `DeterministicSimulationHarness`)
+  - [x] Each test gets isolated `SharedResources` instance (via `SimulationHarness`)
 
 - [x] **Debugging helpers** - Tools for debugging simulation failures
   - [x] Visualize cluster state at any point (via `SimulationDebugger.PrintState()`)

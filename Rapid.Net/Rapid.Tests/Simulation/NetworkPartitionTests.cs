@@ -194,10 +194,10 @@ public sealed class NetworkPartitionTests : IAsyncLifetime
     [Fact]
     public async Task InvariantCheckerDetectsSplitBrainAttempt()
     {
-        await using var deterministicHarness = new DeterministicSimulationHarness(seed: TestSeed);
-        var checker = new InvariantChecker(deterministicHarness);
+        await using var simulationHarness = new SimulationHarness(seed: TestSeed);
+        var checker = new InvariantChecker(simulationHarness);
 
-        var seedNode = deterministicHarness.CreateSeedNode();
+        var seedNode = simulationHarness.CreateSeedNode();
 
         // Check that single node doesn't trigger split-brain detection
         var result = checker.CheckNoSplitBrain();

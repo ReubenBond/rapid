@@ -1,17 +1,16 @@
 using Rapid.Tests.Simulation;
-using Microsoft.Extensions.Time.Testing;
 
 namespace Rapid.Tests;
 
 /// <summary>
-/// Tests for the deterministic task scheduler and synchronization context.
+/// Tests for the simulation task scheduler and synchronization context.
 /// </summary>
-public sealed class DeterministicSchedulerTests
+public sealed class SimulationSchedulerTests
 {
     [Fact]
     public void QueuedTasksAreNotExecutedAutomatically()
     {
-        var scheduler = new DeterministicTaskScheduler();
+        var scheduler = new SimulationTaskScheduler();
         var executed = false;
 
         var task = new Task(() => executed = true);
@@ -24,7 +23,7 @@ public sealed class DeterministicSchedulerTests
     [Fact]
     public void StepExecutesSingleTask()
     {
-        var scheduler = new DeterministicTaskScheduler();
+        var scheduler = new SimulationTaskScheduler();
         var executed = false;
 
         var task = new Task(() => executed = true);
@@ -40,7 +39,7 @@ public sealed class DeterministicSchedulerTests
     [Fact]
     public void StepAllExecutesAllTasks()
     {
-        var scheduler = new DeterministicTaskScheduler();
+        var scheduler = new SimulationTaskScheduler();
         var count = 0;
 
         for (var i = 0; i < 5; i++)
@@ -59,7 +58,7 @@ public sealed class DeterministicSchedulerTests
     [Fact]
     public void StepWithCountLimitsExecution()
     {
-        var scheduler = new DeterministicTaskScheduler();
+        var scheduler = new SimulationTaskScheduler();
         var count = 0;
 
         for (var i = 0; i < 10; i++)
@@ -76,28 +75,9 @@ public sealed class DeterministicSchedulerTests
     }
 
     [Fact]
-    public void StepUntilStopsOnCondition()
-    {
-        var scheduler = new DeterministicTaskScheduler();
-        var count = 0;
-
-        for (var i = 0; i < 10; i++)
-        {
-            var task = new Task(() => Interlocked.Increment(ref count));
-            task.Start(scheduler);
-        }
-
-        var executed = scheduler.StepUntil(() => count >= 5);
-
-        Assert.Equal(5, executed);
-        Assert.Equal(5, count);
-        Assert.Equal(5, scheduler.PendingCount);
-    }
-
-    [Fact]
     public void ClearRemovesAllPendingTasks()
     {
-        var scheduler = new DeterministicTaskScheduler();
+        var scheduler = new SimulationTaskScheduler();
 
         for (var i = 0; i < 5; i++)
         {
@@ -114,7 +94,7 @@ public sealed class DeterministicSchedulerTests
     [Fact]
     public void TasksExecuteInFifoOrder()
     {
-        var scheduler = new DeterministicTaskScheduler();
+        var scheduler = new SimulationTaskScheduler();
         var order = new List<int>();
 
         for (var i = 0; i < 5; i++)
@@ -132,8 +112,8 @@ public sealed class DeterministicSchedulerTests
     [Fact]
     public void SynchronizationContextPostRoutesToScheduler()
     {
-        var scheduler = new DeterministicTaskScheduler();
-        var syncContext = new DeterministicSynchronizationContext(scheduler);
+        var scheduler = new SimulationTaskScheduler();
+        var syncContext = new SimulationSynchronizationContext(scheduler);
         var executed = false;
 
         syncContext.Post(_ => executed = true, null);
@@ -146,8 +126,8 @@ public sealed class DeterministicSchedulerTests
     [Fact]
     public void SynchronizationContextSendExecutesSynchronously()
     {
-        var scheduler = new DeterministicTaskScheduler();
-        var syncContext = new DeterministicSynchronizationContext(scheduler);
+        var scheduler = new SimulationTaskScheduler();
+        var syncContext = new SimulationSynchronizationContext(scheduler);
         var executed = false;
 
         syncContext.Send(_ => executed = true, null);
@@ -158,20 +138,20 @@ public sealed class DeterministicSchedulerTests
     [Fact]
     public void SynchronizationContextCreateCopyReturnsNewInstance()
     {
-        var scheduler = new DeterministicTaskScheduler();
-        var syncContext = new DeterministicSynchronizationContext(scheduler);
+        var scheduler = new SimulationTaskScheduler();
+        var syncContext = new SimulationSynchronizationContext(scheduler);
 
         var copy = syncContext.CreateCopy();
 
         Assert.NotSame(syncContext, copy);
-        Assert.IsType<DeterministicSynchronizationContext>(copy);
+        Assert.IsType<SimulationSynchronizationContext>(copy);
     }
 
     [Fact]
-    public void SchedulerWithTimeProviderOrdersByTime()
+    public void SchedulerWithTaskQueueOrdersByTime()
     {
-        var timeProvider = new FakeTimeProvider(DateTimeOffset.UtcNow);
-        var scheduler = new DeterministicTaskScheduler(timeProvider);
+        var taskQueue = new SimulationTaskQueue();
+        var scheduler = new SimulationTaskScheduler(taskQueue);
         var order = new List<string>();
 
         // Queue first task
@@ -179,7 +159,7 @@ public sealed class DeterministicSchedulerTests
         task1.Start(scheduler);
 
         // Advance time and queue second task
-        timeProvider.Advance(TimeSpan.FromSeconds(1));
+        taskQueue.AdvanceTime(TimeSpan.FromSeconds(1).Ticks);
         var task2 = new Task(() => order.Add("second"));
         task2.Start(scheduler);
 
@@ -192,7 +172,7 @@ public sealed class DeterministicSchedulerTests
     [Fact]
     public void TryExecuteOneReturnsFalseWhenEmpty()
     {
-        var scheduler = new DeterministicTaskScheduler();
+        var scheduler = new SimulationTaskScheduler();
 
         var result = scheduler.TryExecuteOne();
 
@@ -202,7 +182,7 @@ public sealed class DeterministicSchedulerTests
     [Fact]
     public void HasPendingTasksReflectsQueueState()
     {
-        var scheduler = new DeterministicTaskScheduler();
+        var scheduler = new SimulationTaskScheduler();
 
         Assert.False(scheduler.HasPendingTasks);
 

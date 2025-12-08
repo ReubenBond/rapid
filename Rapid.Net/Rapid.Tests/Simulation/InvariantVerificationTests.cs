@@ -13,7 +13,7 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
 {
     private readonly ITestOutputHelper _output;
     private readonly ILoggerFactory _loggerFactory;
-    private DeterministicSimulationHarness _harness = null!;
+    private SimulationHarness _harness = null!;
     private InvariantChecker _checker = null!;
     private const int TestSeed = 56789;
 
@@ -26,7 +26,7 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
     public ValueTask InitializeAsync()
     {
         _output.WriteLine($"[InvariantVerificationTests] Initializing with seed {TestSeed}");
-        _harness = new DeterministicSimulationHarness(seed: TestSeed, loggerFactory: _loggerFactory, testOutput: _output);
+        _harness = new SimulationHarness(seed: TestSeed, loggerFactory: _loggerFactory, testOutput: _output);
         _checker = new InvariantChecker(_harness);
         return ValueTask.CompletedTask;
     }
@@ -285,7 +285,7 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
         _harness.CrashNode(joiner);
 
         // Failure should eventually be detected - run until seed node sees size of 1
-        var detected = _harness.RunUntil(() => seedNode.MembershipSize == 1, maxSteps: 50000);
+        var detected = _harness.RunUntil(() => seedNode.MembershipSize == 1, maxIterations: 50000);
 
         Assert.True(detected, "Seed node did not detect joiner failure");
         Assert.Equal(1, seedNode.MembershipSize);
@@ -312,7 +312,7 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
         _harness.HealPartition(seedNode, joiner);
 
         // Nodes should eventually re-converge
-        var converged = _harness.RunUntilConverged(expectedSize: 2, maxSteps: 50000);
+        var converged = _harness.RunUntilConverged(expectedSize: 2, maxIterations: 50000);
 
         Assert.True(converged, "Nodes did not reconverge after partition heal");
         Assert.Equal(2, seedNode.MembershipSize);

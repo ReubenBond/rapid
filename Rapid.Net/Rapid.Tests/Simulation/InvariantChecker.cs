@@ -7,9 +7,9 @@ namespace Rapid.Tests.Simulation;
 /// <remarks>
 /// Creates a new invariant checker for the specified harness.
 /// </remarks>
-internal sealed class InvariantChecker(DeterministicSimulationHarness harness)
+internal sealed class InvariantChecker(SimulationHarness harness)
 {
-    private readonly DeterministicSimulationHarness _harness = harness ?? throw new ArgumentNullException(nameof(harness));
+    private readonly SimulationHarness _harness = harness ?? throw new ArgumentNullException(nameof(harness));
     private readonly List<InvariantViolation> _violations = [];
     private readonly Lock _lock = new();
 

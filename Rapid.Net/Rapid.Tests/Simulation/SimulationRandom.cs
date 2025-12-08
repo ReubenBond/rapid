@@ -9,13 +9,13 @@ namespace Rapid.Tests.Simulation;
 /// It is NOT intended for security-sensitive operations.
 /// </remarks>
 /// <remarks>
-/// Creates a new deterministic random with the specified seed.
+/// Creates a new simulation random with the specified seed.
 /// </remarks>
 /// <param name="seed">The seed for reproducible random sequences.</param>
 #pragma warning disable CA5394 // Do not use insecure randomness - intentionally deterministic for simulation testing
-internal sealed class DeterministicRandom(int seed)
+internal sealed class SimulationRandom(int seed)
 {
-    private readonly Random _random = new Random(seed);
+    private readonly Random _random = new(seed);
 
     /// <summary>
     /// Gets the seed used to initialize this random instance.
@@ -113,9 +113,9 @@ internal sealed class DeterministicRandom(int seed)
     }
 
     /// <summary>
-    /// Creates a new DeterministicRandom derived from this one.
+    /// Creates a new SimulationRandom derived from this one.
     /// Useful for creating independent random streams.
     /// </summary>
-    public DeterministicRandom Fork() => new(_random.Next());
+    public SimulationRandom Fork() => new(_random.Next());
 }
 #pragma warning restore CA5394

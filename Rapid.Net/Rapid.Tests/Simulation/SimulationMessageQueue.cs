@@ -3,11 +3,11 @@ using System.Diagnostics.CodeAnalysis;
 namespace Rapid.Tests.Simulation;
 
 /// <summary>
-/// A deterministic message queue that delivers messages in a consistent order
+/// A simulation message queue that delivers messages in a consistent order
 /// based on simulated delivery time and tie-breaking criteria.
 /// </summary>
 [SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "Infrastructure class for deterministic simulation")]
-internal sealed class DeterministicMessageQueue
+internal sealed class SimulationMessageQueue
 {
     private readonly PriorityQueue<PendingMessage, MessagePriority> _queue = new();
     private readonly Lock _lock = new();

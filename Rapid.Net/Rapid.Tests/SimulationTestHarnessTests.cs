@@ -19,10 +19,10 @@ public sealed class SimulationTestHarnessTests : IAsyncLifetime
     public async ValueTask DisposeAsync() => await _harness.DisposeAsync();
 
     [Fact]
-    public void DeterministicRandomWithSameSeedProducesSameSequence()
+    public void SimulationRandomWithSameSeedProducesSameSequence()
     {
-        var random1 = new DeterministicRandom(42);
-        var random2 = new DeterministicRandom(42);
+        var random1 = new SimulationRandom(42);
+        var random2 = new SimulationRandom(42);
 
         for (var i = 0; i < 100; i++)
         {
@@ -31,10 +31,10 @@ public sealed class SimulationTestHarnessTests : IAsyncLifetime
     }
 
     [Fact]
-    public void DeterministicRandomShuffleIsReproducible()
+    public void SimulationRandomShuffleIsReproducible()
     {
-        var random1 = new DeterministicRandom(42);
-        var random2 = new DeterministicRandom(42);
+        var random1 = new SimulationRandom(42);
+        var random2 = new SimulationRandom(42);
 
         var list1 = new List<int> { 1, 2, 3, 4, 5 };
         var list2 = new List<int> { 1, 2, 3, 4, 5 };

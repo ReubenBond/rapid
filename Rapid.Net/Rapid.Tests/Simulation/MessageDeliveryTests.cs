@@ -223,9 +223,9 @@ public sealed class MessageDeliveryTests : IAsyncLifetime
     #region Message Ordering (MSG-020 to MSG-022)
 
     [Fact]
-    public void DeterministicMessageQueueOrdersByDeliveryTime()
+    public void SimulationMessageQueueOrdersByDeliveryTime()
     {
-        var queue = new DeterministicMessageQueue();
+        var queue = new SimulationMessageQueue();
         var now = DateTimeOffset.UtcNow;
 
         // Add messages with different delivery times
@@ -244,10 +244,10 @@ public sealed class MessageDeliveryTests : IAsyncLifetime
     }
 
     [Fact]
-    public void DeterministicMessageQueueTieBreaksConsistently()
+    public void SimulationMessageQueueTieBreaksConsistently()
     {
-        var queue1 = new DeterministicMessageQueue();
-        var queue2 = new DeterministicMessageQueue();
+        var queue1 = new SimulationMessageQueue();
+        var queue2 = new SimulationMessageQueue();
 
         var deliveryTime = DateTimeOffset.UtcNow;
 
@@ -269,9 +269,9 @@ public sealed class MessageDeliveryTests : IAsyncLifetime
     }
 
     [Fact]
-    public void DeterministicMessageQueueReportsCorrectCount()
+    public void SimulationMessageQueueReportsCorrectCount()
     {
-        var queue = new DeterministicMessageQueue();
+        var queue = new SimulationMessageQueue();
         var now = DateTimeOffset.UtcNow;
 
         Assert.Equal(0, queue.Count);

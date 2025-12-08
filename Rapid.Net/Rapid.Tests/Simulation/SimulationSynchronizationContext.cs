@@ -1,19 +1,19 @@
 namespace Rapid.Tests.Simulation;
 
 /// <summary>
-/// A synchronization context that routes all continuations through a <see cref="DeterministicTaskScheduler"/>.
+/// A synchronization context that routes all continuations through a <see cref="SimulationTaskScheduler"/>.
 /// This ensures that async/await continuations are captured and executed deterministically.
 /// </summary>
 /// <remarks>
-/// Creates a new deterministic synchronization context.
+/// Creates a new simulation synchronization context.
 /// </remarks>
 /// <param name="scheduler">The task scheduler to route continuations through.</param>
-internal sealed class DeterministicSynchronizationContext(DeterministicTaskScheduler scheduler) : SynchronizationContext
+internal sealed class SimulationSynchronizationContext(SimulationTaskScheduler scheduler) : SynchronizationContext
 {
     /// <summary>
     /// Gets the underlying task scheduler.
     /// </summary>
-    public DeterministicTaskScheduler Scheduler { get; } = scheduler ?? throw new ArgumentNullException(nameof(scheduler));
+    public SimulationTaskScheduler Scheduler { get; } = scheduler ?? throw new ArgumentNullException(nameof(scheduler));
 
     /// <inheritdoc />
     public override void Post(SendOrPostCallback d, object? state)
@@ -36,7 +36,7 @@ internal sealed class DeterministicSynchronizationContext(DeterministicTaskSched
     }
 
     /// <inheritdoc />
-    public override SynchronizationContext CreateCopy() => new DeterministicSynchronizationContext(Scheduler);
+    public override SynchronizationContext CreateCopy() => new SimulationSynchronizationContext(Scheduler);
 
     /// <summary>
     /// Installs this synchronization context on the current thread.

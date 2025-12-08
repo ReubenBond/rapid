@@ -12,7 +12,7 @@ namespace Rapid.Tests.Simulation;
 /// </summary>
 internal sealed class SimulationNode : IDisposable
 {
-    private readonly SimulationEnvironment _environment;
+    private readonly SimulationHarness _harness;
     private readonly SharedResources _sharedResources;
     private readonly SimulationFailureDetectorFactory _failureDetectorFactory;
     private readonly IFastPaxosFactory _fastPaxosFactory;
@@ -29,9 +29,9 @@ internal sealed class SimulationNode : IDisposable
     public Endpoint Address { get; }
 
     /// <summary>
-    /// Gets the deterministic random instance for this node.
+    /// Gets the simulation random instance for this node.
     /// </summary>
-    public DeterministicRandom Random { get; }
+    public SimulationRandom Random { get; }
 
     /// <summary>
     /// Gets the current membership view of this node.

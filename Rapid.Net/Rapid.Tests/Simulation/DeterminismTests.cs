@@ -13,7 +13,7 @@ public sealed class DeterminismTests : IAsyncLifetime
 {
     private readonly ITestOutputHelper _output;
     private readonly ILoggerFactory _loggerFactory;
-    private DeterministicSimulationHarness _harness = null!;
+    private SimulationHarness _harness = null!;
     private const int TestSeed = 89012;
 
     public DeterminismTests(ITestOutputHelper output)
@@ -25,7 +25,7 @@ public sealed class DeterminismTests : IAsyncLifetime
     public ValueTask InitializeAsync()
     {
         _output.WriteLine($"[DeterminismTests] Initializing with seed {TestSeed}");
-        _harness = new DeterministicSimulationHarness(seed: TestSeed, loggerFactory: _loggerFactory, testOutput: _output);
+        _harness = new SimulationHarness(seed: TestSeed, loggerFactory: _loggerFactory, testOutput: _output);
         return ValueTask.CompletedTask;
     }
 
@@ -41,8 +41,8 @@ public sealed class DeterminismTests : IAsyncLifetime
     [Fact]
     public async Task SameSeedProducesSameRandomSequence()
     {
-        await using var harness1 = new DeterministicSimulationHarness(seed: 11111);
-        await using var harness2 = new DeterministicSimulationHarness(seed: 11111);
+        await using var harness1 = new SimulationHarness(seed: 11111);
+        await using var harness2 = new SimulationHarness(seed: 11111);
 
         var seq1 = Enumerable.Range(0, 100).Select(_ => harness1.Random.Next()).ToList();
         var seq2 = Enumerable.Range(0, 100).Select(_ => harness2.Random.Next()).ToList();
@@ -53,8 +53,8 @@ public sealed class DeterminismTests : IAsyncLifetime
     [Fact]
     public async Task DifferentSeedsProduceDifferentSequences()
     {
-        await using var harness1 = new DeterministicSimulationHarness(seed: 11111);
-        await using var harness2 = new DeterministicSimulationHarness(seed: 22222);
+        await using var harness1 = new SimulationHarness(seed: 11111);
+        await using var harness2 = new SimulationHarness(seed: 22222);
 
         var seq1 = Enumerable.Range(0, 100).Select(_ => harness1.Random.Next()).ToList();
         var seq2 = Enumerable.Range(0, 100).Select(_ => harness2.Random.Next()).ToList();
@@ -265,7 +265,7 @@ public sealed class DeterminismTests : IAsyncLifetime
     [Fact]
     public void RunUntilReturnsFalseWhenMaxStepsReached()
     {
-        var result = _harness.RunUntil(() => false, maxSteps: 10);
+        var result = _harness.RunUntil(() => false, maxIterations: 10);
 
         Assert.False(result);
     }
@@ -276,7 +276,7 @@ public sealed class DeterminismTests : IAsyncLifetime
         _harness.CreateSeedNode();
 
         // Should return true immediately since single node is already converged
-        var result = _harness.RunUntilConverged(expectedSize: 1, maxSteps: 10);
+        var result = _harness.RunUntilConverged(expectedSize: 1, maxIterations: 10);
 
         Assert.True(result);
     }
@@ -307,7 +307,7 @@ public sealed class DeterminismTests : IAsyncLifetime
     public async Task RandomSeedHarnessLogsSeed()
     {
         // CreateWithRandomSeed should work without throwing
-        await using var randomHarness = DeterministicSimulationHarness.CreateWithRandomSeed();
+        await using var randomHarness = SimulationHarness.CreateWithRandomSeed();
 
         // Seed should be accessible
         Assert.NotEqual(0, randomHarness.Seed);

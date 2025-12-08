@@ -13,7 +13,7 @@ public sealed class ChaosTests : IAsyncLifetime
 {
     private readonly ITestOutputHelper _output;
     private readonly ILoggerFactory _loggerFactory;
-    private DeterministicSimulationHarness _harness = null!;
+    private SimulationHarness _harness = null!;
     private ChaosInjector _chaos = null!;
     private InvariantChecker _checker = null!;
     private const int TestSeed = 78901;
@@ -27,7 +27,7 @@ public sealed class ChaosTests : IAsyncLifetime
     public ValueTask InitializeAsync()
     {
         _output.WriteLine($"[ChaosTests] Initializing with seed {TestSeed}");
-        _harness = new DeterministicSimulationHarness(seed: TestSeed, loggerFactory: _loggerFactory, testOutput: _output);
+        _harness = new SimulationHarness(seed: TestSeed, loggerFactory: _loggerFactory, testOutput: _output);
         _chaos = new ChaosInjector(_harness);
         _checker = new InvariantChecker(_harness);
         return ValueTask.CompletedTask;

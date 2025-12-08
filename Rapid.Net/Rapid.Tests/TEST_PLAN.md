@@ -5,7 +5,7 @@ This document outlines the comprehensive test suite for the Rapid.NET determinis
 ## Overview
 
 The simulation testing harness provides:
-- **DeterministicSimulationHarness**: Full control over time, task scheduling, and random number generation
+- **SimulationHarness**: Full control over time, task scheduling, and random number generation
 - **SimulationTestHarness**: Lightweight harness for tests not requiring full determinism
 - **ChaosInjector**: Random fault injection for stress testing
 - **InvariantChecker**: Cluster safety property verification
@@ -373,12 +373,12 @@ All tests should use fixed seeds for reproducibility. When a test fails, the see
 
 All required infrastructure is implemented:
 
-- **DeterministicSimulationHarness**: Full control over time, tasks, and randomness - `DeterministicSimulationHarness.cs`
+- **SimulationHarness**: Full control over time, tasks, and randomness - `SimulationHarness.cs`
 - **SimulationTestHarness**: Lightweight harness for non-deterministic tests - `SimulationTestHarness.cs`
 - **ChaosInjector**: Random and scheduled fault injection - `ChaosInjector.cs`
 - **InvariantChecker**: Safety and liveness property verification - `InvariantChecker.cs`
-- **DeterministicTaskScheduler**: Deterministic task execution - `DeterministicTaskScheduler.cs`
-- **DeterministicRandom**: Reproducible random number generation - `DeterministicRandom.cs`
+- **SimulationTaskScheduler**: Deterministic task execution - `SimulationTaskScheduler.cs`
+- **SimulationRandom**: Reproducible random number generation - `SimulationRandom.cs`
 - **SimulationNetwork**: Network simulation with partitions and delays - `SimulationNetwork.cs`
 - **SimulationNode**: Cluster node for simulation - `SimulationNode.cs`
 
@@ -431,7 +431,7 @@ All required infrastructure is implemented:
 ### Test Fixtures
 ```csharp
 // Standard harness for most tests
-DeterministicSimulationHarness harness = new(seed: <fixed_seed>);
+SimulationHarness harness = new(seed: <fixed_seed>);
 
 // For tests not requiring full determinism
 SimulationTestHarness harness = new(seed: <fixed_seed>);
@@ -469,7 +469,7 @@ harness.DumpEventLog();
 
 1. **Slow Tests**: Some tests (marked with `Skip`) are inherently slow due to consensus round-trips with batching delays. Run these only in integration test suites.
 
-2. **Determinism**: Tests using `DeterministicSimulationHarness` have better reproducibility but require careful handling of async operations.
+2. **Determinism**: Tests using `SimulationHarness` have better reproducibility but require careful handling of async operations.
 
 3. **Failure Detection Timing**: Failure detection depends on heartbeat intervals. Tests may need to advance time significantly to trigger detection.
 

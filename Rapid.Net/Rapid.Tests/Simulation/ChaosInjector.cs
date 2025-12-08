@@ -6,10 +6,10 @@ namespace Rapid.Tests.Simulation;
 /// <remarks>
 /// Creates a new chaos injector.
 /// </remarks>
-internal sealed class ChaosInjector(DeterministicSimulationHarness harness)
+internal sealed class ChaosInjector(SimulationHarness harness)
 {
-    private readonly DeterministicSimulationHarness _harness = harness ?? throw new ArgumentNullException(nameof(harness));
-    private readonly DeterministicRandom _random = harness.Random.Fork();
+    private readonly SimulationHarness _harness = harness ?? throw new ArgumentNullException(nameof(harness));
+    private readonly SimulationRandom _random = harness.Random.Fork();
     private readonly List<ScheduledFault> _scheduledFaults = [];
     private readonly Lock _lock = new();
 

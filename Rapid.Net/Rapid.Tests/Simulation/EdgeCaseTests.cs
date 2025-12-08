@@ -269,7 +269,7 @@ public sealed class EdgeCaseTests : IAsyncLifetime
     #region Random and Determinism Edge Cases
 
     [Fact]
-    public void DeterministicRandomForkProducesDifferentSequences()
+    public void SimulationRandomForkProducesDifferentSequences()
     {
         var random = _harness.Random;
         var fork1 = random.Fork();
@@ -283,7 +283,7 @@ public sealed class EdgeCaseTests : IAsyncLifetime
     }
 
     [Fact]
-    public void DeterministicRandomChanceWorks()
+    public void SimulationRandomChanceWorks()
     {
         var random = _harness.Random;
 
@@ -293,7 +293,7 @@ public sealed class EdgeCaseTests : IAsyncLifetime
     }
 
     [Fact]
-    public void DeterministicRandomChooseWorks()
+    public void SimulationRandomChooseWorks()
     {
         var random = _harness.Random;
         var list = new List<int> { 1, 2, 3, 4, 5 };
@@ -304,7 +304,7 @@ public sealed class EdgeCaseTests : IAsyncLifetime
     }
 
     [Fact]
-    public void DeterministicRandomChooseThrowsOnEmpty()
+    public void SimulationRandomChooseThrowsOnEmpty()
     {
         var random = _harness.Random;
         var emptyList = new List<int>();
@@ -313,7 +313,7 @@ public sealed class EdgeCaseTests : IAsyncLifetime
     }
 
     [Fact]
-    public void DeterministicRandomNextBytesWorks()
+    public void SimulationRandomNextBytesWorks()
     {
         var random = _harness.Random;
         var bytes = new byte[16];
@@ -325,7 +325,7 @@ public sealed class EdgeCaseTests : IAsyncLifetime
     }
 
     [Fact]
-    public void DeterministicRandomNextTimeSpanWorks()
+    public void SimulationRandomNextTimeSpanWorks()
     {
         var random = _harness.Random;
         var maxDuration = TimeSpan.FromSeconds(10);

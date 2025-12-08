@@ -7,12 +7,12 @@ namespace Rapid.Tests;
 /// </summary>
 public sealed class ChaosInjectorTests : IAsyncLifetime
 {
-    private DeterministicSimulationHarness _harness = null!;
+    private SimulationHarness _harness = null!;
     private ChaosInjector _chaos = null!;
 
     public ValueTask InitializeAsync()
     {
-        _harness = new DeterministicSimulationHarness(seed: 22222);
+        _harness = new SimulationHarness(seed: 22222);
         _chaos = new ChaosInjector(_harness);
         return ValueTask.CompletedTask;
     }
