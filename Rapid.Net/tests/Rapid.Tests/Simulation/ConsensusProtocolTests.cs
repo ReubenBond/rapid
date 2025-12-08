@@ -1,5 +1,4 @@
 using System.Diagnostics.CodeAnalysis;
-using Microsoft.Extensions.Logging;
 using Rapid.Tests.Simulation;
 
 namespace Rapid.Tests.SimulationTests;
@@ -9,31 +8,22 @@ namespace Rapid.Tests.SimulationTests;
 /// Covers Fast Paxos basic operations, failure cases, and configuration changes.
 /// </summary>
 [SuppressMessage("Naming", "CA1707:Identifiers should not contain underscores", Justification = "Test naming convention")]
-public sealed class ConsensusProtocolTests : IAsyncLifetime
+public sealed class ConsensusProtocolTests(ITestOutputHelper output) : IAsyncLifetime
 {
-    private readonly ITestOutputHelper _output;
-    private readonly ILoggerFactory _loggerFactory;
     private SimulationHarness _harness = null!;
     private const int TestSeed = 55555;
 
-    public ConsensusProtocolTests(ITestOutputHelper output)
-    {
-        _output = output;
-        _loggerFactory = LoggerFactory.Create(builder => builder.AddXUnit(output).SetMinimumLevel(LogLevel.Debug));
-    }
-
     public ValueTask InitializeAsync()
     {
-        _output.WriteLine($"[ConsensusProtocolTests] Initializing with seed {TestSeed}");
-        _harness = new SimulationHarness(seed: TestSeed, loggerFactory: _loggerFactory);
+        output.WriteLine($"[ConsensusProtocolTests] Initializing with seed {TestSeed}");
+        _harness = new SimulationHarness(seed: TestSeed, output);
         return ValueTask.CompletedTask;
     }
 
     public async ValueTask DisposeAsync()
     {
-        _output.WriteLine("[ConsensusProtocolTests] Disposing harness");
+        output.WriteLine("[ConsensusProtocolTests] Disposing harness");
         await _harness.DisposeAsync();
-        _loggerFactory.Dispose();
     }
 
     #region Fast Paxos Basic Operations (CONS-001 to CONS-004)

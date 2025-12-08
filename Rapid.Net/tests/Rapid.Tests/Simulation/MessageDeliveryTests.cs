@@ -1,5 +1,4 @@
 using System.Diagnostics.CodeAnalysis;
-using Microsoft.Extensions.Logging;
 using Rapid.Tests.Simulation;
 
 namespace Rapid.Tests.SimulationTests;
@@ -9,31 +8,22 @@ namespace Rapid.Tests.SimulationTests;
 /// Covers message delays, message loss, and message ordering.
 /// </summary>
 [SuppressMessage("Naming", "CA1707:Identifiers should not contain underscores", Justification = "Test naming convention")]
-public sealed class MessageDeliveryTests : IAsyncLifetime
+public sealed class MessageDeliveryTests(ITestOutputHelper output) : IAsyncLifetime
 {
-    private readonly ITestOutputHelper _output;
-    private readonly ILoggerFactory _loggerFactory;
     private SimulationHarness _harness = null!;
     private const int TestSeed = 45678;
 
-    public MessageDeliveryTests(ITestOutputHelper output)
-    {
-        _output = output;
-        _loggerFactory = LoggerFactory.Create(builder => builder.AddXUnit(output).SetMinimumLevel(LogLevel.Debug));
-    }
-
     public ValueTask InitializeAsync()
     {
-        _output.WriteLine($"[MessageDeliveryTests] Initializing with seed {TestSeed}");
-        _harness = new SimulationHarness(seed: TestSeed, loggerFactory: _loggerFactory);
+        output.WriteLine($"[MessageDeliveryTests] Initializing with seed {TestSeed}");
+        _harness = new SimulationHarness(seed: TestSeed, output);
         return ValueTask.CompletedTask;
     }
 
     public async ValueTask DisposeAsync()
     {
-        _output.WriteLine("[MessageDeliveryTests] Disposing harness");
+        output.WriteLine("[MessageDeliveryTests] Disposing harness");
         await _harness.DisposeAsync();
-        _loggerFactory.Dispose();
     }
 
     #region Message Delays (MSG-001 to MSG-004)

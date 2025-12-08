@@ -1,5 +1,4 @@
 using System.Diagnostics.CodeAnalysis;
-using Microsoft.Extensions.Logging;
 using Rapid.Tests.Simulation;
 
 namespace Rapid.Tests.SimulationTests;
@@ -9,31 +8,22 @@ namespace Rapid.Tests.SimulationTests;
 /// Ensures that simulation runs are reproducible with the same seed.
 /// </summary>
 [SuppressMessage("Naming", "CA1707:Identifiers should not contain underscores", Justification = "Test naming convention")]
-public sealed class DeterminismTests : IAsyncLifetime
+public sealed class DeterminismTests(ITestOutputHelper output) : IAsyncLifetime
 {
-    private readonly ITestOutputHelper _output;
-    private readonly ILoggerFactory _loggerFactory;
     private SimulationHarness _harness = null!;
     private const int TestSeed = 89012;
 
-    public DeterminismTests(ITestOutputHelper output)
-    {
-        _output = output;
-        _loggerFactory = LoggerFactory.Create(builder => builder.AddXUnit(output).SetMinimumLevel(LogLevel.Debug));
-    }
-
     public ValueTask InitializeAsync()
     {
-        _output.WriteLine($"[DeterminismTests] Initializing with seed {TestSeed}");
-        _harness = new SimulationHarness(seed: TestSeed, loggerFactory: _loggerFactory, testOutput: _output);
+        output.WriteLine($"[DeterminismTests] Initializing with seed {TestSeed}");
+        _harness = new SimulationHarness(seed: TestSeed, output);
         return ValueTask.CompletedTask;
     }
 
     public async ValueTask DisposeAsync()
     {
-        _output.WriteLine("[DeterminismTests] Disposing harness");
+        output.WriteLine("[DeterminismTests] Disposing harness");
         await _harness.DisposeAsync();
-        _loggerFactory.Dispose();
     }
 
     #region Reproducibility Tests (DET-001 to DET-004)
@@ -41,8 +31,8 @@ public sealed class DeterminismTests : IAsyncLifetime
     [Fact]
     public async Task SameSeedProducesSameRandomSequence()
     {
-        await using var harness1 = new SimulationHarness(seed: 11111);
-        await using var harness2 = new SimulationHarness(seed: 11111);
+        await using var harness1 = new SimulationHarness(seed: 11111, output);
+        await using var harness2 = new SimulationHarness(seed: 11111, output);
 
 #pragma warning disable CA5394 // Do not use insecure randomness
         var seq1 = Enumerable.Range(0, 100).Select(_ => harness1.Random.Next()).ToList();
@@ -57,8 +47,8 @@ public sealed class DeterminismTests : IAsyncLifetime
     [Fact]
     public async Task DifferentSeedsProduceDifferentSequences()
     {
-        await using var harness1 = new SimulationHarness(seed: 11111);
-        await using var harness2 = new SimulationHarness(seed: 22222);
+        await using var harness1 = new SimulationHarness(seed: 11111, output);
+        await using var harness2 = new SimulationHarness(seed: 22222, output);
 
 #pragma warning disable CA5394 // Do not use insecure randomness
         var seq1 = Enumerable.Range(0, 100).Select(_ => harness1.Random.Next()).ToList();
@@ -201,16 +191,6 @@ public sealed class DeterminismTests : IAsyncLifetime
     public void SeedIsAccessible()
     {
         Assert.Equal(TestSeed, _harness.Seed);
-    }
-
-    [Fact]
-    public async Task RandomSeedHarnessLogsSeed()
-    {
-        // CreateWithRandomSeed should work without throwing
-        await using var randomHarness = SimulationHarness.CreateWithRandomSeed();
-
-        // Seed should be accessible
-        Assert.NotEqual(0, randomHarness.Seed);
     }
 
     #endregion

@@ -1,5 +1,4 @@
 using System.Diagnostics.CodeAnalysis;
-using Microsoft.Extensions.Logging;
 using Rapid.Tests.Simulation;
 
 namespace Rapid.Tests.SimulationTests;
@@ -8,31 +7,22 @@ namespace Rapid.Tests.SimulationTests;
 /// Tests for edge cases and boundary conditions using the simulation harness.
 /// </summary>
 [SuppressMessage("Naming", "CA1707:Identifiers should not contain underscores", Justification = "Test naming convention")]
-public sealed class EdgeCaseTests : IAsyncLifetime
+public sealed class EdgeCaseTests(ITestOutputHelper output) : IAsyncLifetime
 {
-    private readonly ITestOutputHelper _output;
-    private readonly ILoggerFactory _loggerFactory;
     private SimulationHarness _harness = null!;
     private const int TestSeed = 67890;
 
-    public EdgeCaseTests(ITestOutputHelper output)
-    {
-        _output = output;
-        _loggerFactory = LoggerFactory.Create(builder => builder.AddXUnit(output).SetMinimumLevel(LogLevel.Debug));
-    }
-
     public ValueTask InitializeAsync()
     {
-        _output.WriteLine($"[EdgeCaseTests] Initializing with seed {TestSeed}");
-        _harness = new SimulationHarness(seed: TestSeed, loggerFactory: _loggerFactory);
+        output.WriteLine($"[EdgeCaseTests] Initializing with seed {TestSeed}");
+        _harness = new SimulationHarness(seed: TestSeed, output);
         return ValueTask.CompletedTask;
     }
 
     public async ValueTask DisposeAsync()
     {
-        _output.WriteLine("[EdgeCaseTests] Disposing harness");
+        output.WriteLine("[EdgeCaseTests] Disposing harness");
         await _harness.DisposeAsync();
-        _loggerFactory.Dispose();
     }
 
     #region Boundary Conditions (EDGE-001 to EDGE-004)

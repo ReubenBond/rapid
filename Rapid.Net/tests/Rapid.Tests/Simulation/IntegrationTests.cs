@@ -1,5 +1,4 @@
 using System.Diagnostics.CodeAnalysis;
-using Microsoft.Extensions.Logging;
 using Rapid.Tests.Simulation;
 
 namespace Rapid.Tests.SimulationTests;
@@ -9,32 +8,23 @@ namespace Rapid.Tests.SimulationTests;
 /// These tests verify end-to-end behavior and recovery scenarios.
 /// </summary>
 [SuppressMessage("Naming", "CA1707:Identifiers should not contain underscores", Justification = "Test naming convention")]
-public sealed class IntegrationTests : IAsyncLifetime
+public sealed class IntegrationTests(ITestOutputHelper output) : IAsyncLifetime
 {
-    private readonly ITestOutputHelper _output;
-    private readonly ILoggerFactory _loggerFactory;
     private SimulationHarness _harness = null!;
     private const int TestSeed = 90123;
 
-    public IntegrationTests(ITestOutputHelper output)
-    {
-        _output = output;
-        _loggerFactory = LoggerFactory.Create(builder => builder.AddXUnit(output).SetMinimumLevel(LogLevel.Debug));
-    }
-
     public ValueTask InitializeAsync()
     {
-        _output.WriteLine($"[IntegrationTests] Initializing with seed {TestSeed}");
+        output.WriteLine($"[IntegrationTests] Initializing with seed {TestSeed}");
         // Harness always uses fake time for deterministic and fast test execution
-        _harness = new SimulationHarness(seed: TestSeed, loggerFactory: _loggerFactory);
+        _harness = new SimulationHarness(seed: TestSeed, output);
         return ValueTask.CompletedTask;
     }
 
     public async ValueTask DisposeAsync()
     {
-        _output.WriteLine("[IntegrationTests] Disposing harness");
+        output.WriteLine("[IntegrationTests] Disposing harness");
         await _harness.DisposeAsync();
-        _loggerFactory.Dispose();
     }
 
     #region Complete Cluster Lifecycle (INT-001 to INT-004)

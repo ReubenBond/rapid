@@ -13,7 +13,7 @@ namespace Rapid.Tests.Simulation;
 /// </remarks>
 /// <param name="seed">The seed for reproducible random sequences.</param>
 #pragma warning disable CA5394 // Do not use insecure randomness - intentionally deterministic for simulation testing
-internal sealed class SimulationRandom(int seed) : Random
+internal sealed class SimulationRandom(int seed) : Random(seed)
 {
     /// <summary>
     /// Gets the seed used to initialize this random instance.

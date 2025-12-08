@@ -5,13 +5,13 @@ namespace Rapid.Tests;
 /// <summary>
 /// Tests for the simulation harness.
 /// </summary>
-public sealed class SimulationHarnessTests : IAsyncLifetime
+public sealed class SimulationHarnessTests(ITestOutputHelper output) : IAsyncLifetime
 {
     private SimulationHarness _harness = null!;
 
     public ValueTask InitializeAsync()
     {
-        _harness = new SimulationHarness(seed: 54321);
+        _harness = new SimulationHarness(seed: 54321, output);
         return ValueTask.CompletedTask;
     }
 
@@ -48,8 +48,8 @@ public sealed class SimulationHarnessTests : IAsyncLifetime
     public async Task RandomIsDeterministic()
     {
         // Create two harnesses with same seed
-        await using var harness1 = new SimulationHarness(seed: 99999);
-        await using var harness2 = new SimulationHarness(seed: 99999);
+        await using var harness1 = new SimulationHarness(seed: 99999, output);
+        await using var harness2 = new SimulationHarness(seed: 99999, output);
 
 #pragma warning disable CA5394 // Do not use insecure randomness
         var values1 = Enumerable.Range(0, 10).Select(_ => harness1.Random.Next()).ToList();

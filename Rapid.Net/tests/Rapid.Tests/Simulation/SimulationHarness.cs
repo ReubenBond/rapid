@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using MartinCostello.Logging.XUnit;
 using Microsoft.Extensions.Logging;
 
 namespace Rapid.Tests.Simulation;
@@ -23,23 +24,36 @@ internal sealed class SimulationHarness : IAsyncDisposable
     private readonly List<SimulationEvent> _eventLog = [];
     private readonly Lock _eventLogLock = new();
     private readonly Lock _randomLock = new();
-    private readonly ITestOutputHelper? _testOutput;
+    private readonly ILogger<SimulationHarness>? _logger;
+    private readonly bool _ownsLoggerFactory;
     private bool _disposed;
 
     /// <summary>
-    /// Creates a new simulation harness with the specified seed.
+    /// Creates a new simulation harness with the specified seed and test output helper.
+    /// The logger factory will be created automatically from the test output helper.
     /// </summary>
     /// <param name="seed">The seed for deterministic random number generation.</param>
-    /// <param name="loggerFactory">Optional logger factory for logging.</param>
-    /// <param name="testOutput">Optional xUnit test output helper for logging.</param>
-    public SimulationHarness(
+    /// <param name="testOutput">The xUnit test output helper for logging.</param>
+    public SimulationHarness(int seed, ITestOutputHelper testOutput)
+        : this(seed, CreateLoggerFactory(testOutput), ownsLoggerFactory: true)
+    {
+    }
+
+    /// <summary>
+    /// Creates a new simulation harness with the specified seed, logger factory, and test output.
+    /// </summary>
+    /// <param name="seed">The seed for deterministic random number generation.</param>
+    /// <param name="loggerFactory">The logger factory for logging (can be null).</param>
+    /// <param name="ownsLoggerFactory">Whether this harness owns the logger factory and should dispose it.</param>
+    private SimulationHarness(
         int seed,
-        ILoggerFactory? loggerFactory = null,
-        ITestOutputHelper? testOutput = null)
+        ILoggerFactory? loggerFactory,
+        bool ownsLoggerFactory)
     {
         Seed = seed;
-        _testOutput = testOutput;
         LoggerFactory = loggerFactory;
+        _logger = loggerFactory?.CreateLogger<SimulationHarness>();
+        _ownsLoggerFactory = ownsLoggerFactory;
 
         // Create deterministic components
         Random = new SimulationRandom(seed);
@@ -59,16 +73,12 @@ internal sealed class SimulationHarness : IAsyncDisposable
     }
 
     /// <summary>
-    /// Creates a simulation harness with a random seed, logging the seed for reproduction.
+    /// Creates an ILoggerFactory that writes to the xUnit test output.
     /// </summary>
-    public static SimulationHarness CreateWithRandomSeed(
-        ILoggerFactory? loggerFactory = null,
-        ITestOutputHelper? testOutput = null)
-    {
-        var seed = Environment.TickCount;
-        testOutput?.WriteLine($"[Simulation] Using random seed: {seed}");
-        return new SimulationHarness(seed, loggerFactory, testOutput);
-    }
+    private static ILoggerFactory CreateLoggerFactory(ITestOutputHelper testOutput) =>
+        Microsoft.Extensions.Logging.LoggerFactory.Create(builder => builder
+            .AddXUnit(testOutput)
+            .SetMinimumLevel(LogLevel.Debug));
 
     #region Core Components
 
@@ -569,24 +579,25 @@ internal sealed class SimulationHarness : IAsyncDisposable
     /// <summary>
     /// Logs the seed to the test output for reproduction.
     /// </summary>
-    public void LogSeedForReproduction() => _testOutput?.WriteLine($"[SEED FOR REPRODUCTION] {Seed}");
+    public void LogSeedForReproduction() => _logger?.LogInformation("[SEED FOR REPRODUCTION] {Seed}", Seed);
 
     /// <summary>
     /// Dumps the event log to the test output.
     /// </summary>
     public void DumpEventLog()
     {
-        if (_testOutput == null) return;
+        if (_logger == null) return;
 
-        _testOutput.WriteLine("=== Simulation Event Log ===");
+        _logger.LogInformation("=== Simulation Event Log ===");
         lock (_eventLogLock)
         {
             foreach (var evt in _eventLog)
             {
-                _testOutput.WriteLine($"[{evt.LogicalTime:D6}] [{evt.SimulatedTime:O}] {evt.Type}: {evt.Description}");
+                _logger.LogInformation("[{LogicalTime:D6}] [{SimulatedTime:O}] {Type}: {Description}",
+                    evt.LogicalTime, evt.SimulatedTime, evt.Type, evt.Description);
             }
         }
-        _testOutput.WriteLine("============================");
+        _logger.LogInformation("============================");
     }
 
     private void LogEvent(SimulationEventType type, string description)
@@ -602,7 +613,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
             _eventLog.Add(evt);
         }
 
-        _testOutput?.WriteLine($"[{evt.LogicalTime:D6}] {type}: {description}");
+        _logger?.LogDebug("[{LogicalTime:D6}] {Type}: {Description}", evt.LogicalTime, type, description);
     }
 
     #endregion
@@ -624,6 +635,11 @@ internal sealed class SimulationHarness : IAsyncDisposable
         }
         _nodes.Clear();
         _nodeRegistry.Clear();
+
+        if (_ownsLoggerFactory)
+        {
+            LoggerFactory?.Dispose();
+        }
 
         await Task.CompletedTask.ConfigureAwait(false);
     }
