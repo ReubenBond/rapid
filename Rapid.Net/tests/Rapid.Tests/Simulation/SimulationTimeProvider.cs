@@ -156,11 +156,12 @@ internal sealed partial class SimulationTimeProvider : TimeProvider
         var (_, waiting) = _taskQueue.GetSnapshot();
         var result = new List<TimerInfo>();
 
-        foreach (var (_, dueTime) in waiting)
+        foreach (var item in waiting)
         {
-            result.Add(new TimerInfo(
-                Start + dueTime,
-                TimeSpan.Zero)); // Period info not available from snapshot
+            if (item is ScheduledTimerItem timerItem)
+            {
+                result.Add(new TimerInfo(Start + timerItem.DueTime, timerItem.Period));
+            }
         }
 
         return [.. result.OrderBy(t => t.WakeupTime)];
