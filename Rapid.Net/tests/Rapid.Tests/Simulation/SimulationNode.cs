@@ -252,8 +252,8 @@ internal sealed class SimulationNode : IDisposable
         var opts = _protocolOptions.Value;
         var membershipView = new MembershipViewBuilder(
             opts.RingCount,
-            successfulResponse.Identifiers.ToList(),
-            successfulResponse.Endpoints.ToList()).Build();
+            [.. successfulResponse.Identifiers],
+            [.. successfulResponse.Endpoints]).Build();
         var cutDetector = new MultiNodeCutDetector(opts.RingCount, opts.HighWaterMark, opts.LowWaterMark);
         var broadcaster = new UnicastToAllBroadcaster(MessagingClient);
         Dictionary<ClusterEvents, List<Action<ClusterStatusChange>>> subscriptions = [];

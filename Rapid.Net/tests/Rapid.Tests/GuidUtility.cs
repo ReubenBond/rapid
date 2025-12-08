@@ -15,7 +15,7 @@ internal static class GuidUtility
         SwapByteOrder(namespaceBytes);
 
 #pragma warning disable CA5350
-        var hash = System.Security.Cryptography.SHA1.HashData(namespaceBytes.Concat(nameBytes).ToArray());
+        var hash = System.Security.Cryptography.SHA1.HashData([.. namespaceBytes, .. nameBytes]);
 #pragma warning restore CA5350
 
         var newGuid = new byte[16];

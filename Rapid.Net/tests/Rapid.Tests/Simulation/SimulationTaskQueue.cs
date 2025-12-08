@@ -48,9 +48,6 @@ internal sealed class SimulationTaskQueue(long initialTimeTicks = 0)
     // Timers that can be cancelled - maps timer ID to the scheduled item
     private readonly Dictionary<long, ScheduledItem> _timerItemMap = [];
 
-    private TaskSchedulerAdapter? _taskScheduler;
-    private SynchronizationContextAdapter? _synchronizationContext;
-
     private readonly Lock _lock = new();
     private long _sequenceNumber;
     private long _nextTimerId;
@@ -73,48 +70,6 @@ internal sealed class SimulationTaskQueue(long initialTimeTicks = 0)
     } = initialTimeTicks;
 
     /// <summary>
-    /// Gets the total number of items in both queues.
-    /// </summary>
-    public int Count
-    {
-        get
-        {
-            lock (_lock)
-            {
-                return _readyQueue.Count + _waitingQueue.Count;
-            }
-        }
-    }
-
-    /// <summary>
-    /// Gets the number of ready tasks.
-    /// </summary>
-    public int ReadyCount
-    {
-        get
-        {
-            lock (_lock)
-            {
-                return _readyQueue.Count;
-            }
-        }
-    }
-
-    /// <summary>
-    /// Gets the number of waiting tasks.
-    /// </summary>
-    public int WaitingCount
-    {
-        get
-        {
-            lock (_lock)
-            {
-                return _waitingQueue.Count;
-            }
-        }
-    }
-
-    /// <summary>
     /// Gets whether there are any items in either queue.
     /// </summary>
     public bool HasItems
@@ -124,34 +79,6 @@ internal sealed class SimulationTaskQueue(long initialTimeTicks = 0)
             lock (_lock)
             {
                 return _readyQueue.Count > 0 || _waitingQueue.Count > 0;
-            }
-        }
-    }
-
-    /// <summary>
-    /// Gets whether there are any ready tasks to execute.
-    /// </summary>
-    public bool HasReadyItems
-    {
-        get
-        {
-            lock (_lock)
-            {
-                return _readyQueue.Count > 0;
-            }
-        }
-    }
-
-    /// <summary>
-    /// Gets whether there are any waiting tasks.
-    /// </summary>
-    public bool HasWaitingItems
-    {
-        get
-        {
-            lock (_lock)
-            {
-                return _waitingQueue.Count > 0;
             }
         }
     }
@@ -197,37 +124,6 @@ internal sealed class SimulationTaskQueue(long initialTimeTicks = 0)
     }
 
     /// <summary>
-    /// Gets the number of active timers (items that were scheduled as timers and haven't been cancelled or executed).
-    /// This includes timers in both the waiting queue and the ready queue.
-    /// </summary>
-    public int TimerCount
-    {
-        get
-        {
-            lock (_lock)
-            {
-                return _timerItemMap.Count;
-            }
-        }
-    }
-
-    /// <summary>
-    /// Enqueues an action to be executed immediately (added to ready queue).
-    /// </summary>
-    /// <param name="action">The action to execute.</param>
-    public void Enqueue(Action action)
-    {
-        ArgumentNullException.ThrowIfNull(action);
-
-        lock (_lock)
-        {
-            var seq = _sequenceNumber++;
-            var item = new ScheduledItem(action, ScheduledItemType.Action, CurrentTimeTicks, seq, TimerId: null, Period: 0, Task: null);
-            _readyQueue.Add(seq, item);
-        }
-    }
-
-    /// <summary>
     /// Enqueues a Task to be executed immediately (added to ready queue).
     /// The task object is stored for debugger introspection via GetScheduledTasks.
     /// </summary>
@@ -243,35 +139,6 @@ internal sealed class SimulationTaskQueue(long initialTimeTicks = 0)
             var seq = _sequenceNumber++;
             var item = new ScheduledItem(executeTask, ScheduledItemType.Task, CurrentTimeTicks, seq, TimerId: null, Period: 0, task);
             _readyQueue.Add(seq, item);
-        }
-    }
-
-    /// <summary>
-    /// Enqueues an action to be executed at a specific time.
-    /// If the time is now or in the past, it goes to the ready queue.
-    /// Otherwise, it goes to the waiting queue.
-    /// </summary>
-    /// <param name="action">The action to execute.</param>
-    /// <param name="dueTimeTicks">The time in ticks when the action should be executed.</param>
-    public void EnqueueAt(Action action, long dueTimeTicks)
-    {
-        ArgumentNullException.ThrowIfNull(action);
-
-        lock (_lock)
-        {
-            var seq = _sequenceNumber++;
-            var item = new ScheduledItem(action, ScheduledItemType.Action, dueTimeTicks, seq, TimerId: null, Period: 0, Task: null);
-
-            if (dueTimeTicks <= CurrentTimeTicks)
-            {
-                // Due now or in the past - add to ready queue
-                _readyQueue.Add(seq, item);
-            }
-            else
-            {
-                // Due in the future - add to waiting queue
-                _waitingQueue.Add(item);
-            }
         }
     }
 
@@ -368,65 +235,6 @@ internal sealed class SimulationTaskQueue(long initialTimeTicks = 0)
             }
 
             return false;
-        }
-    }
-
-    /// <summary>
-    /// Reschedules an existing timer to fire at a new time.
-    /// </summary>
-    /// <param name="timerId">The timer ID returned by ScheduleTimer.</param>
-    /// <param name="newDueTimeTicks">The new due time in ticks.</param>
-    /// <param name="newPeriodTicks">The new period in ticks (or -1 to keep current period).</param>
-    /// <returns>True if the timer was found and rescheduled, false otherwise.</returns>
-    public bool RescheduleTimer(long timerId, long newDueTimeTicks, long newPeriodTicks = -1)
-    {
-        lock (_lock)
-        {
-            if (!_timerItemMap.TryGetValue(timerId, out var oldItem))
-            {
-                return false;
-            }
-
-            // Remove the old item from its queue
-            if (!_waitingQueue.Remove(oldItem))
-            {
-                _readyQueue.Remove(oldItem.SequenceNumber);
-            }
-
-            // Create new item with updated values
-            var period = newPeriodTicks >= 0 ? newPeriodTicks : oldItem.Period;
-            var seq = _sequenceNumber++;
-            var newItem = new ScheduledItem(oldItem.Callback, ScheduledItemType.Timer, newDueTimeTicks, seq, timerId, period, Task: null);
-
-            if (newDueTimeTicks <= CurrentTimeTicks)
-            {
-                _readyQueue.Add(seq, newItem);
-            }
-            else
-            {
-                _waitingQueue.Add(newItem);
-            }
-
-            _timerItemMap[timerId] = newItem;
-            return true;
-        }
-    }
-
-    /// <summary>
-    /// Gets information about a timer.
-    /// </summary>
-    /// <param name="timerId">The timer ID.</param>
-    /// <returns>Timer information, or null if the timer is not found.</returns>
-    public (long DueTimeTicks, long PeriodTicks)? GetTimerInfo(long timerId)
-    {
-        lock (_lock)
-        {
-            if (!_timerItemMap.TryGetValue(timerId, out var item))
-            {
-                return null;
-            }
-
-            return (item.DueTimeTicks, item.Period);
         }
     }
 
@@ -566,62 +374,6 @@ internal sealed class SimulationTaskQueue(long initialTimeTicks = 0)
     }
 
     /// <summary>
-    /// Tries to dequeue the next ready item without executing it.
-    /// </summary>
-    /// <param name="action">The dequeued action, if any.</param>
-    /// <returns>True if an item was dequeued, false if no items are ready.</returns>
-    public bool TryDequeue(out Action? action)
-    {
-        lock (_lock)
-        {
-            if (_readyQueue.Count == 0)
-            {
-                action = null;
-                return false;
-            }
-
-            var item = _readyQueue.Values[0];
-            _readyQueue.RemoveAt(0);
-
-            // If this was a timer, clean up tracking (caller is responsible for execution)
-            if (item.TimerId.HasValue)
-            {
-                _timerItemMap.Remove(item.TimerId.Value);
-            }
-
-            action = item.Callback;
-            return true;
-        }
-    }
-
-    /// <summary>
-    /// Advances the current time to the next waiting task's due time.
-    /// This moves all tasks that become due to the ready queue.
-    /// </summary>
-    /// <returns>True if time was advanced, false if no waiting tasks exist.</returns>
-    public bool AdvanceToNextDueTime()
-    {
-        lock (_lock)
-        {
-            if (_waitingQueue.Count == 0)
-                return false;
-
-            var nextDueTime = _waitingQueue.Min.DueTimeTicks;
-
-            if (nextDueTime <= CurrentTimeTicks)
-            {
-                // Already at or past this time, just move tasks
-                MoveWaitingToReady();
-                return _readyQueue.Count > 0;
-            }
-
-            CurrentTimeTicks = nextDueTime;
-            MoveWaitingToReady();
-            return true;
-        }
-    }
-
-    /// <summary>
     /// Advances the current time by the specified amount.
     /// This moves all tasks that become due to the ready queue.
     /// </summary>
@@ -702,65 +454,6 @@ internal sealed class SimulationTaskQueue(long initialTimeTicks = 0)
         }
     }
 
-    /// <summary>
-    /// Gets a <see cref="System.Threading.Tasks.TaskScheduler"/> that schedules tasks through this queue.
-    /// </summary>
-    public TaskScheduler TaskScheduler => _taskScheduler ??= new TaskSchedulerAdapter(this);
-
-    /// <summary>
-    /// Gets a <see cref="System.Threading.SynchronizationContext"/> that posts callbacks through this queue.
-    /// </summary>
-    public SynchronizationContext SynchronizationContext => _synchronizationContext ??= new SynchronizationContextAdapter(this);
-
-    /// <summary>
-    /// Installs this queue's synchronization context on the current thread and returns a scope
-    /// that restores the previous context when disposed.
-    /// </summary>
-    /// <returns>A disposable scope that restores the previous synchronization context when disposed.</returns>
-    public SynchronizationContextScope InstallSynchronizationContext()
-    {
-        var previous = SynchronizationContext.Current;
-        SynchronizationContext.SetSynchronizationContext(SynchronizationContext);
-        return new SynchronizationContextScope(previous);
-    }
-
-    /// <summary>
-    /// A deterministic task scheduler that queues tasks and executes them only when explicitly stepped.
-    /// </summary>
-    private sealed class TaskSchedulerAdapter(SimulationTaskQueue taskQueue) : TaskScheduler
-    {
-        protected override IEnumerable<Task>? GetScheduledTasks() => taskQueue.GetScheduledTasks();
-
-        protected override void QueueTask(Task task) => taskQueue.EnqueueTask(task, () => TryExecuteTask(task));
-
-        protected override bool TryExecuteTaskInline(Task task, bool taskWasPreviouslyQueued) =>
-            // For deterministic testing, we don't execute inline
-            // All tasks go through the queue
-            false;
-    }
-
-    /// <summary>
-    /// A synchronization context that routes all continuations through the task queue.
-    /// </summary>
-    private sealed class SynchronizationContextAdapter(SimulationTaskQueue taskQueue) : SynchronizationContext
-    {
-        public override void Post(SendOrPostCallback d, object? state)
-        {
-            ArgumentNullException.ThrowIfNull(d);
-            var task = new Task(() => d(state));
-            task.Start(taskQueue.TaskScheduler);
-        }
-
-        public override void Send(SendOrPostCallback d, object? state)
-        {
-            ArgumentNullException.ThrowIfNull(d);
-            // For Send, we execute synchronously
-            d(state);
-        }
-
-        public override SynchronizationContext CreateCopy() => new SynchronizationContextAdapter(taskQueue);
-    }
-
     private readonly record struct ScheduledItem(
         Action Callback,
         ScheduledItemType ItemType,
@@ -783,26 +476,4 @@ internal sealed class SimulationTaskQueue(long initialTimeTicks = 0)
             return x.SequenceNumber.CompareTo(y.SequenceNumber);
         }
     }
-}
-
-/// <summary>
-/// A disposable scope that restores the previous synchronization context when disposed.
-/// </summary>
-internal readonly struct SynchronizationContextScope : IDisposable
-{
-    private readonly SynchronizationContext? _previous;
-
-    /// <summary>
-    /// Creates a new scope that will restore the specified context when disposed.
-    /// </summary>
-    /// <param name="previous">The synchronization context to restore.</param>
-    internal SynchronizationContextScope(SynchronizationContext? previous)
-    {
-        _previous = previous;
-    }
-
-    /// <summary>
-    /// Restores the previous synchronization context.
-    /// </summary>
-    public void Dispose() => SynchronizationContext.SetSynchronizationContext(_previous);
 }

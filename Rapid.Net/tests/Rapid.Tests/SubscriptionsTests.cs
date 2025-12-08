@@ -259,10 +259,10 @@ public sealed class SubscriptionsTests(ITestOutputHelper outputHelper) : IAsyncD
         public int NumTimesCalled() => _notificationLog.Count;
 
         public List<List<Endpoint>> GetMembershipLog() =>
-            _notificationLog.Select(c => c.Membership.ToList()).ToList();
+            [.. _notificationLog.Select(c => c.Membership.ToList())];
 
         public List<List<NodeStatusChange>> GetDeltaLog() =>
-            _notificationLog.Select(c => c.Delta.ToList()).ToList();
+            [.. _notificationLog.Select(c => c.Delta.ToList())];
 
         public void Accept(ClusterStatusChange clusterStatusChange) =>
             _notificationLog.Add(clusterStatusChange);

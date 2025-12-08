@@ -976,37 +976,4 @@ public class SimulationTimeProviderTests
 
     #endregion
 
-    #region LocalTimeZone Tests
-
-    [Fact]
-    public void LocalTimeZoneDefaultsToUtc()
-    {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
-
-        Assert.Equal(TimeZoneInfo.Utc, timeProvider.LocalTimeZone);
-    }
-
-    [Fact]
-    public void SetLocalTimeZoneChangesTimeZone()
-    {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
-        var customTz = TimeZoneInfo.CreateCustomTimeZone("TEST", TimeSpan.FromHours(5), "Test", "Test");
-
-        timeProvider.SetLocalTimeZone(customTz);
-
-        Assert.Equal(customTz, timeProvider.LocalTimeZone);
-    }
-
-    [Fact]
-    public void SetLocalTimeZoneNullThrows()
-    {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
-
-        Assert.Throws<ArgumentNullException>(() => timeProvider.SetLocalTimeZone(null!));
-    }
-
-    #endregion
 }

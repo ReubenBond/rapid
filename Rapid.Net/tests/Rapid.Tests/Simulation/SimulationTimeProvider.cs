@@ -18,7 +18,6 @@ internal sealed partial class SimulationTimeProvider : TimeProvider
 {
     private readonly ILogger<SimulationTimeProvider> _logger;
     private readonly SimulationTaskQueue _taskQueue;
-    private TimeZoneInfo _localTimeZone = TimeZoneInfo.Utc;
 
     [LoggerMessage(Level = LogLevel.Trace, Message = "Advance({Duration}) from {FromTime} to {ToTime}")]
     private partial void LogAdvance(TimeSpan duration, string fromTime, string toTime);
@@ -103,17 +102,7 @@ internal sealed partial class SimulationTimeProvider : TimeProvider
     public override long GetTimestamp() => _taskQueue.CurrentTimeTicks;
 
     /// <inheritdoc />
-    public override TimeZoneInfo LocalTimeZone => _localTimeZone;
-
-    /// <summary>
-    /// Sets the local time zone.
-    /// </summary>
-    /// <param name="localTimeZone">The local time zone.</param>
-    public void SetLocalTimeZone(TimeZoneInfo localTimeZone)
-    {
-        ArgumentNullException.ThrowIfNull(localTimeZone);
-        _localTimeZone = localTimeZone;
-    }
+    public override TimeZoneInfo LocalTimeZone => TimeZoneInfo.Utc;
 
     /// <summary>
     /// Gets the amount by which the value from <see cref="GetTimestamp"/> increments per second.
@@ -165,17 +154,17 @@ internal sealed partial class SimulationTimeProvider : TimeProvider
     /// </summary>
     public IReadOnlyList<TimerInfo> GetPendingTimers()
     {
-        var snapshot = _taskQueue.GetSnapshot();
+        var (_, waiting) = _taskQueue.GetSnapshot();
         var result = new List<TimerInfo>();
 
-        foreach (var (_, dueTime) in snapshot.Waiting)
+        foreach (var (_, dueTime) in waiting)
         {
             result.Add(new TimerInfo(
                 new DateTimeOffset(dueTime, TimeSpan.Zero),
                 TimeSpan.Zero)); // Period info not available from snapshot
         }
 
-        return result.OrderBy(t => t.WakeupTime).ToList();
+        return [.. result.OrderBy(t => t.WakeupTime)];
     }
 
     /// <summary>

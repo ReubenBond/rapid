@@ -189,7 +189,7 @@ internal sealed class ChaosInjector(SimulationHarness harness)
 
         lock (_lock)
         {
-            toExecute = _scheduledFaults.Where(f => f.ExecuteAt <= now).ToList();
+            toExecute = [.. _scheduledFaults.Where(f => f.ExecuteAt <= now)];
             foreach (var fault in toExecute)
             {
                 _scheduledFaults.Remove(fault);

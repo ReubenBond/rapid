@@ -8,7 +8,7 @@ namespace Rapid.Tests.Simulation;
 /// Unified simulation harness for fully deterministic testing of Rapid clusters.
 /// 
 /// Provides:
-/// - Deterministic task scheduling via <see cref="SimulationTaskQueue.TaskScheduler"/>
+/// - Deterministic task scheduling via <see cref="SimulationTaskScheduler"/>
 /// - Controlled time via <see cref="SimulationTimeProvider"/>
 /// - Seeded random number generation via <see cref="SimulationRandom"/>
 /// - Simulated network with partition injection via <see cref="SimulationNetwork"/>
@@ -57,6 +57,8 @@ internal sealed class SimulationHarness : IAsyncDisposable
         // Create deterministic components
         Random = new SimulationRandom(seed);
         _taskQueue = new SimulationTaskQueue();
+        _taskScheduler = new SimulationTaskScheduler(_taskQueue);
+        _synchronizationContext = new SimulationSynchronizationContext(_taskQueue, _taskScheduler);
 
         // Create time provider that shares the task queue with the scheduler
         var timeProviderLogger = loggerFactory?.CreateLogger<SimulationTimeProvider>();
@@ -94,6 +96,8 @@ internal sealed class SimulationHarness : IAsyncDisposable
     public SimulationRandom Random { get; }
 
     private readonly SimulationTaskQueue _taskQueue;
+    private readonly SimulationTaskScheduler _taskScheduler;
+    private readonly SimulationSynchronizationContext _synchronizationContext;
 
     /// <summary>
     /// Gets the simulation task queue.
@@ -103,7 +107,12 @@ internal sealed class SimulationHarness : IAsyncDisposable
     /// <summary>
     /// Gets the simulation task scheduler.
     /// </summary>
-    public TaskScheduler Scheduler => _taskQueue.TaskScheduler;
+    public TaskScheduler Scheduler => _taskScheduler;
+
+    /// <summary>
+    /// Gets the simulation synchronization context.
+    /// </summary>
+    public SimulationSynchronizationContext SynchronizationContext => _synchronizationContext;
 
     /// <summary>
     /// Gets the simulation time provider.
@@ -339,7 +348,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(condition);
 
-        using var _ = _taskQueue.InstallSynchronizationContext();
+        using var _ = _synchronizationContext.Install();
 
         return RunUntilCore(condition, maxIterations);
     }
@@ -416,7 +425,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
     /// </summary>
     public bool RunUntilIdle(TimeSpan? maxSimulatedTime = null, int maxIterations = 100000)
     {
-        using var _ = _taskQueue.InstallSynchronizationContext();
+        using var _ = _synchronizationContext.Install();
 
         return RunUntilIdleCore(maxSimulatedTime, maxIterations);
     }
@@ -477,7 +486,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(taskFactory);
 
-        using var _ = _taskQueue.InstallSynchronizationContext();
+        using var _ = _synchronizationContext.Install();
 
         var task = taskFactory();
 
@@ -499,7 +508,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(taskFactory);
 
-        using var _ = _taskQueue.InstallSynchronizationContext();
+        using var _ = _synchronizationContext.Install();
 
         var task = taskFactory();
 
@@ -558,7 +567,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
             return true;
         }
 
-        using var _ = _taskQueue.InstallSynchronizationContext();
+        using var _ = _synchronizationContext.Install();
 
         var targetTime = TimeProvider.GetUtcNow() + delta;
 
