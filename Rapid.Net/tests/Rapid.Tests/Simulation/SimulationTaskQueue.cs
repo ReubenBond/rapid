@@ -23,7 +23,7 @@ internal enum ScheduledItemType
 
 /// <summary>
 /// A time-aware task queue that serves as the common core for both
-/// <see cref="SimulationTaskScheduler"/> and <see cref="SimulationTimeProvider"/>.
+/// <see cref="TaskScheduler"/> and <see cref="SimulationTimeProvider"/>.
 /// 
 /// Uses separate data structures for ready and waiting tasks:
 /// - Ready queue: Tasks that are due now (FIFO ordered by sequence number)
@@ -33,44 +33,27 @@ internal enum ScheduledItemType
 /// This enables deterministic simulation testing by providing unified control
 /// over task execution order and time advancement.
 /// </summary>
-internal sealed class SimulationTaskQueue
+/// <remarks>
+/// Creates a new simulation task queue.
+/// </remarks>
+/// <param name="initialTimeTicks">The initial time in ticks. Default is 0.</param>
+internal sealed class SimulationTaskQueue(long initialTimeTicks = 0)
 {
     // Ready tasks: ordered by sequence number only (FIFO)
-    private readonly SortedList<long, ScheduledItem> _readyQueue = new();
+    private readonly SortedList<long, ScheduledItem> _readyQueue = [];
 
     // Waiting tasks: ordered by due time, then sequence number using custom comparer
     private readonly SortedSet<ScheduledItem> _waitingQueue = new(new ScheduledItemComparer());
 
     // Timers that can be cancelled - maps timer ID to the scheduled item
-    private readonly Dictionary<long, ScheduledItem> _timerItemMap = new();
+    private readonly Dictionary<long, ScheduledItem> _timerItemMap = [];
+
+    private TaskSchedulerAdapter? _taskScheduler;
+    private SynchronizationContextAdapter? _synchronizationContext;
 
     private readonly Lock _lock = new();
     private long _sequenceNumber;
-    private long _currentTimeTicks;
     private long _nextTimerId;
-
-    /// <summary>
-    /// Comparer for ordering scheduled items by due time, then by sequence number.
-    /// </summary>
-    private sealed class ScheduledItemComparer : IComparer<ScheduledItem>
-    {
-        public int Compare(ScheduledItem x, ScheduledItem y)
-        {
-            var dueTimeComparison = x.DueTimeTicks.CompareTo(y.DueTimeTicks);
-            if (dueTimeComparison != 0)
-                return dueTimeComparison;
-            return x.SequenceNumber.CompareTo(y.SequenceNumber);
-        }
-    }
-
-    /// <summary>
-    /// Creates a new simulation task queue.
-    /// </summary>
-    /// <param name="initialTimeTicks">The initial time in ticks. Default is 0.</param>
-    public SimulationTaskQueue(long initialTimeTicks = 0)
-    {
-        _currentTimeTicks = initialTimeTicks;
-    }
 
     /// <summary>
     /// Gets or sets the current time in ticks.
@@ -78,22 +61,16 @@ internal sealed class SimulationTaskQueue
     /// </summary>
     public long CurrentTimeTicks
     {
-        get
-        {
-            lock (_lock)
-            {
-                return _currentTimeTicks;
-            }
-        }
+        get => field;
         set
         {
             lock (_lock)
             {
-                _currentTimeTicks = value;
+                field = value;
                 MoveWaitingToReady();
             }
         }
-    }
+    } = initialTimeTicks;
 
     /// <summary>
     /// Gets the total number of items in both queues.
@@ -245,7 +222,7 @@ internal sealed class SimulationTaskQueue
         lock (_lock)
         {
             var seq = _sequenceNumber++;
-            var item = new ScheduledItem(action, ScheduledItemType.Action, _currentTimeTicks, seq, TimerId: null, Period: 0, Task: null);
+            var item = new ScheduledItem(action, ScheduledItemType.Action, CurrentTimeTicks, seq, TimerId: null, Period: 0, Task: null);
             _readyQueue.Add(seq, item);
         }
     }
@@ -264,7 +241,7 @@ internal sealed class SimulationTaskQueue
         lock (_lock)
         {
             var seq = _sequenceNumber++;
-            var item = new ScheduledItem(executeTask, ScheduledItemType.Task, _currentTimeTicks, seq, TimerId: null, Period: 0, task);
+            var item = new ScheduledItem(executeTask, ScheduledItemType.Task, CurrentTimeTicks, seq, TimerId: null, Period: 0, task);
             _readyQueue.Add(seq, item);
         }
     }
@@ -285,7 +262,7 @@ internal sealed class SimulationTaskQueue
             var seq = _sequenceNumber++;
             var item = new ScheduledItem(action, ScheduledItemType.Action, dueTimeTicks, seq, TimerId: null, Period: 0, Task: null);
 
-            if (dueTimeTicks <= _currentTimeTicks)
+            if (dueTimeTicks <= CurrentTimeTicks)
             {
                 // Due now or in the past - add to ready queue
                 _readyQueue.Add(seq, item);
@@ -310,7 +287,7 @@ internal sealed class SimulationTaskQueue
 
         lock (_lock)
         {
-            var dueTime = _currentTimeTicks + delayTicks;
+            var dueTime = CurrentTimeTicks + delayTicks;
             var seq = _sequenceNumber++;
             var item = new ScheduledItem(action, ScheduledItemType.Action, dueTime, seq, TimerId: null, Period: 0, Task: null);
 
@@ -346,7 +323,7 @@ internal sealed class SimulationTaskQueue
             var seq = _sequenceNumber++;
             var item = new ScheduledItem(callback, ScheduledItemType.Timer, dueTimeTicks, seq, timerId, periodTicks, Task: null);
 
-            if (dueTimeTicks <= _currentTimeTicks)
+            if (dueTimeTicks <= CurrentTimeTicks)
             {
                 // Due now or in the past - add to ready queue
                 _readyQueue.Add(seq, item);
@@ -421,7 +398,7 @@ internal sealed class SimulationTaskQueue
             var seq = _sequenceNumber++;
             var newItem = new ScheduledItem(oldItem.Callback, ScheduledItemType.Timer, newDueTimeTicks, seq, timerId, period, Task: null);
 
-            if (newDueTimeTicks <= _currentTimeTicks)
+            if (newDueTimeTicks <= CurrentTimeTicks)
             {
                 _readyQueue.Add(seq, newItem);
             }
@@ -530,7 +507,7 @@ internal sealed class SimulationTaskQueue
                 if (item.Period > 0)
                 {
                     // Periodic timer - reschedule for next period
-                    var nextDueTime = _currentTimeTicks + item.Period;
+                    var nextDueTime = CurrentTimeTicks + item.Period;
                     var seq = _sequenceNumber++;
                     var newItem = new ScheduledItem(item.Callback, ScheduledItemType.Timer, nextDueTime, seq, timerId, item.Period, Task: null);
                     _waitingQueue.Add(newItem);
@@ -631,14 +608,14 @@ internal sealed class SimulationTaskQueue
 
             var nextDueTime = _waitingQueue.Min.DueTimeTicks;
 
-            if (nextDueTime <= _currentTimeTicks)
+            if (nextDueTime <= CurrentTimeTicks)
             {
                 // Already at or past this time, just move tasks
                 MoveWaitingToReady();
                 return _readyQueue.Count > 0;
             }
 
-            _currentTimeTicks = nextDueTime;
+            CurrentTimeTicks = nextDueTime;
             MoveWaitingToReady();
             return true;
         }
@@ -655,54 +632,8 @@ internal sealed class SimulationTaskQueue
 
         lock (_lock)
         {
-            _currentTimeTicks += deltaTicks;
+            CurrentTimeTicks += deltaTicks;
             MoveWaitingToReady();
-        }
-    }
-
-    /// <summary>
-    /// Adjusts the due time of all waiting items by the specified delta.
-    /// This is used to simulate system clock adjustments where timer due times
-    /// should be shifted relative to the new time.
-    /// Does NOT move items between queues or trigger execution.
-    /// </summary>
-    /// <param name="deltaTicks">The amount to adjust due times by (can be positive or negative).</param>
-    public void AdjustWaitingDueTimes(long deltaTicks)
-    {
-        if (deltaTicks == 0)
-            return;
-
-        lock (_lock)
-        {
-            // We need to rebuild the waiting queue with adjusted due times
-            var itemsToReinsert = new List<ScheduledItem>(_waitingQueue.Count);
-
-            foreach (var item in _waitingQueue)
-            {
-                var adjustedDueTime = item.DueTimeTicks + deltaTicks;
-                var newItem = new ScheduledItem(
-                    item.Callback,
-                    item.ItemType,
-                    adjustedDueTime,
-                    item.SequenceNumber,
-                    item.TimerId,
-                    item.Period,
-                    item.Task);
-                itemsToReinsert.Add(newItem);
-            }
-
-            _waitingQueue.Clear();
-
-            foreach (var item in itemsToReinsert)
-            {
-                _waitingQueue.Add(item);
-
-                // Update timer item map if this is a timer
-                if (item.TimerId.HasValue)
-                {
-                    _timerItemMap[item.TimerId.Value] = item;
-                }
-            }
         }
     }
 
@@ -745,7 +676,7 @@ internal sealed class SimulationTaskQueue
         while (_waitingQueue.Count > 0)
         {
             var item = _waitingQueue.Min;
-            if (item.DueTimeTicks > _currentTimeTicks)
+            if (item.DueTimeTicks > CurrentTimeTicks)
                 break;
 
             _waitingQueue.Remove(item);
@@ -771,6 +702,65 @@ internal sealed class SimulationTaskQueue
         }
     }
 
+    /// <summary>
+    /// Gets a <see cref="System.Threading.Tasks.TaskScheduler"/> that schedules tasks through this queue.
+    /// </summary>
+    public TaskScheduler TaskScheduler => _taskScheduler ??= new TaskSchedulerAdapter(this);
+
+    /// <summary>
+    /// Gets a <see cref="System.Threading.SynchronizationContext"/> that posts callbacks through this queue.
+    /// </summary>
+    public SynchronizationContext SynchronizationContext => _synchronizationContext ??= new SynchronizationContextAdapter(this);
+
+    /// <summary>
+    /// Installs this queue's synchronization context on the current thread and returns a scope
+    /// that restores the previous context when disposed.
+    /// </summary>
+    /// <returns>A disposable scope that restores the previous synchronization context when disposed.</returns>
+    public SynchronizationContextScope InstallSynchronizationContext()
+    {
+        var previous = SynchronizationContext.Current;
+        SynchronizationContext.SetSynchronizationContext(SynchronizationContext);
+        return new SynchronizationContextScope(previous);
+    }
+
+    /// <summary>
+    /// A deterministic task scheduler that queues tasks and executes them only when explicitly stepped.
+    /// </summary>
+    private sealed class TaskSchedulerAdapter(SimulationTaskQueue taskQueue) : TaskScheduler
+    {
+        protected override IEnumerable<Task>? GetScheduledTasks() => taskQueue.GetScheduledTasks();
+
+        protected override void QueueTask(Task task) => taskQueue.EnqueueTask(task, () => TryExecuteTask(task));
+
+        protected override bool TryExecuteTaskInline(Task task, bool taskWasPreviouslyQueued) =>
+            // For deterministic testing, we don't execute inline
+            // All tasks go through the queue
+            false;
+    }
+
+    /// <summary>
+    /// A synchronization context that routes all continuations through the task queue.
+    /// </summary>
+    private sealed class SynchronizationContextAdapter(SimulationTaskQueue taskQueue) : SynchronizationContext
+    {
+        public override void Post(SendOrPostCallback d, object? state)
+        {
+            ArgumentNullException.ThrowIfNull(d);
+            var task = new Task(() => d(state));
+            task.Start(taskQueue.TaskScheduler);
+        }
+
+        public override void Send(SendOrPostCallback d, object? state)
+        {
+            ArgumentNullException.ThrowIfNull(d);
+            // For Send, we execute synchronously
+            d(state);
+        }
+
+        public override SynchronizationContext CreateCopy() => new SynchronizationContextAdapter(taskQueue);
+    }
+
     private readonly record struct ScheduledItem(
         Action Callback,
         ScheduledItemType ItemType,
@@ -779,4 +769,40 @@ internal sealed class SimulationTaskQueue
         long? TimerId,
         long Period,
         Task? Task);
+
+    /// <summary>
+    /// Comparer for ordering scheduled items by due time, then by sequence number.
+    /// </summary>
+    private sealed class ScheduledItemComparer : IComparer<ScheduledItem>
+    {
+        public int Compare(ScheduledItem x, ScheduledItem y)
+        {
+            var dueTimeComparison = x.DueTimeTicks.CompareTo(y.DueTimeTicks);
+            if (dueTimeComparison != 0)
+                return dueTimeComparison;
+            return x.SequenceNumber.CompareTo(y.SequenceNumber);
+        }
+    }
+}
+
+/// <summary>
+/// A disposable scope that restores the previous synchronization context when disposed.
+/// </summary>
+internal readonly struct SynchronizationContextScope : IDisposable
+{
+    private readonly SynchronizationContext? _previous;
+
+    /// <summary>
+    /// Creates a new scope that will restore the specified context when disposed.
+    /// </summary>
+    /// <param name="previous">The synchronization context to restore.</param>
+    internal SynchronizationContextScope(SynchronizationContext? previous)
+    {
+        _previous = previous;
+    }
+
+    /// <summary>
+    /// Restores the previous synchronization context.
+    /// </summary>
+    public void Dispose() => SynchronizationContext.SetSynchronizationContext(_previous);
 }

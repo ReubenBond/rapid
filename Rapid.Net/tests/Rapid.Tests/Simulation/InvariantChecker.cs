@@ -164,7 +164,7 @@ internal sealed class InvariantChecker(SimulationHarness harness)
         // Try to make progress
         for (var i = 0; i < maxSteps; i++)
         {
-            if (_harness.Scheduler.TryExecuteOne())
+            if (_harness.TaskQueue.TryExecuteNext())
             {
                 return true; // Made progress
             }
@@ -174,7 +174,7 @@ internal sealed class InvariantChecker(SimulationHarness harness)
         }
 
         // Check if any tasks are pending now
-        if (_harness.Scheduler.HasPendingTasks)
+        if (_harness.TaskQueue.HasItems)
         {
             return true;
         }

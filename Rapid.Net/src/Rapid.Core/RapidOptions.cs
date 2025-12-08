@@ -26,7 +26,7 @@ public sealed class RapidOptions
     /// <summary>
     /// Event subscriptions.
     /// </summary>
-    internal Dictionary<ClusterEvents, List<Action<ClusterStatusChange>>> Subscriptions { get; } = new();
+    internal Dictionary<ClusterEvents, List<Action<ClusterStatusChange>>> Subscriptions { get; } = [];
 
     /// <summary>
     /// Sets metadata from a dictionary.

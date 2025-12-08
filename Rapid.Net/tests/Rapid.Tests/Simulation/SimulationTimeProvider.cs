@@ -10,13 +10,14 @@ namespace Rapid.Tests.Simulation;
 /// 
 /// Timer callbacks are scheduled through the queue instead of being executed immediately.
 /// This enables fully deterministic simulation testing where task execution order is controlled.
+/// 
+/// Time is tracked centrally by the <see cref="SimulationTaskQueue"/> - this provider
+/// delegates all time queries and modifications to the task queue.
 /// </summary>
 internal sealed partial class SimulationTimeProvider : TimeProvider
 {
     private readonly ILogger<SimulationTimeProvider> _logger;
     private readonly SimulationTaskQueue _taskQueue;
-    private readonly Lock _lock = new();
-    private DateTimeOffset _now;
     private TimeZoneInfo _localTimeZone = TimeZoneInfo.Utc;
 
     [LoggerMessage(Level = LogLevel.Trace, Message = "Advance({Duration}) from {FromTime} to {ToTime}")]
@@ -36,7 +37,7 @@ internal sealed partial class SimulationTimeProvider : TimeProvider
         ArgumentNullException.ThrowIfNull(taskQueue);
 
         _taskQueue = taskQueue;
-        Start = _now = startDateTime ?? new DateTimeOffset(2000, 1, 1, 0, 0, 0, 0, TimeSpan.Zero);
+        Start = startDateTime ?? new DateTimeOffset(2000, 1, 1, 0, 0, 0, 0, TimeSpan.Zero);
         _logger = logger ?? NullLogger<SimulationTimeProvider>.Instance;
 
         if (startDateTime.HasValue)
@@ -44,8 +45,8 @@ internal sealed partial class SimulationTimeProvider : TimeProvider
             ArgumentOutOfRangeException.ThrowIfLessThan(startDateTime.Value.Ticks, 0);
         }
 
-        // Initialize the task queue's time to match our time
-        _taskQueue.CurrentTimeTicks = _now.Ticks;
+        // Initialize the task queue's time to match our start time
+        _taskQueue.CurrentTimeTicks = Start.Ticks;
     }
 
     /// <summary>
@@ -53,41 +54,8 @@ internal sealed partial class SimulationTimeProvider : TimeProvider
     /// </summary>
     public DateTimeOffset Start { get; }
 
-    /// <summary>
-    /// Gets the task queue.
-    /// </summary>
-    public SimulationTaskQueue TaskQueue => _taskQueue;
-
-    /// <summary>
-    /// Gets or sets the amount of time by which time advances whenever the clock is read.
-    /// </summary>
-    /// <remarks>
-    /// This defaults to <see cref="TimeSpan.Zero"/>.
-    /// </remarks>
-    public TimeSpan AutoAdvanceAmount
-    {
-        get => field;
-        set
-        {
-            ArgumentOutOfRangeException.ThrowIfLessThan(value.Ticks, 0);
-            field = value;
-        }
-    }
-
     /// <inheritdoc />
-    public override DateTimeOffset GetUtcNow()
-    {
-        DateTimeOffset result;
-
-        lock (_lock)
-        {
-            result = _now;
-            _now += AutoAdvanceAmount;
-            _taskQueue.CurrentTimeTicks = _now.Ticks;
-        }
-
-        return result;
-    }
+    public override DateTimeOffset GetUtcNow() => new DateTimeOffset(_taskQueue.CurrentTimeTicks, TimeSpan.Zero);
 
     /// <summary>
     /// Advances the date and time in the UTC time zone.
@@ -97,20 +65,17 @@ internal sealed partial class SimulationTimeProvider : TimeProvider
     /// <remarks>
     /// This method simply advances time. If the time is set forward beyond the
     /// trigger point of any outstanding timers, those timers will be moved to the ready queue.
-    /// This is unlike the <see cref="AdjustTime" /> method, which has no impact on timers.
     /// </remarks>
     public void SetUtcNow(DateTimeOffset value)
     {
-        lock (_lock)
+        var currentTicks = _taskQueue.CurrentTimeTicks;
+        if (value.Ticks < currentTicks)
         {
-            if (value < _now)
-            {
-                throw new ArgumentOutOfRangeException(nameof(value), $"Cannot go back in time. Current time is {_now}.");
-            }
-
-            _now = value;
-            _taskQueue.CurrentTimeTicks = _now.Ticks;
+            var currentTime = new DateTimeOffset(currentTicks, TimeSpan.Zero);
+            throw new ArgumentOutOfRangeException(nameof(value), $"Cannot go back in time. Current time is {currentTime}.");
         }
+
+        _taskQueue.CurrentTimeTicks = value.Ticks;
     }
 
     /// <summary>
@@ -126,41 +91,16 @@ internal sealed partial class SimulationTimeProvider : TimeProvider
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(delta.Ticks, 0);
 
-        lock (_lock)
-        {
-            LogAdvance(delta, _now.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture),
-                (_now + delta).ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture));
-            _now += delta;
-            _taskQueue.CurrentTimeTicks = _now.Ticks;
-        }
-    }
-
-    /// <summary>
-    /// Sets the date and time in the UTC time zone.
-    /// </summary>
-    /// <param name="value">The date and time in the UTC time zone.</param>
-    /// <remarks>
-    /// This method updates the current time and adjusts the wake times of
-    /// outstanding timers accordingly. This is similar to what happens in a real 
-    /// system when the system's time is changed - timers still fire after the same
-    /// relative duration from when they were scheduled.
-    /// </remarks>
-    public void AdjustTime(DateTimeOffset value)
-    {
-        lock (_lock)
-        {
-            var delta = value.Ticks - _now.Ticks;
-            _now = value;
-            // Adjust waiting timer due times by the same delta so they fire at the
-            // same relative time from now as they would have before the adjustment
-            _taskQueue.AdjustWaitingDueTimes(delta);
-            // Update the task queue's notion of current time
-            _taskQueue.CurrentTimeTicks = _now.Ticks;
-        }
+        var fromTicks = _taskQueue.CurrentTimeTicks;
+        var toTicks = fromTicks + delta.Ticks;
+        LogAdvance(delta,
+            new DateTimeOffset(fromTicks, TimeSpan.Zero).ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture),
+            new DateTimeOffset(toTicks, TimeSpan.Zero).ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture));
+        _taskQueue.CurrentTimeTicks = toTicks;
     }
 
     /// <inheritdoc />
-    public override long GetTimestamp() => GetUtcNow().Ticks;
+    public override long GetTimestamp() => _taskQueue.CurrentTimeTicks;
 
     /// <inheritdoc />
     public override TimeZoneInfo LocalTimeZone => _localTimeZone;
@@ -194,11 +134,9 @@ internal sealed partial class SimulationTimeProvider : TimeProvider
             if (!nextDueTime.HasValue)
                 return null;
 
-            lock (_lock)
-            {
-                var duration = TimeSpan.FromTicks(nextDueTime.Value - _now.Ticks);
-                return duration > TimeSpan.Zero ? duration : TimeSpan.Zero;
-            }
+            var currentTicks = _taskQueue.CurrentTimeTicks;
+            var duration = TimeSpan.FromTicks(nextDueTime.Value - currentTicks);
+            return duration > TimeSpan.Zero ? duration : TimeSpan.Zero;
         }
     }
 
@@ -212,13 +150,9 @@ internal sealed partial class SimulationTimeProvider : TimeProvider
         if (!nextDueTime.HasValue)
             return false;
 
-        lock (_lock)
+        if (nextDueTime.Value > _taskQueue.CurrentTimeTicks)
         {
-            if (nextDueTime.Value > _now.Ticks)
-            {
-                _now = new DateTimeOffset(nextDueTime.Value, TimeSpan.Zero);
-                _taskQueue.CurrentTimeTicks = _now.Ticks;
-            }
+            _taskQueue.CurrentTimeTicks = nextDueTime.Value;
         }
 
         return true;
@@ -248,7 +182,11 @@ internal sealed partial class SimulationTimeProvider : TimeProvider
     /// Returns a string representation this provider's idea of current time.
     /// </summary>
     /// <returns>A string representing the provider's current time.</returns>
-    public override string ToString() => _now.ToString("yyyy-MM-ddTHH:mm:ss.fff", CultureInfo.InvariantCulture);
+    public override string ToString()
+    {
+        var currentTime = new DateTimeOffset(_taskQueue.CurrentTimeTicks, TimeSpan.Zero);
+        return currentTime.ToString("yyyy-MM-ddTHH:mm:ss.fff", CultureInfo.InvariantCulture);
+    }
 
     /// <inheritdoc />
     public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)

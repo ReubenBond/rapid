@@ -122,7 +122,7 @@ public class RapidOptionsTests
             ["initial"] = ByteString.CopyFromUtf8("value")
         });
 
-        options.SetMetadata(new Dictionary<string, ByteString>());
+        options.SetMetadata([]);
 
         Assert.Empty(options.Metadata.Metadata_);
     }

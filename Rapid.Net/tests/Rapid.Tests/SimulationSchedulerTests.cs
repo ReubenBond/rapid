@@ -11,106 +11,103 @@ public sealed class SimulationSchedulerTests
     public void QueuedTasksAreNotExecutedAutomatically()
     {
         var taskQueue = new SimulationTaskQueue();
-        var scheduler = new SimulationTaskScheduler(taskQueue);
         var executed = false;
 
         var task = new Task(() => executed = true);
-        task.Start(scheduler);
+        task.Start(taskQueue.TaskScheduler);
 
         Assert.False(executed);
-        Assert.Equal(1, scheduler.PendingCount);
+        Assert.Equal(1, taskQueue.ScheduledTaskCount);
     }
 
     [Fact]
     public void StepExecutesSingleTask()
     {
         var taskQueue = new SimulationTaskQueue();
-        var scheduler = new SimulationTaskScheduler(taskQueue);
         var executed = false;
 
         var task = new Task(() => executed = true);
-        task.Start(scheduler);
+        task.Start(taskQueue.TaskScheduler);
 
-        var count = scheduler.Step();
+        var result = taskQueue.TryExecuteNext();
 
-        Assert.Equal(1, count);
+        Assert.True(result);
         Assert.True(executed);
-        Assert.Equal(0, scheduler.PendingCount);
+        Assert.Equal(0, taskQueue.ScheduledTaskCount);
     }
 
     [Fact]
     public void StepAllExecutesAllTasks()
     {
         var taskQueue = new SimulationTaskQueue();
-        var scheduler = new SimulationTaskScheduler(taskQueue);
         var count = 0;
 
         for (var i = 0; i < 5; i++)
         {
             var task = new Task(() => Interlocked.Increment(ref count));
-            task.Start(scheduler);
+            task.Start(taskQueue.TaskScheduler);
         }
 
-        var executed = scheduler.StepAll();
+        var executed = taskQueue.ExecuteAll();
 
         Assert.Equal(5, executed);
         Assert.Equal(5, count);
-        Assert.False(scheduler.HasPendingTasks);
+        Assert.Equal(0, taskQueue.ScheduledTaskCount);
     }
 
     [Fact]
     public void StepWithCountLimitsExecution()
     {
         var taskQueue = new SimulationTaskQueue();
-        var scheduler = new SimulationTaskScheduler(taskQueue);
         var count = 0;
 
         for (var i = 0; i < 10; i++)
         {
             var task = new Task(() => Interlocked.Increment(ref count));
-            task.Start(scheduler);
+            task.Start(taskQueue.TaskScheduler);
         }
 
-        var executed = scheduler.Step(3);
+        var executed = 0;
+        for (var i = 0; i < 3 && taskQueue.TryExecuteNext(); i++)
+        {
+            executed++;
+        }
 
         Assert.Equal(3, executed);
         Assert.Equal(3, count);
-        Assert.Equal(7, scheduler.PendingCount);
+        Assert.Equal(7, taskQueue.ScheduledTaskCount);
     }
 
     [Fact]
     public void ClearRemovesAllPendingTasks()
     {
         var taskQueue = new SimulationTaskQueue();
-        var scheduler = new SimulationTaskScheduler(taskQueue);
 
         for (var i = 0; i < 5; i++)
         {
             var task = new Task(() => { });
-            task.Start(scheduler);
+            task.Start(taskQueue.TaskScheduler);
         }
 
-        scheduler.Clear();
+        taskQueue.Clear();
 
-        Assert.False(scheduler.HasPendingTasks);
-        Assert.Equal(0, scheduler.PendingCount);
+        Assert.Equal(0, taskQueue.ScheduledTaskCount);
     }
 
     [Fact]
     public void TasksExecuteInFifoOrder()
     {
         var taskQueue = new SimulationTaskQueue();
-        var scheduler = new SimulationTaskScheduler(taskQueue);
         var order = new List<int>();
 
         for (var i = 0; i < 5; i++)
         {
             var index = i;
             var task = new Task(() => order.Add(index));
-            task.Start(scheduler);
+            task.Start(taskQueue.TaskScheduler);
         }
 
-        scheduler.StepAll();
+        taskQueue.ExecuteAll();
 
         Assert.Equal([0, 1, 2, 3, 4], order);
     }
@@ -119,14 +116,12 @@ public sealed class SimulationSchedulerTests
     public void SynchronizationContextPostRoutesToScheduler()
     {
         var taskQueue = new SimulationTaskQueue();
-        var scheduler = new SimulationTaskScheduler(taskQueue);
-        var syncContext = new SimulationSynchronizationContext(scheduler);
         var executed = false;
 
-        syncContext.Post(_ => executed = true, null);
+        taskQueue.SynchronizationContext.Post(_ => executed = true, null);
 
         Assert.False(executed);
-        scheduler.Step();
+        taskQueue.TryExecuteNext();
         Assert.True(executed);
     }
 
@@ -134,11 +129,9 @@ public sealed class SimulationSchedulerTests
     public void SynchronizationContextSendExecutesSynchronously()
     {
         var taskQueue = new SimulationTaskQueue();
-        var scheduler = new SimulationTaskScheduler(taskQueue);
-        var syncContext = new SimulationSynchronizationContext(scheduler);
         var executed = false;
 
-        syncContext.Send(_ => executed = true, null);
+        taskQueue.SynchronizationContext.Send(_ => executed = true, null);
 
         Assert.True(executed);
     }
@@ -147,32 +140,29 @@ public sealed class SimulationSchedulerTests
     public void SynchronizationContextCreateCopyReturnsNewInstance()
     {
         var taskQueue = new SimulationTaskQueue();
-        var scheduler = new SimulationTaskScheduler(taskQueue);
-        var syncContext = new SimulationSynchronizationContext(scheduler);
 
-        var copy = syncContext.CreateCopy();
+        var copy = taskQueue.SynchronizationContext.CreateCopy();
 
-        Assert.NotSame(syncContext, copy);
-        Assert.IsType<SimulationSynchronizationContext>(copy);
+        Assert.NotSame(taskQueue.SynchronizationContext, copy);
+        Assert.IsType<SynchronizationContext>(copy, exactMatch: false);
     }
 
     [Fact]
     public void SchedulerWithTaskQueueOrdersByTime()
     {
         var taskQueue = new SimulationTaskQueue();
-        var scheduler = new SimulationTaskScheduler(taskQueue);
         var order = new List<string>();
 
         // Queue first task
         var task1 = new Task(() => order.Add("first"));
-        task1.Start(scheduler);
+        task1.Start(taskQueue.TaskScheduler);
 
         // Advance time and queue second task
         taskQueue.AdvanceTime(TimeSpan.FromSeconds(1).Ticks);
         var task2 = new Task(() => order.Add("second"));
-        task2.Start(scheduler);
+        task2.Start(taskQueue.TaskScheduler);
 
-        scheduler.StepAll();
+        taskQueue.ExecuteAll();
 
         // First task should execute before second (queued at earlier time)
         Assert.Equal(["first", "second"], order);
@@ -182,9 +172,8 @@ public sealed class SimulationSchedulerTests
     public void TryExecuteOneReturnsFalseWhenEmpty()
     {
         var taskQueue = new SimulationTaskQueue();
-        var scheduler = new SimulationTaskScheduler(taskQueue);
 
-        var result = scheduler.TryExecuteOne();
+        var result = taskQueue.TryExecuteNext();
 
         Assert.False(result);
     }
@@ -193,17 +182,16 @@ public sealed class SimulationSchedulerTests
     public void HasPendingTasksReflectsQueueState()
     {
         var taskQueue = new SimulationTaskQueue();
-        var scheduler = new SimulationTaskScheduler(taskQueue);
 
-        Assert.False(scheduler.HasPendingTasks);
+        Assert.Equal(0, taskQueue.ScheduledTaskCount);
 
         var task = new Task(() => { });
-        task.Start(scheduler);
+        task.Start(taskQueue.TaskScheduler);
 
-        Assert.True(scheduler.HasPendingTasks);
+        Assert.True(taskQueue.ScheduledTaskCount > 0);
 
-        scheduler.Step();
+        taskQueue.TryExecuteNext();
 
-        Assert.False(scheduler.HasPendingTasks);
+        Assert.Equal(0, taskQueue.ScheduledTaskCount);
     }
 }

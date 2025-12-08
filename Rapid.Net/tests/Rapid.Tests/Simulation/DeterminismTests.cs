@@ -188,10 +188,7 @@ public sealed class DeterminismTests(ITestOutputHelper output) : IAsyncLifetime
     #region Seed Access Tests
 
     [Fact]
-    public void SeedIsAccessible()
-    {
-        Assert.Equal(TestSeed, _harness.Seed);
-    }
+    public void SeedIsAccessible() => Assert.Equal(TestSeed, _harness.Seed);
 
     #endregion
 }

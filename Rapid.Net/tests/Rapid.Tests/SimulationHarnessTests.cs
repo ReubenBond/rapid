@@ -151,11 +151,10 @@ public sealed class SimulationHarnessTests(ITestOutputHelper output) : IAsyncLif
     public void RunUntilIdleAdvancesTimeForDelayedTasks()
     {
         var executed = false;
-        var scheduler = _harness.Scheduler;
         var initialTime = _harness.TimeProvider.GetUtcNow();
 
         // Schedule a task for 1 minute in the future
-        scheduler.TaskQueue.EnqueueAfter(() => executed = true, TimeSpan.FromMinutes(1).Ticks);
+        _harness.TaskQueue.EnqueueAfter(() => executed = true, TimeSpan.FromMinutes(1).Ticks);
 
         var result = _harness.RunUntilIdle();
 
@@ -167,11 +166,10 @@ public sealed class SimulationHarnessTests(ITestOutputHelper output) : IAsyncLif
     [Fact]
     public void RunUntilIdleRespectsMaxSimulatedTime()
     {
-        var scheduler = _harness.Scheduler;
         var initialTime = _harness.TimeProvider.GetUtcNow();
 
         // Schedule a task for 10 minutes in the future
-        scheduler.TaskQueue.EnqueueAfter(() => { }, TimeSpan.FromMinutes(10).Ticks);
+        _harness.TaskQueue.EnqueueAfter(() => { }, TimeSpan.FromMinutes(10).Ticks);
 
         // Limit to 5 minutes
         var result = _harness.RunUntilIdle(maxSimulatedTime: TimeSpan.FromMinutes(5));
@@ -182,18 +180,18 @@ public sealed class SimulationHarnessTests(ITestOutputHelper output) : IAsyncLif
     }
 
     [Fact]
-    public void SchedulerIsIdlePropertyWorks()
+    public void TaskQueueIsIdlePropertyWorks()
     {
-        Assert.True(_harness.Scheduler.IsIdle);
+        Assert.False(_harness.TaskQueue.HasItems);
 
         var task = new Task(() => { });
         task.Start(_harness.Scheduler);
 
-        Assert.False(_harness.Scheduler.IsIdle);
+        Assert.True(_harness.TaskQueue.HasItems);
 
-        _harness.Scheduler.StepAll();
+        _harness.TaskQueue.ExecuteAll();
 
-        Assert.True(_harness.Scheduler.IsIdle);
+        Assert.False(_harness.TaskQueue.HasItems);
     }
 
     [Fact]

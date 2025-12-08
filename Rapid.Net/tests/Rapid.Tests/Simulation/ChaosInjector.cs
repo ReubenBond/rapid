@@ -156,7 +156,7 @@ internal sealed class ChaosInjector(SimulationHarness harness)
         for (var i = 0; i < steps; i++)
         {
             // Execute pending tasks
-            _harness.Scheduler.StepAll();
+            _harness.TaskQueue.ExecuteAll();
 
             // Maybe inject a fault
             if (MaybeInjectFault())
