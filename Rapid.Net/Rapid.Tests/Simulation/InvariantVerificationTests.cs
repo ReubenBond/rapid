@@ -62,11 +62,10 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task AllNodesInViewAreKnownNodes()
+    public void AllNodesInViewAreKnownNodes()
     {
         var seedNode = _harness.CreateSeedNode();
-        var joiner = await _harness.DriveToCompletionAsync(
-            () => _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken));
+        var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
 
         _harness.RunUntilConverged(expectedSize: 2);
 
@@ -98,11 +97,10 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task NoSplitBrainWithTwoNodes()
+    public void NoSplitBrainWithTwoNodes()
     {
         var seedNode = _harness.CreateSeedNode();
-        var joiner = await _harness.DriveToCompletionAsync(
-            () => _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken));
+        var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
 
         _harness.RunUntilConverged(expectedSize: 2);
 
@@ -123,13 +121,12 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ConfigurationIdMonotonicityAfterJoin()
+    public void ConfigurationIdMonotonicityAfterJoin()
     {
         var seedNode = _harness.CreateSeedNode();
         var initialConfigId = seedNode.CurrentView.ConfigurationId;
 
-        var joiner = await _harness.DriveToCompletionAsync(
-            () => _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken));
+        var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
 
         _harness.RunUntilConverged(expectedSize: 2);
 
@@ -161,11 +158,10 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task MembershipConsistencyWithConvergedCluster()
+    public void MembershipConsistencyWithConvergedCluster()
     {
         var seedNode = _harness.CreateSeedNode();
-        var joiner = await _harness.DriveToCompletionAsync(
-            () => _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken));
+        var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
 
         _harness.RunUntilConverged(expectedSize: 2);
 
@@ -196,11 +192,10 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task CheckAllWithTwoNodes()
+    public void CheckAllWithTwoNodes()
     {
         var seedNode = _harness.CreateSeedNode();
-        var joiner = await _harness.DriveToCompletionAsync(
-            () => _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken));
+        var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
 
         _harness.RunUntilConverged(expectedSize: 2);
 
@@ -254,13 +249,12 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
     /// protocol within a reasonable timeout, ensuring the system doesn't hang.
     /// </summary>
     [Fact]
-    public async Task JoinEventuallyCompletes()
+    public void JoinEventuallyCompletes()
     {
         var seedNode = _harness.CreateSeedNode();
         
         // Start a join operation and drive to completion
-        var joiner = await _harness.DriveToCompletionAsync(
-            () => _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken));
+        var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
 
         Assert.True(joiner.IsInitialized);
     }
@@ -273,11 +267,10 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
     /// failed node (needs quorum), so we only verify that the failure is detected (alerts queued).
     /// </summary>
     [Fact(Skip = "Requires 3+ node cluster for consensus after failure - 2-node cluster cannot reach quorum")]
-    public async Task FailureDetectionEventuallyOccurs()
+    public void FailureDetectionEventuallyOccurs()
     {
         var seedNode = _harness.CreateSeedNode();
-        var joiner = await _harness.DriveToCompletionAsync(
-            () => _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken));
+        var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
 
         _harness.RunUntilConverged(expectedSize: 2);
 
@@ -297,11 +290,10 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
     /// issues don't permanently damage the cluster's ability to reach consensus.
     /// </summary>
     [Fact]
-    public async Task PartitionHealEventuallyConverges()
+    public void PartitionHealEventuallyConverges()
     {
         var seedNode = _harness.CreateSeedNode();
-        var joiner = await _harness.DriveToCompletionAsync(
-            () => _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken));
+        var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
 
         _harness.RunUntilConverged(expectedSize: 2);
 
@@ -349,5 +341,3 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
 
     #endregion
 }
-
-

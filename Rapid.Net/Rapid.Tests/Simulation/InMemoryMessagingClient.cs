@@ -19,7 +19,7 @@ namespace Rapid.Tests.Simulation;
 /// </summary>
 internal sealed class InMemoryMessagingClient : IMessagingClient
 {
-    private readonly SimulationEnvironment _environment;
+    private readonly SimulationHarness _harness;
     private readonly Endpoint _localEndpoint;
     private readonly ILogger<InMemoryMessagingClient> _logger;
     private readonly ConcurrentDictionary<int, Task> _pendingTasks = new();
@@ -32,11 +32,11 @@ internal sealed class InMemoryMessagingClient : IMessagingClient
     /// </summary>
     public TimeSpan MessageTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
-    public InMemoryMessagingClient(SimulationEnvironment environment, Endpoint localEndpoint)
+    public InMemoryMessagingClient(SimulationHarness harness, Endpoint localEndpoint)
     {
-        _environment = environment;
+        _harness = harness;
         _localEndpoint = localEndpoint;
-        _logger = environment.LoggerFactory?.CreateLogger<InMemoryMessagingClient>()
+        _logger = harness.LoggerFactory?.CreateLogger<InMemoryMessagingClient>()
             ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<InMemoryMessagingClient>.Instance;
     }
 
@@ -51,7 +51,7 @@ internal sealed class InMemoryMessagingClient : IMessagingClient
             request.ContentCase, localAddr, remoteAddr);
 
         // Check if message can be delivered
-        if (!_environment.Network.CanDeliver(localAddr, remoteAddr))
+        if (!_harness.Network.CanDeliver(localAddr, remoteAddr))
         {
             _logger.LogWarning("Message {MessageType} from {Local} to {Remote} blocked by network partition",
                 request.ContentCase, localAddr, remoteAddr);
@@ -60,7 +60,7 @@ internal sealed class InMemoryMessagingClient : IMessagingClient
         }
 
         // Find the target node
-        var targetNode = _environment.GetNode(remoteAddr);
+        var targetNode = _harness.GetNode(remoteAddr);
         if (targetNode == null)
         {
             _logger.LogError("Target node {Remote} not found when sending from {Local}",
@@ -100,10 +100,10 @@ internal sealed class InMemoryMessagingClient : IMessagingClient
 #pragma warning restore CA1068
     {
         // Get the task scheduler to use
-        var scheduler = _environment.TaskScheduler ?? TaskScheduler.Default;
+        var scheduler = _harness.Scheduler;
 
         // Apply network delay if configured
-        var delay = _environment.Network.GetMessageDelay();
+        var delay = _harness.Network.GetMessageDelay();
 
         // Schedule the delivery using Task.Factory.StartNew with the simulation's TaskScheduler
         // The .Unwrap() is needed because StartNew returns Task<Task> for async delegates
@@ -113,9 +113,9 @@ internal sealed class InMemoryMessagingClient : IMessagingClient
                 // Create a CTS that we can cancel from multiple sources
                 using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
-                // Start a timeout task using the environment's TimeProvider
+                // Start a timeout task using the harness's TimeProvider
                 // This ensures timeouts work correctly with FakeTimeProvider in tests
-                var timeoutTask = Task.Delay(MessageTimeout, _environment.TimeProvider, CancellationToken.None)
+                var timeoutTask = Task.Delay(MessageTimeout, _harness.TimeProvider, CancellationToken.None)
                     .ContinueWith(_ =>
                     {
                         if (!responseTcs.Task.IsCompleted && !cancellationToken.IsCancellationRequested)
@@ -134,7 +134,7 @@ internal sealed class InMemoryMessagingClient : IMessagingClient
                     {
                         _logger.LogTrace("Simulating {Delay}ms delay for message from {Local} to {Remote}",
                             delay.TotalMilliseconds, localAddr, remoteAddr);
-                        await Task.Delay(delay, _environment.TimeProvider, timeoutCts.Token).ConfigureAwait(true);
+                        await Task.Delay(delay, _harness.TimeProvider, timeoutCts.Token).ConfigureAwait(true);
                     }
 
                     _logger.LogTrace("Delivering {MessageType} from {Local} to {Remote}",

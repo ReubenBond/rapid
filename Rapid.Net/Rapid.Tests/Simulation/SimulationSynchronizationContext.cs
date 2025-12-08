@@ -39,19 +39,50 @@ internal sealed class SimulationSynchronizationContext(SimulationTaskScheduler s
     public override SynchronizationContext CreateCopy() => new SimulationSynchronizationContext(Scheduler);
 
     /// <summary>
-    /// Installs this synchronization context on the current thread.
+    /// Installs this synchronization context on the current thread and returns a scope
+    /// that restores the previous context when disposed.
     /// </summary>
-    /// <returns>The previous synchronization context, which should be restored when done.</returns>
-    public SynchronizationContext? Install()
+    /// <returns>A disposable scope that restores the previous synchronization context when disposed.</returns>
+    /// <example>
+    /// <code>
+    /// using var _ = syncContext.Install();
+    /// // Code here runs with the simulation synchronization context
+    /// // Previous context is automatically restored when scope ends
+    /// </code>
+    /// </example>
+    public SynchronizationContextScope Install()
     {
         var previous = Current;
         SetSynchronizationContext(this);
-        return previous;
+        return new SynchronizationContextScope(previous);
+    }
+}
+
+/// <summary>
+/// A disposable scope that restores the previous synchronization context when disposed.
+/// </summary>
+/// <remarks>
+/// This struct is returned by <see cref="SimulationSynchronizationContext.Install"/> and
+/// should be used with a using statement to ensure the previous context is restored.
+/// </remarks>
+internal readonly struct SynchronizationContextScope : IDisposable
+{
+    private readonly SynchronizationContext? _previous;
+
+    /// <summary>
+    /// Creates a new scope that will restore the specified context when disposed.
+    /// </summary>
+    /// <param name="previous">The synchronization context to restore.</param>
+    internal SynchronizationContextScope(SynchronizationContext? previous)
+    {
+        _previous = previous;
     }
 
     /// <summary>
     /// Restores the previous synchronization context.
     /// </summary>
-    /// <param name="previous">The previous synchronization context to restore.</param>
-    public static void Restore(SynchronizationContext? previous) => SetSynchronizationContext(previous);
+    public void Dispose()
+    {
+        SynchronizationContext.SetSynchronizationContext(_previous);
+    }
 }

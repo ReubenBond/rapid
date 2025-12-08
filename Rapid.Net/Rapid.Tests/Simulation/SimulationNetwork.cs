@@ -9,7 +9,7 @@ namespace Rapid.Tests.Simulation;
 /// </summary>
 internal sealed class SimulationNetwork
 {
-    private readonly SimulationEnvironment _environment;
+    private readonly SimulationHarness _harness;
     private readonly ConcurrentDictionary<string, HashSet<string>> _partitions = new();
     private readonly Lock _partitionLock = new();
     private readonly ILogger<SimulationNetwork> _logger;
@@ -41,10 +41,10 @@ internal sealed class SimulationNetwork
     /// </summary>
     public TimeSpan DefaultMessageTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
-    internal SimulationNetwork(SimulationEnvironment environment)
+    internal SimulationNetwork(SimulationHarness harness)
     {
-        _environment = environment;
-        _logger = environment.LoggerFactory?.CreateLogger<SimulationNetwork>()
+        _harness = harness;
+        _logger = harness.LoggerFactory?.CreateLogger<SimulationNetwork>()
             ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<SimulationNetwork>.Instance;
         // Disable delays by default for faster tests
         EnableDelays = false;
@@ -119,7 +119,7 @@ internal sealed class SimulationNetwork
     public void IsolateNode(string nodeAddress)
     {
         _logger.LogInformation("Isolating node {Node}", nodeAddress);
-        foreach (var node in _environment.Nodes)
+        foreach (var node in _harness.Nodes)
         {
             var addr = RapidUtils.Loggable(node.Address);
             if (addr != nodeAddress)
@@ -135,7 +135,7 @@ internal sealed class SimulationNetwork
     public void ReconnectNode(string nodeAddress)
     {
         _logger.LogInformation("Reconnecting isolated node {Node}", nodeAddress);
-        foreach (var node in _environment.Nodes)
+        foreach (var node in _harness.Nodes)
         {
             var addr = RapidUtils.Loggable(node.Address);
             if (addr != nodeAddress)
@@ -151,7 +151,7 @@ internal sealed class SimulationNetwork
     internal bool CanDeliver(string sourceAddress, string targetAddress)
     {
         // Check for message drop
-        if (MessageDropRate > 0 && _environment.Random.Chance(MessageDropRate))
+        if (MessageDropRate > 0 && _harness.Random.Chance(MessageDropRate))
         {
             _logger.LogTrace("Message from {Source} to {Target} dropped (random)", sourceAddress, targetAddress);
             return false;
@@ -180,7 +180,7 @@ internal sealed class SimulationNetwork
             return TimeSpan.Zero;
         }
 
-        var jitter = _environment.Random.NextTimeSpan(MaxJitter);
+        var jitter = _harness.Random.NextTimeSpan(MaxJitter);
         return BaseMessageDelay + jitter;
     }
 }

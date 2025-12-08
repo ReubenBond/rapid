@@ -13,7 +13,7 @@ public sealed class NodeFailureTests : IAsyncLifetime
 {
     private readonly ITestOutputHelper _output;
     private readonly ILoggerFactory _loggerFactory;
-    private SimulationTestHarness _harness = null!;
+    private SimulationHarness _harness = null!;
     private const int TestSeed = 23456;
 
     public NodeFailureTests(ITestOutputHelper output)
@@ -25,7 +25,7 @@ public sealed class NodeFailureTests : IAsyncLifetime
     public ValueTask InitializeAsync()
     {
         _output.WriteLine($"[NodeFailureTests] Initializing with seed {TestSeed}");
-        _harness = new SimulationTestHarness(seed: TestSeed, loggerFactory: _loggerFactory);
+        _harness = new SimulationHarness(seed: TestSeed, loggerFactory: _loggerFactory);
         return ValueTask.CompletedTask;
     }
 

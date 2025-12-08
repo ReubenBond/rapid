@@ -7,12 +7,12 @@ namespace Rapid.Tests;
 /// </summary>
 public sealed class SimulationTestHarnessTests : IAsyncLifetime
 {
-    private SimulationTestHarness _harness = null!;
+    private SimulationHarness _harness = null!;
 
     public ValueTask InitializeAsync()
     {
         // Use a fixed seed for reproducibility
-        _harness = new SimulationTestHarness(seed: 12345);
+        _harness = new SimulationHarness(seed: 12345);
         return ValueTask.CompletedTask;
     }
 
@@ -84,9 +84,9 @@ public sealed class SimulationTestHarnessTests : IAsyncLifetime
     [Fact]
     public async Task AdvanceTimeMovesTimeProviderForward()
     {
-        // Create a harness with fake time enabled for this test
-        await using var fakeTimeHarness = new SimulationTestHarness(seed: 99999, useFakeTime: true);
-        var initialTime = fakeTimeHarness.TimeProvider!.GetUtcNow();
+        // Create a harness (always uses fake time now)
+        await using var fakeTimeHarness = new SimulationHarness(seed: 99999);
+        var initialTime = fakeTimeHarness.TimeProvider.GetUtcNow();
         fakeTimeHarness.AdvanceTime(TimeSpan.FromMinutes(5));
         var newTime = fakeTimeHarness.TimeProvider.GetUtcNow();
 
@@ -108,8 +108,8 @@ public sealed class SimulationTestHarnessTests : IAsyncLifetime
     [Fact]
     public void SimulationEnvironmentCreatesDerivedRandom()
     {
-        var derived1 = _harness.Environment.CreateDerivedRandom();
-        var derived2 = _harness.Environment.CreateDerivedRandom();
+        var derived1 = _harness.CreateDerivedRandom();
+        var derived2 = _harness.CreateDerivedRandom();
 
         // Different derived randoms should produce different sequences
         var seq1 = Enumerable.Range(0, 10).Select(_ => derived1.Next()).ToList();

@@ -59,16 +59,16 @@ internal sealed class SimulationNode : IDisposable
     internal InMemoryMessagingClient MessagingClient { get; }
 
     private SimulationNode(
-        SimulationEnvironment environment,
+        SimulationHarness harness,
         Endpoint address,
         RapidProtocolOptions? protocolOptions,
         ILoggerFactory? loggerFactory)
     {
-        _environment = environment;
+        _harness = harness;
         Address = address;
-        Random = environment.CreateDerivedRandom();
+        Random = harness.CreateDerivedRandom();
 
-        var factory = loggerFactory ?? environment.LoggerFactory;
+        var factory = loggerFactory ?? harness.LoggerFactory;
         _logger = factory?.CreateLogger<SimulationNode>()
             ?? NullLogger<SimulationNode>.Instance;
         _membershipServiceLogger = factory?.CreateLogger<MembershipService>()
@@ -81,11 +81,11 @@ internal sealed class SimulationNode : IDisposable
         // Create shared resources with the simulation's time provider and task scheduler
         var sharedResourcesLogger = factory?.CreateLogger<SharedResources>()
             ?? NullLogger<SharedResources>.Instance;
-        _sharedResources = new SharedResources(sharedResourcesLogger, environment.TimeProvider, environment.TaskScheduler);
+        _sharedResources = new SharedResources(sharedResourcesLogger, harness.TimeProvider, harness.Scheduler);
 
 
         // Create in-memory messaging client with a shorter timeout for simulations
-        MessagingClient = new InMemoryMessagingClient(environment, address)
+        MessagingClient = new InMemoryMessagingClient(harness, address)
         {
             // Use a 5 second timeout for simulations - this is long enough for consensus
             // but short enough that tests don't hang when nodes are crashed
@@ -116,33 +116,33 @@ internal sealed class SimulationNode : IDisposable
             fastPaxosLogger,
             paxosLogger);
 
-        // Register with the simulation environment
-        environment.RegisterNode(this);
+        // Register with the simulation harness
+        harness.RegisterNode(this);
     }
 
     /// <summary>
     /// Creates a new simulation node.
     /// </summary>
     public static SimulationNode Create(
-        SimulationEnvironment environment,
+        SimulationHarness harness,
         string hostname,
         int port,
         RapidProtocolOptions? protocolOptions = null,
         ILoggerFactory? loggerFactory = null)
     {
-        ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(harness);
         var address = RapidUtils.HostFromParts(hostname, port);
-        return new SimulationNode(environment, address, protocolOptions, loggerFactory);
+        return new SimulationNode(harness, address, protocolOptions, loggerFactory);
     }
 
     /// <summary>
     /// Creates a new simulation node with a numeric identifier.
     /// </summary>
     public static SimulationNode Create(
-        SimulationEnvironment environment,
+        SimulationHarness harness,
         int nodeId,
         RapidProtocolOptions? protocolOptions = null,
-        ILoggerFactory? loggerFactory = null) => Create(environment, "node", nodeId, protocolOptions, loggerFactory);
+        ILoggerFactory? loggerFactory = null) => Create(harness, "node", nodeId, protocolOptions, loggerFactory);
 
     /// <summary>
     /// Starts this node as a new single-node cluster (seed node).
@@ -229,7 +229,7 @@ internal sealed class SimulationNode : IDisposable
             {
                 _logger.LogWarning("Node {Address} join attempt {Attempt} failed: {Message}. Retrying in {Delay}ms",
                     RapidUtils.Loggable(Address), attempt + 1, ex.Message, retryDelay.TotalMilliseconds);
-                await Task.Delay(retryDelay, _environment.TimeProvider, cancellationToken).ConfigureAwait(true);
+                await Task.Delay(retryDelay, _harness.TimeProvider, cancellationToken).ConfigureAwait(true);
                 retryDelay *= 2; // Exponential backoff
             }
         }
@@ -465,7 +465,7 @@ internal sealed class SimulationNode : IDisposable
         _membershipService?.Dispose();
         _sharedResources.Dispose();
         MessagingClient.Dispose();
-        _environment.UnregisterNode(this);
+        _harness.UnregisterNode(this);
         
         _logger.LogDebug("Node {Address} disposed", RapidUtils.Loggable(Address));
     }

@@ -12,7 +12,7 @@ public sealed class EdgeCaseTests : IAsyncLifetime
 {
     private readonly ITestOutputHelper _output;
     private readonly ILoggerFactory _loggerFactory;
-    private SimulationTestHarness _harness = null!;
+    private SimulationHarness _harness = null!;
     private const int TestSeed = 67890;
 
     public EdgeCaseTests(ITestOutputHelper output)
@@ -24,7 +24,7 @@ public sealed class EdgeCaseTests : IAsyncLifetime
     public ValueTask InitializeAsync()
     {
         _output.WriteLine($"[EdgeCaseTests] Initializing with seed {TestSeed}");
-        _harness = new SimulationTestHarness(seed: TestSeed, loggerFactory: _loggerFactory);
+        _harness = new SimulationHarness(seed: TestSeed, loggerFactory: _loggerFactory);
         return ValueTask.CompletedTask;
     }
 
@@ -180,8 +180,7 @@ public sealed class EdgeCaseTests : IAsyncLifetime
     [Fact]
     public void UninitializedNodeThrowsOnHandleRequest()
     {
-        var environment = _harness.Environment;
-        var node = SimulationNode.Create(environment, nodeId: 99);
+        var node = SimulationNode.Create(_harness, nodeId: 99);
 
         // Node not initialized - should not be in a valid state
         Assert.False(node.IsInitialized);

@@ -13,7 +13,7 @@ public sealed class ClusterBasicTests : IAsyncLifetime
 {
     private readonly ITestOutputHelper _output;
     private readonly ILoggerFactory _loggerFactory;
-    private SimulationTestHarness _harness = null!;
+    private SimulationHarness _harness = null!;
     private const int TestSeed = 12345;
 
     public ClusterBasicTests(ITestOutputHelper output)
@@ -25,7 +25,7 @@ public sealed class ClusterBasicTests : IAsyncLifetime
     public ValueTask InitializeAsync()
     {
         _output.WriteLine($"[ClusterBasicTests] Initializing with seed {TestSeed}");
-        _harness = new SimulationTestHarness(seed: TestSeed, loggerFactory: _loggerFactory);
+        _harness = new SimulationHarness(seed: TestSeed, loggerFactory: _loggerFactory);
         return ValueTask.CompletedTask;
     }
 

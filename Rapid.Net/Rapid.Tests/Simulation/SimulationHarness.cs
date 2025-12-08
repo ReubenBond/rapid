@@ -20,7 +20,6 @@ internal sealed class SimulationHarness : IAsyncDisposable
     private readonly ConcurrentDictionary<string, SimulationNode> _nodeRegistry = new();
     private readonly List<SimulationNode> _nodes = [];
     private readonly SimulationSynchronizationContext _syncContext;
-    private readonly SynchronizationContext? _previousSyncContext;
     private readonly List<SimulationEvent> _eventLog = [];
     private readonly Lock _eventLogLock = new();
     private readonly Lock _randomLock = new();
@@ -53,9 +52,8 @@ internal sealed class SimulationHarness : IAsyncDisposable
         // Create network
         Network = new SimulationNetwork(this);
 
-        // Install synchronization context
+        // Create synchronization context (but don't install it globally - install per-operation)
         _syncContext = new SimulationSynchronizationContext(Scheduler);
-        _previousSyncContext = _syncContext.Install();
 
         LogEvent(SimulationEventType.HarnessCreated, $"Seed: {seed}");
     }
@@ -359,9 +357,11 @@ internal sealed class SimulationHarness : IAsyncDisposable
     /// </summary>
     public int AdvanceTimeAndStep(TimeSpan duration)
     {
+        using var _ = _syncContext.Install();
+
         TimeProvider.Advance(duration);
         LogEvent(SimulationEventType.TimeAdvanced, $"Time advanced by {duration}");
-        return StepAll();
+        return StepAllCore();
     }
 
     #endregion
@@ -373,6 +373,33 @@ internal sealed class SimulationHarness : IAsyncDisposable
     /// </summary>
     public bool Step()
     {
+        using var _ = _syncContext.Install();
+        return StepCore();
+    }
+
+    /// <summary>
+    /// Executes the specified number of pending tasks.
+    /// </summary>
+    public int Step(int count)
+    {
+        using var _ = _syncContext.Install();
+        return StepCore(count);
+    }
+
+    /// <summary>
+    /// Executes all pending tasks.
+    /// </summary>
+    public int StepAll()
+    {
+        using var _ = _syncContext.Install();
+        return StepAllCore();
+    }
+
+    /// <summary>
+    /// Core implementation of Step without context installation (for internal use).
+    /// </summary>
+    private bool StepCore()
+    {
         var result = Scheduler.TryExecuteOne();
         if (result)
         {
@@ -382,9 +409,9 @@ internal sealed class SimulationHarness : IAsyncDisposable
     }
 
     /// <summary>
-    /// Executes the specified number of pending tasks.
+    /// Core implementation of Step(count) without context installation (for internal use).
     /// </summary>
-    public int Step(int count)
+    private int StepCore(int count)
     {
         var executed = Scheduler.Step(count);
         LogicalTime += executed;
@@ -392,9 +419,9 @@ internal sealed class SimulationHarness : IAsyncDisposable
     }
 
     /// <summary>
-    /// Executes all pending tasks.
+    /// Core implementation of StepAll without context installation (for internal use).
     /// </summary>
-    public int StepAll()
+    private int StepAllCore()
     {
         var executed = Scheduler.StepAll();
         LogicalTime += executed;
@@ -412,6 +439,16 @@ internal sealed class SimulationHarness : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(condition);
 
+        using var _ = _syncContext.Install();
+
+        return RunUntilCore(condition, maxIterations);
+    }
+
+    /// <summary>
+    /// Core implementation of RunUntil without context installation (for internal use).
+    /// </summary>
+    private bool RunUntilCore(Func<bool> condition, int maxIterations)
+    {
         for (var i = 0; i < maxIterations; i++)
         {
             if (condition())
@@ -446,6 +483,16 @@ internal sealed class SimulationHarness : IAsyncDisposable
     /// Runs the simulation until it becomes idle.
     /// </summary>
     public bool RunUntilIdle(TimeSpan? maxSimulatedTime = null, int maxIterations = 100000)
+    {
+        using var _ = _syncContext.Install();
+
+        return RunUntilIdleCore(maxSimulatedTime, maxIterations);
+    }
+
+    /// <summary>
+    /// Core implementation of RunUntilIdle without context installation (for internal use).
+    /// </summary>
+    private bool RunUntilIdleCore(TimeSpan? maxSimulatedTime, int maxIterations)
     {
         var startTime = TimeProvider.GetUtcNow();
         var maxEndTime = maxSimulatedTime.HasValue ? startTime + maxSimulatedTime.Value : DateTimeOffset.MaxValue;
@@ -485,9 +532,11 @@ internal sealed class SimulationHarness : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(taskFactory);
 
+        using var _ = _syncContext.Install();
+
         var task = taskFactory();
 
-        if (!RunUntil(() => task.IsCompleted, maxIterations))
+        if (!RunUntilCore(() => task.IsCompleted, maxIterations))
         {
             if (!task.IsCompleted)
             {
@@ -505,9 +554,11 @@ internal sealed class SimulationHarness : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(taskFactory);
 
+        using var _ = _syncContext.Install();
+
         var task = taskFactory();
 
-        if (!RunUntil(() => task.IsCompleted, maxIterations))
+        if (!RunUntilCore(() => task.IsCompleted, maxIterations))
         {
             if (!task.IsCompleted)
             {
@@ -540,6 +591,32 @@ internal sealed class SimulationHarness : IAsyncDisposable
         CancellationToken cancellationToken = default)
     {
         WaitForConvergence(expectedSize);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Waits for a specific node to reach the expected membership size.
+    /// </summary>
+    public void WaitForNodeSize(SimulationNode node, int expectedSize, int maxIterations = 100000)
+    {
+        ArgumentNullException.ThrowIfNull(node);
+        if (!RunUntil(() => node.MembershipSize == expectedSize, maxIterations))
+        {
+            throw new TimeoutException($"Node did not reach size {expectedSize}. Current size: {node.MembershipSize}");
+        }
+    }
+
+    /// <summary>
+    /// Waits for a specific node to reach the expected membership size (async version for compatibility).
+    /// </summary>
+    public Task WaitForNodeSizeAsync(
+        SimulationNode node,
+        int expectedSize,
+        TimeSpan timeout,
+        TimeSpan? stepSize = null,
+        CancellationToken cancellationToken = default)
+    {
+        WaitForNodeSize(node, expectedSize);
         return Task.CompletedTask;
     }
 
@@ -649,7 +726,6 @@ internal sealed class SimulationHarness : IAsyncDisposable
         if (_disposed) return;
         _disposed = true;
 
-        SimulationSynchronizationContext.Restore(_previousSyncContext);
         Scheduler.Clear();
 
         foreach (var node in _nodes)

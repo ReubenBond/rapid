@@ -13,7 +13,7 @@ public sealed class IntegrationTests : IAsyncLifetime
 {
     private readonly ITestOutputHelper _output;
     private readonly ILoggerFactory _loggerFactory;
-    private SimulationTestHarness _harness = null!;
+    private SimulationHarness _harness = null!;
     private const int TestSeed = 90123;
 
     public IntegrationTests(ITestOutputHelper output)
@@ -25,8 +25,8 @@ public sealed class IntegrationTests : IAsyncLifetime
     public ValueTask InitializeAsync()
     {
         _output.WriteLine($"[IntegrationTests] Initializing with seed {TestSeed}");
-        // Use fake time for deterministic and fast test execution
-        _harness = new SimulationTestHarness(seed: TestSeed, loggerFactory: _loggerFactory, useFakeTime: true);
+        // Harness always uses fake time for deterministic and fast test execution
+        _harness = new SimulationHarness(seed: TestSeed, loggerFactory: _loggerFactory);
         return ValueTask.CompletedTask;
     }
 
@@ -283,11 +283,11 @@ public sealed class IntegrationTests : IAsyncLifetime
     #region Harness Utilities
 
     [Fact]
-    public void HarnessEnvironmentAccessible()
+    public void HarnessPropertiesAccessible()
     {
-        Assert.NotNull(_harness.Environment);
         Assert.NotNull(_harness.Random);
         Assert.NotNull(_harness.Network);
+        Assert.NotNull(_harness.TimeProvider);
     }
 
     [Fact]
