@@ -159,7 +159,7 @@ internal sealed partial class FastPaxos : IDisposable
         _broadcaster.Broadcast(proposalMessage, cancellationToken);
 
         LogSchedulingClassicRound(recoveryDelay);
-        var classicRoundTask = ScheduleClassicRoundAsync(recoveryDelay, _sharedResources.ShuttingDown);
+        var classicRoundTask = ScheduleClassicRoundAsync(recoveryDelay, _sharedResources.ShuttingDownToken);
         _sharedResources.TrackBackgroundTask(classicRoundTask);
     }
 

@@ -341,13 +341,13 @@ public sealed class ChaosTests : IAsyncLifetime
     /// is respected by the chaos injector.
     /// </summary>
     [Fact]
-    public async Task CombinedFaultsUnderLoad()
+    public void CombinedFaultsUnderLoad()
     {
         // Create a cluster
         var nodes = new List<SimulationNode>();
         for (var i = 0; i < 5; i++)
         {
-            nodes.Add(_harness.InnerHarness.CreateSeedNode(i));
+            nodes.Add(_harness.CreateSeedNode(i));
         }
 
         // Enable multiple types of faults simultaneously

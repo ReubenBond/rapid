@@ -15,10 +15,11 @@ internal sealed partial class RapidClusterService(
     IMessagingClient messagingClient,
     IMembershipServiceFactory membershipServiceFactory,
     SharedResources sharedResources,
-    ILoggerFactory loggerFactory) : BackgroundService
+    ILoggerFactory loggerFactory) : BackgroundService, IAsyncDisposable
 {
     private readonly RapidOptions _options = options.Value;
     private readonly ILogger<RapidClusterService> _logger = loggerFactory.CreateLogger<RapidClusterService>();
+    private int _disposed;
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Starting Rapid cluster service on {ListenAddress}")]
     private partial void LogStarting(string ListenAddress);
@@ -167,7 +168,6 @@ internal sealed partial class RapidClusterService(
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
         LogStopping();
-        MembershipService?.Shutdown();
 
         // Wait for background tasks to complete gracefully
         try
@@ -186,8 +186,28 @@ internal sealed partial class RapidClusterService(
 
     public override void Dispose()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return; // Already disposed
+        }
+
         MembershipService?.Dispose();
-        sharedResources.Dispose();
+        base.Dispose();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return; // Already disposed
+        }
+
+        if (MembershipService != null)
+        {
+            await MembershipService.DisposeAsync().ConfigureAwait(false);
+        }
+
+        // Call base Dispose (BackgroundService.Dispose)
         base.Dispose();
     }
 }

@@ -31,4 +31,8 @@
 		<ProjectReference Include="..\Rapid.Core\Rapid.Core.csproj" />
 	</ItemGroup>
 
+  <ItemGroup>
+    <None Include="$(MsBuildThisFileDirectory)xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

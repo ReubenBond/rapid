@@ -15,7 +15,7 @@ namespace Rapid;
 /// Note: This class is not thread-safe yet. RpcServer.start() uses a single threaded messagingExecutor during the server
 /// initialization to make sure that only a single thread runs the process* methods.
 /// </summary>
-internal sealed partial class MembershipService : IMembershipServiceHandler, IDisposable
+internal sealed partial class MembershipService : IMembershipServiceHandler, IAsyncDisposable, IDisposable
 {
     private readonly ILogger<MembershipService> _logger;
     private readonly MultiNodeCutDetector _cutDetection;
@@ -34,10 +34,9 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
 
     // Fields used by batching logic.
     private readonly Channel<AlertMessage> _sendQueue;
-    private readonly Lock _batchSchedulerLock = new();
     private readonly SharedResources _sharedResources;
-    private readonly CancellationTokenSource _shutdownCts = new();
     private readonly List<IDisposable> _failureDetectors = [];
+    private int _disposed;
 
     // Failure detector
     private readonly IEdgeFailureDetectorFactory _fdFactory;
@@ -207,6 +206,9 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
     [LoggerMessage(Level = LogLevel.Debug, Message = "Dispose: disposing MembershipService resources")]
     private partial void LogDispose();
 
+    [LoggerMessage(Level = LogLevel.Debug, Message = "FastPaxos decided continuation skipped due to shutdown")]
+    private partial void LogFastPaxosDecidedSkippedShutdown();
+
     private readonly struct LoggableRingNumbers(IEnumerable<int> ringNumbers)
     {
         private readonly IEnumerable<int> _ringNumbers = ringNumbers;
@@ -268,7 +270,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         }
 
         // Start background jobs and track them
-        var alertBatcherTask = Task.Factory.StartNew(AlertBatcherAsync, _shutdownCts.Token, TaskCreationOptions.None, _sharedResources.TaskScheduler).Unwrap();
+        var alertBatcherTask = Task.Factory.StartNew(AlertBatcherAsync, _sharedResources.ShuttingDownToken, TaskCreationOptions.None, _sharedResources.TaskScheduler).Unwrap();
         _sharedResources.TrackBackgroundTask(alertBatcherTask);
 
         _broadcaster.SetMembership([.. _membershipView.GetRing(0)]);
@@ -278,15 +280,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         // Prepare consensus instance
         _fastPaxosInstance = _fastPaxosFactory.Create(_myAddr, _membershipView.ConfigurationId,
                                           _membershipView.Size, _broadcaster);
-        _fastPaxosInstance.Decided.ContinueWith(t =>
-        {
-            if (t.IsFaulted)
-            {
-                LogFastPaxosDecidedFaulted(t.Exception!);
-                return;
-            }
-            DecideViewChange(t.Result);
-        }, scheduler: _sharedResources.TaskScheduler);
+        RegisterFastPaxosDecidedContinuation(_fastPaxosInstance);
 
         CreateFailureDetectorsForCurrentConfiguration();
 
@@ -441,7 +435,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
             }
         }
 
-        return await tcs.Task.ConfigureAwait(true);
+        return await tcs.Task.WaitAsync(cancellationToken).ConfigureAwait(true);
     }
 
     /// <summary>
@@ -651,15 +645,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
                 _membershipView.ConfigurationId,
                 _membershipView.Size,
                 _broadcaster);
-            _fastPaxosInstance.Decided.ContinueWith(t =>
-            {
-                if (t.IsFaulted)
-                {
-                    LogFastPaxosDecidedFaulted(t.Exception!);
-                    return;
-                }
-                DecideViewChange(t.Result);
-            }, scheduler: _sharedResources.TaskScheduler);
+            RegisterFastPaxosDecidedContinuation(_fastPaxosInstance);
 
             // Inform EdgeFailureDetector about membership change
             CreateFailureDetectorsForCurrentConfiguration();
@@ -714,7 +700,6 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
     public void Shutdown()
     {
         LogShutdown();
-        _shutdownCts.Cancel();
         _viewAccessor.Complete();
         foreach (var fd in _failureDetectors)
         {
@@ -769,10 +754,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
     private void EnqueueAlertMessage(AlertMessage msg)
     {
         LogEnqueueAlertMessage(new LoggableEndpoint(msg.EdgeSrc), new LoggableEndpoint(msg.EdgeDst), msg.EdgeStatus);
-        lock (_batchSchedulerLock)
-        {
-            _sendQueue.Writer.TryWrite(msg);
-        }
+        _sendQueue.Writer.TryWrite(msg);
     }
 
     /// <summary>
@@ -781,35 +763,32 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
     private async Task AlertBatcherAsync()
     {
         var buffer = new List<AlertMessage>();
+        var shutdownToken = _sharedResources.ShuttingDownToken;
 
-        while (!_shutdownCts.Token.IsCancellationRequested)
+        while (!shutdownToken.IsCancellationRequested)
         {
+            buffer.Clear();
             try
             {
-                await Task.Delay(_options.BatchingWindow, _sharedResources.TimeProvider, _shutdownCts.Token).ConfigureAwait(true);
-
-                lock (_batchSchedulerLock)
+                await Task.Delay(_options.BatchingWindow, _sharedResources.TimeProvider, shutdownToken).ConfigureAwait(true);
+                await _sendQueue.Reader.WaitToReadAsync(shutdownToken);
+                while (_sendQueue.Reader.TryRead(out var msg))
                 {
-                    while (_sendQueue.Reader.TryRead(out var msg))
+                    buffer.Add(msg);
+                }
+
+                if (buffer.Count > 0)
+                {
+                    LogAlertBatcherBroadcast(buffer.Count);
+
+                    var batchedMessage = new BatchedAlertMessage
                     {
-                        buffer.Add(msg);
-                    }
+                        Sender = _myAddr
+                    };
+                    batchedMessage.Messages.AddRange(buffer);
 
-                    if (buffer.Count > 0)
-                    {
-                        LogAlertBatcherBroadcast(buffer.Count);
-
-                        var batchedMessage = new BatchedAlertMessage
-                        {
-                            Sender = _myAddr
-                        };
-                        batchedMessage.Messages.AddRange(buffer);
-
-                        var request = RapidUtils.ToRapidRequest(batchedMessage);
-                        _broadcaster.Broadcast(request, _shutdownCts.Token);
-
-                        buffer.Clear();
-                    }
+                    var request = RapidUtils.ToRapidRequest(batchedMessage);
+                    _broadcaster.Broadcast(request, shutdownToken);
                 }
             }
             catch (OperationCanceledException)
@@ -940,14 +919,56 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         }
     }
 
+    /// <summary>
+    /// Registers a continuation on FastPaxos.Decided that handles the result and checks for shutdown.
+    /// The continuation is tracked as a background task to ensure proper cleanup during shutdown.
+    /// </summary>
+    private void RegisterFastPaxosDecidedContinuation(FastPaxos fastPaxosInstance)
+    {
+        var continuationTask = fastPaxosInstance.Decided.ContinueWith(t =>
+        {
+            if (t.IsFaulted)
+            {
+                LogFastPaxosDecidedFaulted(t.Exception!);
+                return;
+            }
+
+            DecideViewChange(t.Result);
+        }, CancellationToken.None, TaskContinuationOptions.None, _sharedResources.TaskScheduler);
+    }
+
+    /// <summary>
+    /// Asynchronously disposes the membership service, waiting for background tasks to complete.
+    /// </summary>
+    public async ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return; // Already disposed
+        }
+
+        LogDispose();
+        Shutdown();
+
+        // Wait for tracked background tasks via SharedResources
+        // The SharedResources.WaitForBackgroundTasksAsync handles this
+        await Task.CompletedTask.ConfigureAwait(false);
+
+        _fastPaxosInstance?.Dispose();
+    }
+
+    /// <summary>
+    /// Synchronously disposes the membership service.
+    /// </summary>
     public void Dispose()
     {
-        LogDispose();
-        _shutdownCts.Dispose();
-        _fastPaxosInstance?.Dispose();
-        foreach (var fd in _failureDetectors)
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
         {
-            fd.Dispose();
+            return; // Already disposed
         }
+
+        LogDispose();
+        Shutdown();
+        _fastPaxosInstance?.Dispose();
     }
 }

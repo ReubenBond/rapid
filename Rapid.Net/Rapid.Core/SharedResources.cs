@@ -11,7 +11,7 @@ public sealed partial class SharedResources(
     TimeProvider? timeProvider = null,
     TaskScheduler? taskScheduler = null,
     Random? random = null,
-    Func<Guid>? guidFactory = null) : IDisposable
+    Func<Guid>? guidFactory = null) : IAsyncDisposable, IDisposable
 {
     private readonly ILogger<SharedResources> _logger = (loggerFactory ?? NullLoggerFactory.Instance).CreateLogger<SharedResources>();
     private readonly CancellationTokenSource _shutdownCts = new();
@@ -19,6 +19,7 @@ public sealed partial class SharedResources(
     private readonly Lock _backgroundTasksLock = new();
     private readonly Random _random = random ?? Random.Shared;
     private readonly Func<Guid> _guidFactory = guidFactory ?? Guid.NewGuid;
+    private int _disposed;
 
     /// <summary>
     /// Gets the TimeProvider used for all time-related operations.
@@ -42,7 +43,29 @@ public sealed partial class SharedResources(
     /// </summary>
     public Guid NewGuid() => _guidFactory();
 
-    public CancellationToken ShuttingDown => _shutdownCts.Token;
+    /// <summary>
+    /// Gets a cancellation token that is cancelled when shutdown begins.
+    /// </summary>
+    public CancellationToken ShuttingDownToken
+    {
+        get
+        {
+            try
+            {
+                return _shutdownCts.Token;
+            }
+            catch (ObjectDisposedException)
+            {
+                // If the CTS is disposed, return a cancelled token
+                return new CancellationToken(canceled: true);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets whether shutdown has been initiated.
+    /// </summary>
+    public bool IsShuttingDown => Volatile.Read(ref _disposed) != 0 || _shutdownCts.IsCancellationRequested;
 
     /// <summary>
     /// Tracks a background task to ensure it can be awaited during shutdown.
@@ -56,9 +79,19 @@ public sealed partial class SharedResources(
         }
     }
 
+    /// <summary>
+    /// Initiates shutdown by cancelling the shutdown token.
+    /// </summary>
     public void StartShutdown()
     {
-        _shutdownCts.Cancel();
+        try
+        {
+            _shutdownCts.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // Already disposed, shutdown already happened
+        }
     }
 
     /// <summary>
@@ -96,9 +129,32 @@ public sealed partial class SharedResources(
         }
     }
 
+    /// <summary>
+    /// Asynchronously disposes the shared resources, waiting for background tasks to complete.
+    /// </summary>
+    public async ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return; // Already disposed
+        }
+
+        StartShutdown();
+        await WaitForBackgroundTasksAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        _shutdownCts.Dispose();
+    }
+
+    /// <summary>
+    /// Synchronously disposes the shared resources.
+    /// </summary>
     public void Dispose()
     {
-        _shutdownCts.Cancel();
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return; // Already disposed
+        }
+
+        StartShutdown();
         _shutdownCts.Dispose();
     }
 

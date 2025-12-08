@@ -64,10 +64,11 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
     [Fact]
     public async Task AllNodesInViewAreKnownNodes()
     {
-        var seedNode = _harness.InnerHarness.CreateSeedNode();
-        var joiner = await _harness.InnerHarness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
+        var seedNode = _harness.CreateSeedNode();
+        var joiner = await _harness.DriveToCompletionAsync(
+            () => _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken));
 
-        await _harness.InnerHarness.WaitForConvergenceAsync(expectedSize: 2, timeout: TimeSpan.FromSeconds(5), cancellationToken: TestContext.Current.CancellationToken);
+        _harness.RunUntilConverged(expectedSize: 2);
 
         var knownAddresses = _harness.Nodes
             .Select(n => $"{n.Address.Hostname}:{n.Address.Port}")
@@ -99,10 +100,11 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
     [Fact]
     public async Task NoSplitBrainWithTwoNodes()
     {
-        var seedNode = _harness.InnerHarness.CreateSeedNode();
-        var joiner = await _harness.InnerHarness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
+        var seedNode = _harness.CreateSeedNode();
+        var joiner = await _harness.DriveToCompletionAsync(
+            () => _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken));
 
-        await _harness.InnerHarness.WaitForConvergenceAsync(expectedSize: 2, timeout: TimeSpan.FromSeconds(5), cancellationToken: TestContext.Current.CancellationToken);
+        _harness.RunUntilConverged(expectedSize: 2);
 
         var result = _checker.CheckNoSplitBrain();
 
@@ -123,15 +125,16 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
     [Fact]
     public async Task ConfigurationIdMonotonicityAfterJoin()
     {
-        var seedNode = _harness.InnerHarness.CreateSeedNode();
+        var seedNode = _harness.CreateSeedNode();
         var initialConfigId = seedNode.CurrentView.ConfigurationId;
 
-        var joiner = await _harness.InnerHarness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
+        var joiner = await _harness.DriveToCompletionAsync(
+            () => _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken));
 
-        await _harness.InnerHarness.WaitForConvergenceAsync(expectedSize: 2, timeout: TimeSpan.FromSeconds(5), cancellationToken: TestContext.Current.CancellationToken);
+        _harness.RunUntilConverged(expectedSize: 2);
 
-        // Config ID should have increased
-        Assert.True(seedNode.CurrentView.ConfigurationId >= initialConfigId);
+        // Config ID should have changed after membership change (it's a hash, not monotonically increasing)
+        Assert.NotEqual(initialConfigId, seedNode.CurrentView.ConfigurationId);
 
         var result = _checker.CheckConfigurationIdMonotonicity();
         Assert.True(result);
@@ -160,10 +163,11 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
     [Fact]
     public async Task MembershipConsistencyWithConvergedCluster()
     {
-        var seedNode = _harness.InnerHarness.CreateSeedNode();
-        var joiner = await _harness.InnerHarness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
+        var seedNode = _harness.CreateSeedNode();
+        var joiner = await _harness.DriveToCompletionAsync(
+            () => _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken));
 
-        await _harness.InnerHarness.WaitForConvergenceAsync(expectedSize: 2, timeout: TimeSpan.FromSeconds(5), cancellationToken: TestContext.Current.CancellationToken);
+        _harness.RunUntilConverged(expectedSize: 2);
 
         var result = _checker.CheckMembershipConsistency();
         Assert.True(result);
@@ -194,10 +198,11 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
     [Fact]
     public async Task CheckAllWithTwoNodes()
     {
-        var seedNode = _harness.InnerHarness.CreateSeedNode();
-        var joiner = await _harness.InnerHarness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken);
+        var seedNode = _harness.CreateSeedNode();
+        var joiner = await _harness.DriveToCompletionAsync(
+            () => _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken));
 
-        await _harness.InnerHarness.WaitForConvergenceAsync(expectedSize: 2, timeout: TimeSpan.FromSeconds(5), cancellationToken: TestContext.Current.CancellationToken);
+        _harness.RunUntilConverged(expectedSize: 2);
 
         var result = _checker.CheckAll();
         Assert.True(result);
@@ -248,22 +253,15 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
     /// Verifies that a node attempting to join the cluster will finish the join
     /// protocol within a reasonable timeout, ensuring the system doesn't hang.
     /// </summary>
-    [Fact(Skip = "Requires timeout-based join completion verification")]
+    [Fact]
     public async Task JoinEventuallyCompletes()
     {
-        var seedNode = _harness.InnerHarness.CreateSeedNode();
+        var seedNode = _harness.CreateSeedNode();
         
-        // Start a join operation
-        var joinTask = _harness.InnerHarness.CreateJoinerNodeAsync(
-            seedNode, 
-            nodeId: 1, 
-            cancellationToken: TestContext.Current.CancellationToken);
+        // Start a join operation and drive to completion
+        var joiner = await _harness.DriveToCompletionAsync(
+            () => _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken));
 
-        // Join should eventually complete (this is a liveness property)
-        var completed = await Task.WhenAny(joinTask, Task.Delay(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
-        
-        Assert.Equal(joinTask, completed);
-        var joiner = await joinTask;
         Assert.True(joiner.IsInitialized);
     }
 
@@ -271,32 +269,25 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
     /// Tests the liveness property that node failures are eventually detected by the cluster.
     /// When a node crashes, the failure detection mechanism should identify it within the
     /// configured timeout period and trigger membership updates.
+    /// Note: In a 2-node cluster, the remaining node cannot reach consensus to remove the 
+    /// failed node (needs quorum), so we only verify that the failure is detected (alerts queued).
     /// </summary>
-    [Fact(Skip = "Requires failure detection monitoring")]
+    [Fact(Skip = "Requires 3+ node cluster for consensus after failure - 2-node cluster cannot reach quorum")]
     public async Task FailureDetectionEventuallyOccurs()
     {
-        var seedNode = _harness.InnerHarness.CreateSeedNode();
-        var joiner = await _harness.InnerHarness.CreateJoinerNodeAsync(
-            seedNode, 
-            nodeId: 1, 
-            cancellationToken: TestContext.Current.CancellationToken);
+        var seedNode = _harness.CreateSeedNode();
+        var joiner = await _harness.DriveToCompletionAsync(
+            () => _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken));
 
-        await _harness.InnerHarness.WaitForConvergenceAsync(
-            expectedSize: 2, 
-            timeout: TimeSpan.FromSeconds(5), 
-            cancellationToken: TestContext.Current.CancellationToken);
+        _harness.RunUntilConverged(expectedSize: 2);
 
         // Crash the joiner
-        _harness.InnerHarness.CrashNode(joiner);
+        _harness.CrashNode(joiner);
 
-        // Failure should eventually be detected
-        // This requires waiting for failure detection interval + processing time
-        await _harness.InnerHarness.WaitForNodeSizeAsync(
-            seedNode, 
-            expectedSize: 1, 
-            timeout: TimeSpan.FromSeconds(30), 
-            cancellationToken: TestContext.Current.CancellationToken);
+        // Failure should eventually be detected - run until seed node sees size of 1
+        var detected = _harness.RunUntil(() => seedNode.MembershipSize == 1, maxSteps: 50000);
 
+        Assert.True(detected, "Seed node did not detect joiner failure");
         Assert.Equal(1, seedNode.MembershipSize);
     }
 
@@ -305,32 +296,25 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
     /// to a consistent state. This tests the self-healing property where temporary network
     /// issues don't permanently damage the cluster's ability to reach consensus.
     /// </summary>
-    [Fact(Skip = "Requires partition heal verification")]
+    [Fact]
     public async Task PartitionHealEventuallyConverges()
     {
-        var seedNode = _harness.InnerHarness.CreateSeedNode();
-        var joiner = await _harness.InnerHarness.CreateJoinerNodeAsync(
-            seedNode, 
-            nodeId: 1, 
-            cancellationToken: TestContext.Current.CancellationToken);
+        var seedNode = _harness.CreateSeedNode();
+        var joiner = await _harness.DriveToCompletionAsync(
+            () => _harness.CreateJoinerNodeAsync(seedNode, nodeId: 1, cancellationToken: TestContext.Current.CancellationToken));
 
-        await _harness.InnerHarness.WaitForConvergenceAsync(
-            expectedSize: 2, 
-            timeout: TimeSpan.FromSeconds(5), 
-            cancellationToken: TestContext.Current.CancellationToken);
+        _harness.RunUntilConverged(expectedSize: 2);
 
         // Create partition
-        _harness.InnerHarness.PartitionNodes(seedNode, joiner);
+        _harness.PartitionNodes(seedNode, joiner);
 
         // Heal partition
-        _harness.InnerHarness.HealPartition(seedNode, joiner);
+        _harness.HealPartition(seedNode, joiner);
 
         // Nodes should eventually re-converge
-        await _harness.InnerHarness.WaitForConvergenceAsync(
-            expectedSize: 2, 
-            timeout: TimeSpan.FromSeconds(10), 
-            cancellationToken: TestContext.Current.CancellationToken);
+        var converged = _harness.RunUntilConverged(expectedSize: 2, maxSteps: 50000);
 
+        Assert.True(converged, "Nodes did not reconverge after partition heal");
         Assert.Equal(2, seedNode.MembershipSize);
         Assert.Equal(2, joiner.MembershipSize);
     }
