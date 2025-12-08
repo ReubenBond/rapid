@@ -26,6 +26,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
     private readonly Lock _randomLock = new();
     private readonly ILogger<SimulationHarness>? _logger;
     private readonly bool _ownsLoggerFactory;
+    private readonly SimulationTaskScheduler _scheduler;
     private bool _disposed;
 
     /// <summary>
@@ -57,17 +58,18 @@ internal sealed class SimulationHarness : IAsyncDisposable
 
         // Create deterministic components
         Random = new SimulationRandom(seed);
-        Scheduler = new SimulationTaskScheduler();
+        _taskQueue = new SimulationTaskQueue();
+        _scheduler = new SimulationTaskScheduler(_taskQueue);
 
         // Create time provider that shares the task queue with the scheduler
         var timeProviderLogger = loggerFactory?.CreateLogger<SimulationTimeProvider>();
-        TimeProvider = new SimulationTimeProvider(Scheduler.TaskQueue, DateTimeOffset.UtcNow, timeProviderLogger);
+        TimeProvider = new SimulationTimeProvider(_taskQueue, DateTimeOffset.UtcNow, timeProviderLogger);
 
         // Create network
         Network = new SimulationNetwork(this);
 
         // Create synchronization context (but don't install it globally - install per-operation)
-        _syncContext = new SimulationSynchronizationContext(Scheduler);
+        _syncContext = new SimulationSynchronizationContext(_scheduler);
 
         LogEvent(SimulationEventType.HarnessCreated, $"Seed: {seed}");
     }
@@ -97,10 +99,12 @@ internal sealed class SimulationHarness : IAsyncDisposable
     /// </summary>
     public SimulationRandom Random { get; }
 
+    private readonly SimulationTaskQueue _taskQueue;
+
     /// <summary>
     /// Gets the simulation task scheduler.
     /// </summary>
-    public SimulationTaskScheduler Scheduler { get; }
+    public SimulationTaskScheduler Scheduler => _scheduler;
 
     /// <summary>
     /// Gets the simulation time provider.
@@ -358,7 +362,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
                 return true;
             }
 
-            if (Scheduler.TryExecuteOne())
+            if (_scheduler.TryExecuteOne())
             {
                 LogicalTime++;
                 timeAdvanceCount = 0; // Reset time advance counter when real work happens
@@ -429,7 +433,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
 
         for (var i = 0; i < maxIterations; i++)
         {
-            if (Scheduler.TryExecuteOne())
+            if (_scheduler.TryExecuteOne())
             {
                 LogicalTime++;
                 timeAdvanceCount = 0; // Reset time advance counter when real work happens
@@ -535,26 +539,40 @@ internal sealed class SimulationHarness : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Advances simulated time by the specified amount and runs the simulation until idle.
+    /// This is the preferred method for advancing time in tests, as it ensures that any
+    /// tasks triggered by timers are processed before returning.
+    /// </summary>
+    /// <param name="delta">The amount of time to advance.</param>
+    /// <param name="maxIterations">Maximum iterations to run while processing tasks.</param>
+    /// <returns>True if the simulation reached an idle state; false if max iterations reached.</returns>
+    public bool AdvanceTime(TimeSpan delta, int maxIterations = 100000)
+    {
+        if (delta < TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(delta), "Time delta cannot be negative");
+        }
+
+        if (delta == TimeSpan.Zero)
+        {
+            return true;
+        }
+
+        using var _ = _syncContext.Install();
+
+        var targetTime = TimeProvider.GetUtcNow() + delta;
+
+        // Advance time to trigger timers, then run until idle
+        TimeProvider.SetUtcNow(targetTime);
+        LogEvent(SimulationEventType.TimeAdvanced, $"Advanced time by {delta}");
+
+        return RunUntilIdleCore(maxSimulatedTime: null, maxIterations);
+    }
+
     private DateTimeOffset? GetNextScheduledTime()
     {
-        var nextQueueDueTime = Scheduler.TaskQueue.NextWaitingDueTimeTicks;
-        var nextTimerDueTime = TimeProvider.NextTimerDueTicks;
-
-        long? nextDueTime = null;
-
-        if (nextQueueDueTime.HasValue && nextTimerDueTime.HasValue)
-        {
-            nextDueTime = Math.Min(nextQueueDueTime.Value, nextTimerDueTime.Value);
-        }
-        else if (nextQueueDueTime.HasValue)
-        {
-            nextDueTime = nextQueueDueTime.Value;
-        }
-        else if (nextTimerDueTime.HasValue)
-        {
-            nextDueTime = nextTimerDueTime.Value;
-        }
-
+        var nextDueTime = _taskQueue.NextWaitingDueTimeTicks;
         return nextDueTime.HasValue ? new DateTimeOffset(nextDueTime.Value, TimeSpan.Zero) : null;
     }
 
@@ -626,7 +644,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
         if (_disposed) return;
         _disposed = true;
 
-        Scheduler.Clear();
+        _scheduler.Clear();
 
         foreach (var node in _nodes)
         {

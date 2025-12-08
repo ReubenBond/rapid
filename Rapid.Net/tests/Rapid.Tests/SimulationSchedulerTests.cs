@@ -10,7 +10,8 @@ public sealed class SimulationSchedulerTests
     [Fact]
     public void QueuedTasksAreNotExecutedAutomatically()
     {
-        var scheduler = new SimulationTaskScheduler();
+        var taskQueue = new SimulationTaskQueue();
+        var scheduler = new SimulationTaskScheduler(taskQueue);
         var executed = false;
 
         var task = new Task(() => executed = true);
@@ -23,7 +24,8 @@ public sealed class SimulationSchedulerTests
     [Fact]
     public void StepExecutesSingleTask()
     {
-        var scheduler = new SimulationTaskScheduler();
+        var taskQueue = new SimulationTaskQueue();
+        var scheduler = new SimulationTaskScheduler(taskQueue);
         var executed = false;
 
         var task = new Task(() => executed = true);
@@ -39,7 +41,8 @@ public sealed class SimulationSchedulerTests
     [Fact]
     public void StepAllExecutesAllTasks()
     {
-        var scheduler = new SimulationTaskScheduler();
+        var taskQueue = new SimulationTaskQueue();
+        var scheduler = new SimulationTaskScheduler(taskQueue);
         var count = 0;
 
         for (var i = 0; i < 5; i++)
@@ -58,7 +61,8 @@ public sealed class SimulationSchedulerTests
     [Fact]
     public void StepWithCountLimitsExecution()
     {
-        var scheduler = new SimulationTaskScheduler();
+        var taskQueue = new SimulationTaskQueue();
+        var scheduler = new SimulationTaskScheduler(taskQueue);
         var count = 0;
 
         for (var i = 0; i < 10; i++)
@@ -77,7 +81,8 @@ public sealed class SimulationSchedulerTests
     [Fact]
     public void ClearRemovesAllPendingTasks()
     {
-        var scheduler = new SimulationTaskScheduler();
+        var taskQueue = new SimulationTaskQueue();
+        var scheduler = new SimulationTaskScheduler(taskQueue);
 
         for (var i = 0; i < 5; i++)
         {
@@ -94,7 +99,8 @@ public sealed class SimulationSchedulerTests
     [Fact]
     public void TasksExecuteInFifoOrder()
     {
-        var scheduler = new SimulationTaskScheduler();
+        var taskQueue = new SimulationTaskQueue();
+        var scheduler = new SimulationTaskScheduler(taskQueue);
         var order = new List<int>();
 
         for (var i = 0; i < 5; i++)
@@ -112,7 +118,8 @@ public sealed class SimulationSchedulerTests
     [Fact]
     public void SynchronizationContextPostRoutesToScheduler()
     {
-        var scheduler = new SimulationTaskScheduler();
+        var taskQueue = new SimulationTaskQueue();
+        var scheduler = new SimulationTaskScheduler(taskQueue);
         var syncContext = new SimulationSynchronizationContext(scheduler);
         var executed = false;
 
@@ -126,7 +133,8 @@ public sealed class SimulationSchedulerTests
     [Fact]
     public void SynchronizationContextSendExecutesSynchronously()
     {
-        var scheduler = new SimulationTaskScheduler();
+        var taskQueue = new SimulationTaskQueue();
+        var scheduler = new SimulationTaskScheduler(taskQueue);
         var syncContext = new SimulationSynchronizationContext(scheduler);
         var executed = false;
 
@@ -138,7 +146,8 @@ public sealed class SimulationSchedulerTests
     [Fact]
     public void SynchronizationContextCreateCopyReturnsNewInstance()
     {
-        var scheduler = new SimulationTaskScheduler();
+        var taskQueue = new SimulationTaskQueue();
+        var scheduler = new SimulationTaskScheduler(taskQueue);
         var syncContext = new SimulationSynchronizationContext(scheduler);
 
         var copy = syncContext.CreateCopy();
@@ -172,7 +181,8 @@ public sealed class SimulationSchedulerTests
     [Fact]
     public void TryExecuteOneReturnsFalseWhenEmpty()
     {
-        var scheduler = new SimulationTaskScheduler();
+        var taskQueue = new SimulationTaskQueue();
+        var scheduler = new SimulationTaskScheduler(taskQueue);
 
         var result = scheduler.TryExecuteOne();
 
@@ -182,7 +192,8 @@ public sealed class SimulationSchedulerTests
     [Fact]
     public void HasPendingTasksReflectsQueueState()
     {
-        var scheduler = new SimulationTaskScheduler();
+        var taskQueue = new SimulationTaskQueue();
+        var scheduler = new SimulationTaskScheduler(taskQueue);
 
         Assert.False(scheduler.HasPendingTasks);
 

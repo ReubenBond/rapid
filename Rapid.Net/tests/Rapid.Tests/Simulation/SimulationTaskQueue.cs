@@ -1,6 +1,27 @@
 namespace Rapid.Tests.Simulation;
 
 /// <summary>
+/// The type of item scheduled in the queue.
+/// </summary>
+internal enum ScheduledItemType
+{
+    /// <summary>
+    /// A simple action callback.
+    /// </summary>
+    Action,
+
+    /// <summary>
+    /// A Task from the TaskScheduler.
+    /// </summary>
+    Task,
+
+    /// <summary>
+    /// A timer callback.
+    /// </summary>
+    Timer
+}
+
+/// <summary>
 /// A time-aware task queue that serves as the common core for both
 /// <see cref="SimulationTaskScheduler"/> and <see cref="SimulationTimeProvider"/>.
 /// 
@@ -17,12 +38,30 @@ internal sealed class SimulationTaskQueue
     // Ready tasks: ordered by sequence number only (FIFO)
     private readonly SortedList<long, ScheduledItem> _readyQueue = new();
 
-    // Waiting tasks: ordered by due time, then sequence number
-    private readonly SortedList<long, ScheduledItem> _waitingQueue = new();
+    // Waiting tasks: ordered by due time, then sequence number using custom comparer
+    private readonly SortedSet<ScheduledItem> _waitingQueue = new(new ScheduledItemComparer());
+
+    // Timers that can be cancelled - maps timer ID to the scheduled item
+    private readonly Dictionary<long, ScheduledItem> _timerItemMap = new();
 
     private readonly Lock _lock = new();
     private long _sequenceNumber;
     private long _currentTimeTicks;
+    private long _nextTimerId;
+
+    /// <summary>
+    /// Comparer for ordering scheduled items by due time, then by sequence number.
+    /// </summary>
+    private sealed class ScheduledItemComparer : IComparer<ScheduledItem>
+    {
+        public int Compare(ScheduledItem x, ScheduledItem y)
+        {
+            var dueTimeComparison = x.DueTimeTicks.CompareTo(y.DueTimeTicks);
+            if (dueTimeComparison != 0)
+                return dueTimeComparison;
+            return x.SequenceNumber.CompareTo(y.SequenceNumber);
+        }
+    }
 
     /// <summary>
     /// Creates a new simulation task queue.
@@ -152,7 +191,45 @@ internal sealed class SimulationTaskQueue
                 if (_waitingQueue.Count == 0)
                     return null;
 
-                return _waitingQueue.Values[0].DueTimeTicks;
+                return _waitingQueue.Min.DueTimeTicks;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets the number of timers waiting in the waiting queue (not yet due).
+    /// This excludes timers that have been moved to the ready queue.
+    /// </summary>
+    public int WaitingTimerCount
+    {
+        get
+        {
+            lock (_lock)
+            {
+                var count = 0;
+                foreach (var item in _waitingQueue)
+                {
+                    if (item.ItemType == ScheduledItemType.Timer)
+                    {
+                        count++;
+                    }
+                }
+                return count;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets the number of active timers (items that were scheduled as timers and haven't been cancelled or executed).
+    /// This includes timers in both the waiting queue and the ready queue.
+    /// </summary>
+    public int TimerCount
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _timerItemMap.Count;
             }
         }
     }
@@ -168,7 +245,26 @@ internal sealed class SimulationTaskQueue
         lock (_lock)
         {
             var seq = _sequenceNumber++;
-            var item = new ScheduledItem(action, _currentTimeTicks, seq);
+            var item = new ScheduledItem(action, ScheduledItemType.Action, _currentTimeTicks, seq, TimerId: null, Period: 0, Task: null);
+            _readyQueue.Add(seq, item);
+        }
+    }
+
+    /// <summary>
+    /// Enqueues a Task to be executed immediately (added to ready queue).
+    /// The task object is stored for debugger introspection via GetScheduledTasks.
+    /// </summary>
+    /// <param name="task">The task to schedule.</param>
+    /// <param name="executeTask">The action that executes the task.</param>
+    public void EnqueueTask(Task task, Action executeTask)
+    {
+        ArgumentNullException.ThrowIfNull(task);
+        ArgumentNullException.ThrowIfNull(executeTask);
+
+        lock (_lock)
+        {
+            var seq = _sequenceNumber++;
+            var item = new ScheduledItem(executeTask, ScheduledItemType.Task, _currentTimeTicks, seq, TimerId: null, Period: 0, task);
             _readyQueue.Add(seq, item);
         }
     }
@@ -187,7 +283,7 @@ internal sealed class SimulationTaskQueue
         lock (_lock)
         {
             var seq = _sequenceNumber++;
-            var item = new ScheduledItem(action, dueTimeTicks, seq);
+            var item = new ScheduledItem(action, ScheduledItemType.Action, dueTimeTicks, seq, TimerId: null, Period: 0, Task: null);
 
             if (dueTimeTicks <= _currentTimeTicks)
             {
@@ -197,9 +293,7 @@ internal sealed class SimulationTaskQueue
             else
             {
                 // Due in the future - add to waiting queue
-                // Key combines due time and sequence for proper ordering
-                var key = (dueTimeTicks << 20) | (seq & 0xFFFFF);
-                _waitingQueue.Add(key, item);
+                _waitingQueue.Add(item);
             }
         }
     }
@@ -218,7 +312,7 @@ internal sealed class SimulationTaskQueue
         {
             var dueTime = _currentTimeTicks + delayTicks;
             var seq = _sequenceNumber++;
-            var item = new ScheduledItem(action, dueTime, seq);
+            var item = new ScheduledItem(action, ScheduledItemType.Action, dueTime, seq, TimerId: null, Period: 0, Task: null);
 
             if (delayTicks == 0)
             {
@@ -228,8 +322,186 @@ internal sealed class SimulationTaskQueue
             else
             {
                 // Has delay - add to waiting queue
-                var key = (dueTime << 20) | (seq & 0xFFFFF);
-                _waitingQueue.Add(key, item);
+                _waitingQueue.Add(item);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Schedules a timer callback to be executed at a specific time.
+    /// Returns a timer ID that can be used to cancel or modify the timer.
+    /// </summary>
+    /// <param name="callback">The callback to execute.</param>
+    /// <param name="dueTimeTicks">The time in ticks when the callback should be executed.</param>
+    /// <param name="periodTicks">The period in ticks for recurring timers (0 for one-shot).</param>
+    /// <returns>A timer ID that can be used to cancel the timer.</returns>
+    public long ScheduleTimer(Action callback, long dueTimeTicks, long periodTicks = 0)
+    {
+        ArgumentNullException.ThrowIfNull(callback);
+        ArgumentOutOfRangeException.ThrowIfNegative(periodTicks);
+
+        lock (_lock)
+        {
+            var timerId = _nextTimerId++;
+            var seq = _sequenceNumber++;
+            var item = new ScheduledItem(callback, ScheduledItemType.Timer, dueTimeTicks, seq, timerId, periodTicks, Task: null);
+
+            if (dueTimeTicks <= _currentTimeTicks)
+            {
+                // Due now or in the past - add to ready queue
+                _readyQueue.Add(seq, item);
+            }
+            else
+            {
+                // Due in the future - add to waiting queue
+                _waitingQueue.Add(item);
+            }
+
+            _timerItemMap[timerId] = item;
+            return timerId;
+        }
+    }
+
+    /// <summary>
+    /// Cancels a timer by its ID.
+    /// </summary>
+    /// <param name="timerId">The timer ID returned by ScheduleTimer.</param>
+    /// <returns>True if the timer was found and cancelled, false if it was already executed or not found.</returns>
+    public bool CancelTimer(long timerId)
+    {
+        lock (_lock)
+        {
+            if (!_timerItemMap.TryGetValue(timerId, out var item))
+            {
+                return false;
+            }
+
+            _timerItemMap.Remove(timerId);
+
+            // Try to remove from waiting queue first
+            if (_waitingQueue.Remove(item))
+            {
+                return true;
+            }
+
+            // Try to remove from ready queue
+            if (_readyQueue.Remove(item.SequenceNumber))
+            {
+                return true;
+            }
+
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Reschedules an existing timer to fire at a new time.
+    /// </summary>
+    /// <param name="timerId">The timer ID returned by ScheduleTimer.</param>
+    /// <param name="newDueTimeTicks">The new due time in ticks.</param>
+    /// <param name="newPeriodTicks">The new period in ticks (or -1 to keep current period).</param>
+    /// <returns>True if the timer was found and rescheduled, false otherwise.</returns>
+    public bool RescheduleTimer(long timerId, long newDueTimeTicks, long newPeriodTicks = -1)
+    {
+        lock (_lock)
+        {
+            if (!_timerItemMap.TryGetValue(timerId, out var oldItem))
+            {
+                return false;
+            }
+
+            // Remove the old item from its queue
+            if (!_waitingQueue.Remove(oldItem))
+            {
+                _readyQueue.Remove(oldItem.SequenceNumber);
+            }
+
+            // Create new item with updated values
+            var period = newPeriodTicks >= 0 ? newPeriodTicks : oldItem.Period;
+            var seq = _sequenceNumber++;
+            var newItem = new ScheduledItem(oldItem.Callback, ScheduledItemType.Timer, newDueTimeTicks, seq, timerId, period, Task: null);
+
+            if (newDueTimeTicks <= _currentTimeTicks)
+            {
+                _readyQueue.Add(seq, newItem);
+            }
+            else
+            {
+                _waitingQueue.Add(newItem);
+            }
+
+            _timerItemMap[timerId] = newItem;
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Gets information about a timer.
+    /// </summary>
+    /// <param name="timerId">The timer ID.</param>
+    /// <returns>Timer information, or null if the timer is not found.</returns>
+    public (long DueTimeTicks, long PeriodTicks)? GetTimerInfo(long timerId)
+    {
+        lock (_lock)
+        {
+            if (!_timerItemMap.TryGetValue(timerId, out var item))
+            {
+                return null;
+            }
+
+            return (item.DueTimeTicks, item.Period);
+        }
+    }
+
+    /// <summary>
+    /// Gets all scheduled Task objects from both queues.
+    /// Used by SimulationTaskScheduler for debugger support (GetScheduledTasks).
+    /// </summary>
+    /// <returns>An enumerable of all scheduled tasks.</returns>
+    public IEnumerable<Task> GetScheduledTasks()
+    {
+        lock (_lock)
+        {
+            var tasks = new List<Task>();
+
+            foreach (var item in _readyQueue.Values)
+            {
+                if (item.ItemType == ScheduledItemType.Task && item.Task != null)
+                {
+                    tasks.Add(item.Task);
+                }
+            }
+
+            foreach (var item in _waitingQueue)
+            {
+                if (item.ItemType == ScheduledItemType.Task && item.Task != null)
+                {
+                    tasks.Add(item.Task);
+                }
+            }
+
+            return tasks;
+        }
+    }
+
+    /// <summary>
+    /// Gets the count of scheduled Task objects in the ready queue.
+    /// </summary>
+    public int ScheduledTaskCount
+    {
+        get
+        {
+            lock (_lock)
+            {
+                var count = 0;
+                foreach (var item in _readyQueue.Values)
+                {
+                    if (item.ItemType == ScheduledItemType.Task)
+                    {
+                        count++;
+                    }
+                }
+                return count;
             }
         }
     }
@@ -249,10 +521,71 @@ internal sealed class SimulationTaskQueue
 
             item = _readyQueue.Values[0];
             _readyQueue.RemoveAt(0);
+
+            // If this was a timer, handle rescheduling for periodic timers
+            if (item.TimerId.HasValue)
+            {
+                var timerId = item.TimerId.Value;
+
+                if (item.Period > 0)
+                {
+                    // Periodic timer - reschedule for next period
+                    var nextDueTime = _currentTimeTicks + item.Period;
+                    var seq = _sequenceNumber++;
+                    var newItem = new ScheduledItem(item.Callback, ScheduledItemType.Timer, nextDueTime, seq, timerId, item.Period, Task: null);
+                    _waitingQueue.Add(newItem);
+                    _timerItemMap[timerId] = newItem;
+                }
+                else
+                {
+                    // One-shot timer - remove from tracking
+                    _timerItemMap.Remove(timerId);
+                }
+            }
         }
 
-        item.Action();
+        item.Callback();
         return true;
+    }
+
+    /// <summary>
+    /// Executes all ready items in the queue.
+    /// Note: Items added during execution are also executed (use ExecuteAllCurrently for bounded execution).
+    /// </summary>
+    /// <returns>The number of items executed.</returns>
+    public int ExecuteAll()
+    {
+        var count = 0;
+        while (TryExecuteNext())
+        {
+            count++;
+        }
+        return count;
+    }
+
+    /// <summary>
+    /// Executes all currently ready items, but not items added during execution.
+    /// This prevents infinite loops when callbacks enqueue more items.
+    /// </summary>
+    /// <returns>The number of items executed.</returns>
+    public int ExecuteAllCurrently()
+    {
+        int readyCount;
+        lock (_lock)
+        {
+            readyCount = _readyQueue.Count;
+        }
+
+        var count = 0;
+        for (var i = 0; i < readyCount; i++)
+        {
+            if (!TryExecuteNext())
+            {
+                break;
+            }
+            count++;
+        }
+        return count;
     }
 
     /// <summary>
@@ -272,7 +605,14 @@ internal sealed class SimulationTaskQueue
 
             var item = _readyQueue.Values[0];
             _readyQueue.RemoveAt(0);
-            action = item.Action;
+
+            // If this was a timer, clean up tracking (caller is responsible for execution)
+            if (item.TimerId.HasValue)
+            {
+                _timerItemMap.Remove(item.TimerId.Value);
+            }
+
+            action = item.Callback;
             return true;
         }
     }
@@ -289,7 +629,7 @@ internal sealed class SimulationTaskQueue
             if (_waitingQueue.Count == 0)
                 return false;
 
-            var nextDueTime = _waitingQueue.Values[0].DueTimeTicks;
+            var nextDueTime = _waitingQueue.Min.DueTimeTicks;
 
             if (nextDueTime <= _currentTimeTicks)
             {
@@ -321,6 +661,52 @@ internal sealed class SimulationTaskQueue
     }
 
     /// <summary>
+    /// Adjusts the due time of all waiting items by the specified delta.
+    /// This is used to simulate system clock adjustments where timer due times
+    /// should be shifted relative to the new time.
+    /// Does NOT move items between queues or trigger execution.
+    /// </summary>
+    /// <param name="deltaTicks">The amount to adjust due times by (can be positive or negative).</param>
+    public void AdjustWaitingDueTimes(long deltaTicks)
+    {
+        if (deltaTicks == 0)
+            return;
+
+        lock (_lock)
+        {
+            // We need to rebuild the waiting queue with adjusted due times
+            var itemsToReinsert = new List<ScheduledItem>(_waitingQueue.Count);
+
+            foreach (var item in _waitingQueue)
+            {
+                var adjustedDueTime = item.DueTimeTicks + deltaTicks;
+                var newItem = new ScheduledItem(
+                    item.Callback,
+                    item.ItemType,
+                    adjustedDueTime,
+                    item.SequenceNumber,
+                    item.TimerId,
+                    item.Period,
+                    item.Task);
+                itemsToReinsert.Add(newItem);
+            }
+
+            _waitingQueue.Clear();
+
+            foreach (var item in itemsToReinsert)
+            {
+                _waitingQueue.Add(item);
+
+                // Update timer item map if this is a timer
+                if (item.TimerId.HasValue)
+                {
+                    _timerItemMap[item.TimerId.Value] = item;
+                }
+            }
+        }
+    }
+
+    /// <summary>
     /// Clears all items from both queues.
     /// </summary>
     public void Clear()
@@ -329,6 +715,7 @@ internal sealed class SimulationTaskQueue
         {
             _readyQueue.Clear();
             _waitingQueue.Clear();
+            _timerItemMap.Clear();
         }
     }
 
@@ -340,10 +727,10 @@ internal sealed class SimulationTaskQueue
         lock (_lock)
         {
             var ready = _readyQueue.Values
-                .Select(item => (item.Action, item.DueTimeTicks))
+                .Select(item => (item.Callback, item.DueTimeTicks))
                 .ToList();
-            var waiting = _waitingQueue.Values
-                .Select(item => (item.Action, item.DueTimeTicks))
+            var waiting = _waitingQueue
+                .Select(item => (item.Callback, item.DueTimeTicks))
                 .ToList();
             return (ready, waiting);
         }
@@ -357,14 +744,39 @@ internal sealed class SimulationTaskQueue
     {
         while (_waitingQueue.Count > 0)
         {
-            var item = _waitingQueue.Values[0];
+            var item = _waitingQueue.Min;
             if (item.DueTimeTicks > _currentTimeTicks)
                 break;
 
-            _waitingQueue.RemoveAt(0);
-            _readyQueue.Add(item.SequenceNumber, item);
+            _waitingQueue.Remove(item);
+            
+            // Assign a new sequence number to preserve due-time ordering in the ready queue.
+            // This ensures items are executed in the order they became due, not creation order.
+            var readySeq = _sequenceNumber++;
+            var readyItem = new ScheduledItem(
+                item.Callback,
+                item.ItemType,
+                item.DueTimeTicks,
+                readySeq,
+                item.TimerId,
+                item.Period,
+                item.Task);
+            _readyQueue.Add(readySeq, readyItem);
+
+            // Update timer tracking if this is a timer
+            if (item.TimerId.HasValue)
+            {
+                _timerItemMap[item.TimerId.Value] = readyItem;
+            }
         }
     }
 
-    private readonly record struct ScheduledItem(Action Action, long DueTimeTicks, long SequenceNumber);
+    private readonly record struct ScheduledItem(
+        Action Callback,
+        ScheduledItemType ItemType,
+        long DueTimeTicks,
+        long SequenceNumber,
+        long? TimerId,
+        long Period,
+        Task? Task);
 }

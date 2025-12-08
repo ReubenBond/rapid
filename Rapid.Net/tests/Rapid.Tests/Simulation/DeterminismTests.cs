@@ -88,7 +88,7 @@ public sealed class DeterminismTests(ITestOutputHelper output) : IAsyncLifetime
     {
         var initialTime = _harness.TimeProvider.GetUtcNow();
 
-        _harness.TimeProvider.Advance(TimeSpan.FromMinutes(5));
+        _harness.AdvanceTime(TimeSpan.FromMinutes(5));
 
         var newTime = _harness.TimeProvider.GetUtcNow();
         Assert.Equal(initialTime + TimeSpan.FromMinutes(5), newTime);

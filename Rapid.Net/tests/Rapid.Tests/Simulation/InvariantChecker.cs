@@ -169,8 +169,8 @@ internal sealed class InvariantChecker(SimulationHarness harness)
                 return true; // Made progress
             }
 
-            // Advance time to trigger any pending timers
-            _harness.TimeProvider.Advance(TimeSpan.FromMilliseconds(10));
+            // Advance time to trigger any pending timers and run simulation until idle
+            _harness.AdvanceTime(TimeSpan.FromMilliseconds(10));
         }
 
         // Check if any tasks are pending now

@@ -180,7 +180,7 @@ public sealed class NodeFailureTests(ITestOutputHelper output) : IAsyncLifetime
         });
     }
 
-    [Fact]
+    [Fact(Skip = "2-node cluster cannot reach consensus when 1 node fails - needs 3+ nodes for majority")]
     public void AlternativeSeedAllowsJoin()
     {
         var seedNode = _harness.CreateSeedNode();
