@@ -171,10 +171,7 @@ internal sealed partial class SimulationTimeProvider : TimeProvider
     /// Returns a string representation this provider's idea of current time.
     /// </summary>
     /// <returns>A string representing the provider's current time.</returns>
-    public override string ToString()
-    {
-        return GetUtcNow().ToString("yyyy-MM-ddTHH:mm:ss.fff", CultureInfo.InvariantCulture);
-    }
+    public override string ToString() => GetUtcNow().ToString("yyyy-MM-ddTHH:mm:ss.fff", CultureInfo.InvariantCulture);
 
     /// <inheritdoc />
     public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
@@ -182,7 +179,7 @@ internal sealed partial class SimulationTimeProvider : TimeProvider
         ArgumentNullException.ThrowIfNull(callback);
         LogCreateTimer(dueTime, period);
 
-        var timer = new SimulationTimer(this, _taskQueue, callback, state);
+        var timer = new SimulationTimer(_taskQueue, callback, state);
         _ = timer.Change(dueTime, period);
         return timer;
     }
@@ -197,23 +194,14 @@ internal sealed partial class SimulationTimeProvider : TimeProvider
 /// A timer implementation for the simulation time provider.
 /// This implements the timer abstractions using SimulationTaskQueue for scheduling.
 /// </summary>
-internal sealed class SimulationTimer : ITimer
+internal sealed class SimulationTimer(SimulationTaskQueue taskQueue, TimerCallback callback, object? state) : ITimer
 {
     private const uint MaxSupportedTimeout = 0xfffffffe;
 
-    private SimulationTimeProvider? _timeProvider;
-    private SimulationTaskQueue? _taskQueue;
-    private TimerCallback? _callback;
-    private object? _state;
-    private long _timerId = -1;
-
-    public SimulationTimer(SimulationTimeProvider timeProvider, SimulationTaskQueue taskQueue, TimerCallback callback, object? state)
-    {
-        _timeProvider = timeProvider;
-        _taskQueue = taskQueue;
-        _callback = callback;
-        _state = state;
-    }
+    private readonly TimerCallback? _callback = callback;
+    private readonly object? _state = state;
+    private SimulationTaskQueue? _taskQueue = taskQueue;
+    private IDisposable? _scheduledTimer;
 
     public bool Change(TimeSpan dueTime, TimeSpan period)
     {
@@ -231,19 +219,15 @@ internal sealed class SimulationTimer : ITimer
             throw new ArgumentOutOfRangeException(nameof(period));
 
         var taskQueue = _taskQueue;
-        var timeProvider = _timeProvider;
-        if (taskQueue is null || timeProvider is null)
+        if (taskQueue is null)
         {
             // timer has been disposed
             return false;
         }
 
         // Cancel any existing timer
-        if (_timerId >= 0)
-        {
-            taskQueue.CancelTimer(_timerId);
-            _timerId = -1;
-        }
+        _scheduledTimer?.Dispose();
+        _scheduledTimer = null;
 
         if (dueTimeMs < 0)
         {
@@ -263,7 +247,7 @@ internal sealed class SimulationTimer : ITimer
         var callback = _callback!;
         var state = _state;
 
-        _timerId = taskQueue.ScheduleTimer(
+        _scheduledTimer = taskQueue.ScheduleTimer(
             () => callback(state),
             scheduledDueTime,
             period);
@@ -288,15 +272,8 @@ internal sealed class SimulationTimer : ITimer
 
     private void Dispose(bool _)
     {
-        if (_timerId >= 0)
-        {
-            _taskQueue?.CancelTimer(_timerId);
-            _timerId = -1;
-        }
-
-        _timeProvider = null;
+        _scheduledTimer?.Dispose();
+        _scheduledTimer = null;
         _taskQueue = null;
-        _callback = null;
-        _state = null;
     }
 }

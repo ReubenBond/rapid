@@ -122,8 +122,7 @@ public sealed class SimulationSchedulerTests
     public void SynchronizationContextPostRoutesToScheduler()
     {
         var taskQueue = new SimulationTaskQueue();
-        var scheduler = new SimulationTaskScheduler(taskQueue);
-        var syncContext = new SimulationSynchronizationContext(taskQueue, scheduler);
+        var syncContext = taskQueue.SynchronizationContext;
         var executed = false;
 
         syncContext.Post(_ => executed = true, null);
@@ -137,8 +136,7 @@ public sealed class SimulationSchedulerTests
     public void SynchronizationContextSendExecutesSynchronously()
     {
         var taskQueue = new SimulationTaskQueue();
-        var scheduler = new SimulationTaskScheduler(taskQueue);
-        var syncContext = new SimulationSynchronizationContext(taskQueue, scheduler);
+        var syncContext = taskQueue.SynchronizationContext;
         var executed = false;
 
         syncContext.Send(_ => executed = true, null);
@@ -150,8 +148,7 @@ public sealed class SimulationSchedulerTests
     public void SynchronizationContextCreateCopyReturnsNewInstance()
     {
         var taskQueue = new SimulationTaskQueue();
-        var scheduler = new SimulationTaskScheduler(taskQueue);
-        var syncContext = new SimulationSynchronizationContext(taskQueue, scheduler);
+        var syncContext = taskQueue.SynchronizationContext;
 
         var copy = syncContext.CreateCopy();
 

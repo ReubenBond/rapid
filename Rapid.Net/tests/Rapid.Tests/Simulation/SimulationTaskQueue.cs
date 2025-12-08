@@ -3,41 +3,92 @@ namespace Rapid.Tests.Simulation;
 /// <summary>
 /// Base class for all scheduled items in the queue.
 /// </summary>
-/// <param name="Callback">The action to execute when this item is due.</param>
-/// <param name="DueTime">The time offset from start when this item is due.</param>
-/// <param name="SequenceNumber">The sequence number for ordering items with the same due time.</param>
-internal abstract record ScheduledItem(
-    Action Callback,
-    TimeSpan DueTime,
-    long SequenceNumber);
+internal abstract class ScheduledItem(
+    Action callback,
+    TimeSpan dueTime,
+    long sequenceNumber)
+{
+    /// <summary>
+    /// The action to execute when this item is due.
+    /// </summary>
+    public Action Callback { get; } = callback;
+
+    /// <summary>
+    /// The time offset from start when this item is due.
+    /// </summary>
+    public TimeSpan DueTime { get; } = dueTime;
+
+    /// <summary>
+    /// The sequence number for ordering items with the same due time.
+    /// </summary>
+    public long SequenceNumber { get; } = sequenceNumber;
+}
 
 /// <summary>
 /// A scheduled item representing a Task from the TaskScheduler.
 /// </summary>
-/// <param name="Callback">The action to execute when this item is due.</param>
-/// <param name="DueTime">The time offset from start when this item is due.</param>
-/// <param name="SequenceNumber">The sequence number for ordering items with the same due time.</param>
-/// <param name="Task">The Task object being scheduled.</param>
-internal sealed record ScheduledTaskItem(
-    Action Callback,
-    TimeSpan DueTime,
-    long SequenceNumber,
-    Task Task) : ScheduledItem(Callback, DueTime, SequenceNumber);
+internal sealed class ScheduledTaskItem(
+    Action callback,
+    TimeSpan dueTime,
+    long sequenceNumber,
+    Task task) : ScheduledItem(callback, dueTime, sequenceNumber)
+{
+    /// <summary>
+    /// The Task object being scheduled.
+    /// </summary>
+    public Task Task { get; } = task;
+}
+
+/// <summary>
+/// A scheduled item representing a SynchronizationContext callback.
+/// </summary>
+internal sealed class ScheduledSyncContextItem(
+    Action callback,
+    TimeSpan dueTime,
+    long sequenceNumber) : ScheduledItem(callback, dueTime, sequenceNumber);
 
 /// <summary>
 /// A scheduled item representing a timer callback.
+/// Implements IDisposable for efficient timer cancellation.
 /// </summary>
-/// <param name="Callback">The action to execute when this item is due.</param>
-/// <param name="DueTime">The time offset from start when this item is due.</param>
-/// <param name="SequenceNumber">The sequence number for ordering items with the same due time.</param>
-/// <param name="TimerId">The unique identifier for this timer.</param>
-/// <param name="Period">The period for recurring timers (Zero for one-shot).</param>
-internal sealed record ScheduledTimerItem(
-    Action Callback,
-    TimeSpan DueTime,
-    long SequenceNumber,
-    long TimerId,
-    TimeSpan Period) : ScheduledItem(Callback, DueTime, SequenceNumber);
+internal sealed class ScheduledTimerItem : ScheduledItem, IDisposable
+{
+    private readonly SimulationTaskQueue _queue;
+
+    /// <summary>
+    /// Gets the period for recurring timers (Zero for one-shot).
+    /// </summary>
+    public TimeSpan Period { get; }
+
+    /// <summary>
+    /// Gets whether this timer has been cancelled.
+    /// </summary>
+    public bool IsCancelled { get; private set; }
+
+    public ScheduledTimerItem(
+        Action callback,
+        TimeSpan dueTime,
+        long sequenceNumber,
+        TimeSpan period,
+        SimulationTaskQueue queue)
+        : base(callback, dueTime, sequenceNumber)
+    {
+        Period = period;
+        _queue = queue;
+    }
+
+    /// <summary>
+    /// Cancels the timer by removing it from the queue.
+    /// </summary>
+    public void Dispose()
+    {
+        if (IsCancelled)
+            return;
+
+        IsCancelled = true;
+        _queue.RemoveTimer(this);
+    }
+}
 
 /// <summary>
 /// A time-aware task queue that serves as the common core for both
@@ -48,23 +99,33 @@ internal sealed record ScheduledTimerItem(
 /// This enables deterministic simulation testing by providing unified control
 /// over task execution order and time advancement.
 /// </summary>
-/// <remarks>
-/// Creates a new simulation task queue.
-/// </remarks>
-/// <param name="initialTime">The initial time offset. Default is <see cref="TimeSpan.Zero"/>.</param>
-internal sealed class SimulationTaskQueue(TimeSpan initialTime = default)
+internal sealed class SimulationTaskQueue
 {
     // Single queue ordered by due time, then sequence number
     private readonly SortedSet<ScheduledItem> _queue = new(new ScheduledItemComparer());
 
     private readonly Lock _lock = new();
     private long _sequenceNumber;
-    private long _nextTimerId;
+
+    /// <summary>
+    /// Creates a new simulation task queue.
+    /// </summary>
+    /// <param name="initialTime">The initial time offset. Default is <see cref="TimeSpan.Zero"/>.</param>
+    public SimulationTaskQueue(TimeSpan initialTime = default)
+    {
+        CurrentTime = initialTime;
+        SynchronizationContext = new SimulationSynchronizationContext(this);
+    }
 
     /// <summary>
     /// Gets or sets the current time offset from the start.
     /// </summary>
-    public TimeSpan CurrentTime { get; set; } = initialTime;
+    public TimeSpan CurrentTime { get; set; }
+
+    /// <summary>
+    /// Gets the synchronization context used to execute callbacks.
+    /// </summary>
+    public SimulationSynchronizationContext SynchronizationContext { get; }
 
     /// <summary>
     /// Gets whether there are any items in the queue.
@@ -154,60 +215,58 @@ internal sealed class SimulationTaskQueue(TimeSpan initialTime = default)
         {
             var dueTime = CurrentTime + delay;
             var seq = _sequenceNumber++;
-            var item = new ScheduledTaskItem(action, dueTime, seq, Task: null!);
+            var item = new ScheduledTaskItem(action, dueTime, seq, task: null!);
+            _queue.Add(item);
+        }
+    }
+
+    /// <summary>
+    /// Enqueues a SynchronizationContext callback to be executed immediately (at current time).
+    /// </summary>
+    /// <param name="callback">The callback to execute.</param>
+    internal void EnqueueSyncContextCallback(Action callback)
+    {
+        ArgumentNullException.ThrowIfNull(callback);
+
+        lock (_lock)
+        {
+            var seq = _sequenceNumber++;
+            var item = new ScheduledSyncContextItem(callback, CurrentTime, seq);
             _queue.Add(item);
         }
     }
 
     /// <summary>
     /// Schedules a timer callback to be executed at a specific time.
-    /// Returns a timer ID that can be used to cancel or modify the timer.
+    /// Returns an IDisposable that can be used to cancel the timer.
     /// </summary>
     /// <param name="callback">The callback to execute.</param>
     /// <param name="dueTime">The time offset when the callback should be executed.</param>
     /// <param name="period">The period for recurring timers (<see cref="TimeSpan.Zero"/> for one-shot).</param>
-    /// <returns>A timer ID that can be used to cancel the timer.</returns>
-    public long ScheduleTimer(Action callback, TimeSpan dueTime, TimeSpan period = default)
+    /// <returns>A <see cref="ScheduledTimerItem"/> that can be disposed to cancel the timer.</returns>
+    public IDisposable ScheduleTimer(Action callback, TimeSpan dueTime, TimeSpan period = default)
     {
         ArgumentNullException.ThrowIfNull(callback);
         ArgumentOutOfRangeException.ThrowIfLessThan(period, TimeSpan.Zero);
 
         lock (_lock)
         {
-            var timerId = _nextTimerId++;
             var seq = _sequenceNumber++;
-            var item = new ScheduledTimerItem(callback, dueTime, seq, timerId, period);
+            var item = new ScheduledTimerItem(callback, dueTime, seq, period, this);
             _queue.Add(item);
-            return timerId;
+            return item;
         }
     }
 
     /// <summary>
-    /// Cancels a timer by its ID.
+    /// Removes a timer from the queue. Called by ScheduledTimerItem.Dispose().
     /// </summary>
-    /// <param name="timerId">The timer ID returned by ScheduleTimer.</param>
-    /// <returns>True if the timer was found and cancelled, false if it was already executed or not found.</returns>
-    public bool CancelTimer(long timerId)
+    /// <param name="timer">The timer to remove.</param>
+    internal void RemoveTimer(ScheduledTimerItem timer)
     {
         lock (_lock)
         {
-            ScheduledTimerItem? toRemove = null;
-            foreach (var item in _queue)
-            {
-                if (item is ScheduledTimerItem timerItem && timerItem.TimerId == timerId)
-                {
-                    toRemove = timerItem;
-                    break;
-                }
-            }
-
-            if (toRemove is not null)
-            {
-                _queue.Remove(toRemove);
-                return true;
-            }
-
-            return false;
+            _queue.Remove(timer);
         }
     }
 
@@ -282,12 +341,15 @@ internal sealed class SimulationTaskQueue(TimeSpan initialTime = default)
             {
                 var nextDueTime = CurrentTime + period;
                 var seq = _sequenceNumber++;
-                var newItem = new ScheduledTimerItem(timerItem.Callback, nextDueTime, seq, timerItem.TimerId, period);
+                var newItem = new ScheduledTimerItem(timerItem.Callback, nextDueTime, seq, period, this);
                 _queue.Add(newItem);
             }
         }
 
-        item.Callback();
+        using (SynchronizationContext.Install())
+        {
+            item.Callback();
+        }
         return true;
     }
 

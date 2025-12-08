@@ -58,7 +58,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
         Random = new SimulationRandom(seed);
         _taskQueue = new SimulationTaskQueue();
         _taskScheduler = new SimulationTaskScheduler(_taskQueue);
-        _synchronizationContext = new SimulationSynchronizationContext(_taskQueue, _taskScheduler);
+        _synchronizationContext = _taskQueue.SynchronizationContext;
 
         // Create time provider that shares the task queue with the scheduler
         var timeProviderLogger = loggerFactory?.CreateLogger<SimulationTimeProvider>();

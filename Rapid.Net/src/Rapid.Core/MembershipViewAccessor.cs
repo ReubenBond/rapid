@@ -55,8 +55,5 @@ internal sealed class MembershipViewAccessor : IMembershipViewAccessor
     /// <summary>
     /// Completes the view change channel. Called during shutdown.
     /// </summary>
-    internal void Complete()
-    {
-        _viewChangeChannel.Writer.TryComplete();
-    }
+    internal void Complete() => _viewChangeChannel.Writer.TryComplete();
 }

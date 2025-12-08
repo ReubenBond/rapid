@@ -314,10 +314,7 @@ internal sealed class MembershipViewBuilder
             return hash1.CompareTo(hash2);
         }
 
-        public void RemoveEndpoint(Endpoint endpoint)
-        {
-            _hashCache.Remove(endpoint, out _);
-        }
+        public void RemoveEndpoint(Endpoint endpoint) => _hashCache.Remove(endpoint, out _);
 
         private long GetCachedHash(Endpoint endpoint)
         {
