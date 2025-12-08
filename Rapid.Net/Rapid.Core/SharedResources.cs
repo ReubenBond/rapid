@@ -1,5 +1,4 @@
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Rapid;
 
@@ -7,13 +6,13 @@ namespace Rapid;
 /// Holds all resources that are shared across a single instance of Rapid.
 /// </summary>
 public sealed partial class SharedResources(
-    ILoggerFactory? loggerFactory = null,
+    ILogger<SharedResources> logger,
     TimeProvider? timeProvider = null,
     TaskScheduler? taskScheduler = null,
     Random? random = null,
     Func<Guid>? guidFactory = null) : IAsyncDisposable, IDisposable
 {
-    private readonly ILogger<SharedResources> _logger = (loggerFactory ?? NullLoggerFactory.Instance).CreateLogger<SharedResources>();
+    private readonly ILogger<SharedResources> _logger = logger;
     private readonly CancellationTokenSource _shutdownCts = new();
     private readonly List<Task> _backgroundTasks = [];
     private readonly Lock _backgroundTasksLock = new();

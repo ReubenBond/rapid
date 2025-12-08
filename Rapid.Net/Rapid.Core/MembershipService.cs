@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
+
 using Microsoft.Extensions.Options;
 using Rapid.Messaging;
 using Rapid.Monitoring;
@@ -257,7 +257,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
         _fdFactory = edgeFailureDetector;
         _fastPaxosFactory = fastPaxosFactory;
         _viewAccessor = viewAccessor;
-        _logger = (loggerFactory ?? NullLoggerFactory.Instance).CreateLogger<MembershipService>();
+        _logger = logger;
         _sendQueue = Channel.CreateUnbounded<AlertMessage>();
 
         // Make sure there is an empty list for every enum type

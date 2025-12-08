@@ -15,10 +15,10 @@ internal sealed partial class RapidClusterService(
     IMessagingClient messagingClient,
     IMembershipServiceFactory membershipServiceFactory,
     SharedResources sharedResources,
-    ILoggerFactory loggerFactory) : BackgroundService, IAsyncDisposable
+    ILogger<RapidClusterService> logger) : BackgroundService, IAsyncDisposable
 {
     private readonly RapidOptions _options = options.Value;
-    private readonly ILogger<RapidClusterService> _logger = loggerFactory.CreateLogger<RapidClusterService>();
+    private readonly ILogger<RapidClusterService> _logger = logger;
     private int _disposed;
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Starting Rapid cluster service on {ListenAddress}")]

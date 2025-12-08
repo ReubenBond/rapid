@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Rapid.Messaging;
 using Rapid.Monitoring;
 
@@ -50,7 +51,7 @@ public static class RapidServiceCollectionExtensions
         services.AddGrpc();
         services.AddSingleton(sp =>
             new SharedResources(
-                sp.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>(),
+                sp.GetRequiredService<ILogger<SharedResources>>(),
                 sp.GetRequiredService<TimeProvider>()));
 
         // Register messaging infrastructure
@@ -67,8 +68,8 @@ public static class RapidServiceCollectionExtensions
             var options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<RapidOptions>>().Value;
             var client = sp.GetRequiredService<IMessagingClient>();
             var sharedResources = sp.GetRequiredService<SharedResources>();
-            var loggerFactory = sp.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>();
-            return new PingPongFailureDetectorFactory(options.ListenAddress, client, sharedResources, loggerFactory);
+            var logger = sp.GetRequiredService<ILogger<PingPongFailureDetector>>();
+            return new PingPongFailureDetectorFactory(options.ListenAddress, client, sharedResources, logger);
         });
 
         // Register FastPaxos factory

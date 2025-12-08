@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Rapid.Messaging;
 using Rapid.Monitoring;
 using Rapid.Pb;
@@ -13,12 +14,12 @@ internal sealed class SimulationFailureDetectorFactory(
     Endpoint localEndpoint,
     IMessagingClient client,
     SharedResources sharedResources,
-    ILoggerFactory? loggerFactory) : IEdgeFailureDetectorFactory
+    ILogger<SimulationFailureDetector> logger) : IEdgeFailureDetectorFactory
 {
     private readonly Endpoint _localEndpoint = localEndpoint;
     private readonly IMessagingClient _client = client;
     private readonly SharedResources _sharedResources = sharedResources;
-    private readonly ILoggerFactory? _loggerFactory = loggerFactory;
+    private readonly ILogger<SimulationFailureDetector> _logger = logger;
 
     public IEdgeFailureDetector CreateInstance(Endpoint subject, Action notifier)
     {
@@ -28,7 +29,7 @@ internal sealed class SimulationFailureDetectorFactory(
             _client,
             _sharedResources,
             notifier,
-            _loggerFactory);
+            _logger);
     }
 }
 
@@ -42,10 +43,9 @@ internal sealed partial class SimulationFailureDetector(
     IMessagingClient client,
     SharedResources sharedResources,
     Action notifier,
-    ILoggerFactory? loggerFactory) : IEdgeFailureDetector
+    ILogger<SimulationFailureDetector> logger) : IEdgeFailureDetector
 {
-    private readonly ILogger _logger = loggerFactory?.CreateLogger<SimulationFailureDetector>()
-            ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<SimulationFailureDetector>.Instance;
+    private readonly ILogger<SimulationFailureDetector> _logger = logger;
     private readonly CancellationTokenSource _cts = new();
     private Task? _probeTask;
 

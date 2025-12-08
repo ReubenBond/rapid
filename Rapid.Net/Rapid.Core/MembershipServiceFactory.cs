@@ -18,7 +18,7 @@ internal sealed class MembershipServiceFactory(
     SharedResources sharedResources,
     MembershipViewAccessor viewAccessor,
     IOptions<RapidProtocolOptions> protocolOptions,
-    ILoggerFactory loggerFactory) : IMembershipServiceFactory
+    ILogger<MembershipService> logger) : IMembershipServiceFactory
 {
     public MembershipService CreateForNewCluster(
         Endpoint localEndpoint,
@@ -45,7 +45,7 @@ internal sealed class MembershipServiceFactory(
             viewAccessor,
             metadataMap,
             subscriptions,
-            loggerFactory);
+            logger);
     }
 
     public MembershipService CreateForJoin(
@@ -77,6 +77,6 @@ internal sealed class MembershipServiceFactory(
             viewAccessor,
             metadataMap,
             subscriptions,
-            loggerFactory);
+            logger);
     }
 }

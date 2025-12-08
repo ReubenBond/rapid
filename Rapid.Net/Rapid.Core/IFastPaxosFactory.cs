@@ -33,7 +33,8 @@ internal sealed class FastPaxosFactory(
     IMessagingClient messagingClient,
     IOptions<RapidProtocolOptions> protocolOptions,
     SharedResources sharedResources,
-    ILoggerFactory loggerFactory) : IFastPaxosFactory
+    ILogger<FastPaxos> fastPaxosLogger,
+    ILogger<Paxos> paxosLogger) : IFastPaxosFactory
 {
     public FastPaxos Create(
         Endpoint myAddr,
@@ -49,6 +50,7 @@ internal sealed class FastPaxosFactory(
             broadcaster,
             protocolOptions,
             sharedResources,
-            loggerFactory);
+            fastPaxosLogger,
+            paxosLogger);
     }
 }

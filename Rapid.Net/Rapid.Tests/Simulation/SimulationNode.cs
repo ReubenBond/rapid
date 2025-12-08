@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Rapid.Messaging;
 using Rapid.Pb;
@@ -18,6 +19,7 @@ internal sealed class SimulationNode : IDisposable
     private readonly MembershipViewAccessor _viewAccessor;
     private readonly IOptions<RapidProtocolOptions> _protocolOptions;
     private readonly ILogger<SimulationNode> _logger;
+    private readonly ILogger<MembershipService> _membershipServiceLogger;
     private MembershipService? _membershipService;
     private bool _disposed;
 
@@ -66,16 +68,20 @@ internal sealed class SimulationNode : IDisposable
         Address = address;
         Random = environment.CreateDerivedRandom();
 
-        var logger = loggerFactory ?? environment.LoggerFactory;
-        _logger = logger?.CreateLogger<SimulationNode>()
-            ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<SimulationNode>.Instance;
+        var factory = loggerFactory ?? environment.LoggerFactory;
+        _logger = factory?.CreateLogger<SimulationNode>()
+            ?? NullLogger<SimulationNode>.Instance;
+        _membershipServiceLogger = factory?.CreateLogger<MembershipService>()
+            ?? NullLogger<MembershipService>.Instance;
 
         // Create protocol options
         var options = protocolOptions ?? new RapidProtocolOptions();
         _protocolOptions = Options.Create(options);
 
         // Create shared resources with the simulation's time provider and task scheduler
-        _sharedResources = new SharedResources(logger, environment.TimeProvider, environment.TaskScheduler);
+        var sharedResourcesLogger = factory?.CreateLogger<SharedResources>()
+            ?? NullLogger<SharedResources>.Instance;
+        _sharedResources = new SharedResources(sharedResourcesLogger, environment.TimeProvider, environment.TaskScheduler);
 
 
         // Create in-memory messaging client
@@ -85,18 +91,25 @@ internal sealed class SimulationNode : IDisposable
         _viewAccessor = new MembershipViewAccessor();
 
         // Create failure detector factory
+        var failureDetectorLogger = factory?.CreateLogger<SimulationFailureDetector>()
+            ?? NullLogger<SimulationFailureDetector>.Instance;
         _failureDetectorFactory = new SimulationFailureDetectorFactory(
             address,
             MessagingClient,
             _sharedResources,
-            logger);
+            failureDetectorLogger);
 
         // Create fast paxos factory
+        var fastPaxosLogger = factory?.CreateLogger<FastPaxos>()
+            ?? NullLogger<FastPaxos>.Instance;
+        var paxosLogger = factory?.CreateLogger<Paxos>()
+            ?? NullLogger<Paxos>.Instance;
         _fastPaxosFactory = new FastPaxosFactory(
             MessagingClient,
             _protocolOptions,
             _sharedResources,
-            logger ?? Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance);
+            fastPaxosLogger,
+            paxosLogger);
 
         // Register with the simulation environment
         environment.RegisterNode(this);
@@ -164,7 +177,7 @@ internal sealed class SimulationNode : IDisposable
             _viewAccessor,
             metadataMap,
             subscriptions,
-            _environment.LoggerFactory);
+            _membershipServiceLogger);
 
         _logger.LogInformation("Cluster started for node {Address} with {MembershipSize} members", 
             RapidUtils.Loggable(Address), membershipView.Size);
@@ -254,7 +267,7 @@ internal sealed class SimulationNode : IDisposable
             _viewAccessor,
             metadataMap,
             subscriptions,
-            _environment.LoggerFactory);
+            _membershipServiceLogger);
 
         _logger.LogInformation("Node {Address} successfully joined cluster with {MembershipSize} members, ConfigId={ConfigId}",
             RapidUtils.Loggable(Address), membershipView.Size, membershipView.ConfigurationId);
