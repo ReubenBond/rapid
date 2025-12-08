@@ -192,6 +192,12 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
     [LoggerMessage(Level = LogLevel.Debug, Message = "CreateFailureDetectorsForCurrentConfiguration: created detector for subject {Subject}, ringNumber={RingNumber}")]
     private partial void LogCreatedFailureDetector(LoggableEndpoint Subject, int RingNumber);
 
+    [LoggerMessage(Level = LogLevel.Debug, Message = "CreateFailureDetectorsForCurrentConfiguration: skipping, this node is no longer in the ring")]
+    private partial void LogSkippingFailureDetectorsNotInRing();
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "FastPaxos Decided task faulted")]
+    private partial void LogFastPaxosDecidedFaulted(Exception ex);
+
     [LoggerMessage(Level = LogLevel.Debug, Message = "EdgeFailureNotification: scheduling callback for subject {Subject}, configId={ConfigId}")]
     private partial void LogEdgeFailureNotificationScheduled(LoggableEndpoint Subject, long ConfigId);
 
@@ -272,7 +278,15 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
         // Prepare consensus instance
         _fastPaxosInstance = _fastPaxosFactory.Create(_myAddr, _membershipView.ConfigurationId,
                                           _membershipView.Size, _broadcaster);
-        _fastPaxosInstance.Decided.ContinueWith(t => DecideViewChange(t.Result), scheduler: _sharedResources.TaskScheduler);
+        _fastPaxosInstance.Decided.ContinueWith(t =>
+        {
+            if (t.IsFaulted)
+            {
+                LogFastPaxosDecidedFaulted(t.Exception!);
+                return;
+            }
+            DecideViewChange(t.Result);
+        }, scheduler: _sharedResources.TaskScheduler);
 
         CreateFailureDetectorsForCurrentConfiguration();
 
@@ -637,7 +651,15 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
                 _membershipView.ConfigurationId,
                 _membershipView.Size,
                 _broadcaster);
-            _fastPaxosInstance.Decided.ContinueWith(t => DecideViewChange(t.Result), scheduler: _sharedResources.TaskScheduler);
+            _fastPaxosInstance.Decided.ContinueWith(t =>
+            {
+                if (t.IsFaulted)
+                {
+                    LogFastPaxosDecidedFaulted(t.Exception!);
+                    return;
+                }
+                DecideViewChange(t.Result);
+            }, scheduler: _sharedResources.TaskScheduler);
 
             // Inform EdgeFailureDetector about membership change
             CreateFailureDetectorsForCurrentConfiguration();
@@ -851,6 +873,13 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IDi
     /// </summary>
     private void CreateFailureDetectorsForCurrentConfiguration()
     {
+        // Check if this node is still in the ring - it may have been removed during a view change
+        if (!_membershipView.IsHostPresent(_myAddr))
+        {
+            LogSkippingFailureDetectorsNotInRing();
+            return;
+        }
+
         var subjects = _membershipView.GetSubjectsOf(_myAddr);
         var configurationId = _membershipView.ConfigurationId;
 
