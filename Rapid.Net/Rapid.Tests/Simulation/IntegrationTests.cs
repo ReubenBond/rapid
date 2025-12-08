@@ -25,7 +25,8 @@ public sealed class IntegrationTests : IAsyncLifetime
     public ValueTask InitializeAsync()
     {
         _output.WriteLine($"[IntegrationTests] Initializing with seed {TestSeed}");
-        _harness = new SimulationTestHarness(seed: TestSeed, loggerFactory: _loggerFactory);
+        // Use fake time for deterministic and fast test execution
+        _harness = new SimulationTestHarness(seed: TestSeed, loggerFactory: _loggerFactory, useFakeTime: true);
         return ValueTask.CompletedTask;
     }
 
@@ -178,6 +179,11 @@ public sealed class IntegrationTests : IAsyncLifetime
 
         // Remove joiner1
         _harness.CrashNode(joiner1);
+
+        // Wait for the seed node to detect the failure and remove joiner1 from membership.
+        // This is required because consensus needs a quorum - with 2 members, we need 2 votes.
+        // After the failed node is removed, membership goes back to 1 and consensus can proceed.
+        await _harness.WaitForNodeSizeAsync(seedNode, expectedSize: 1, timeout: TimeSpan.FromSeconds(30), cancellationToken: TestContext.Current.CancellationToken);
 
         // Add a new joiner through seed
         var joiner2 = await _harness.CreateJoinerNodeAsync(seedNode, nodeId: 2, cancellationToken: TestContext.Current.CancellationToken);

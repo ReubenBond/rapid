@@ -1,5 +1,4 @@
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Time.Testing;
 
 namespace Rapid.Tests.Simulation;
 
@@ -35,9 +34,6 @@ internal sealed class DeterministicSimulationHarness : IAsyncDisposable
         // Create the inner harness with fake time and our deterministic scheduler
         InnerHarness = new SimulationTestHarness(seed, loggerFactory, useFakeTime: true, taskScheduler: Scheduler);
         
-        // Now set the time provider on the scheduler for proper time-based ordering
-        Scheduler.SetTimeProvider(InnerHarness.FakeTimeProvider!);
-        
         _syncContext = new DeterministicSynchronizationContext(Scheduler);
         _previousSyncContext = _syncContext.Install();
 
@@ -67,9 +63,9 @@ internal sealed class DeterministicSimulationHarness : IAsyncDisposable
     public DeterministicTaskScheduler Scheduler { get; }
 
     /// <summary>
-    /// Gets the fake time provider.
+    /// Gets the simulation time provider.
     /// </summary>
-    public FakeTimeProvider TimeProvider => InnerHarness.FakeTimeProvider!;
+    public SimulationTimeProvider TimeProvider => InnerHarness.TimeProvider!;
 
     /// <summary>
     /// Gets the deterministic random instance.

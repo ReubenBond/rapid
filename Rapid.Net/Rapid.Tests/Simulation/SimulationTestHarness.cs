@@ -1,5 +1,4 @@
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Time.Testing;
 
 namespace Rapid.Tests.Simulation;
 
@@ -39,9 +38,10 @@ internal sealed class SimulationTestHarness(int seed, ILoggerFactory? loggerFact
     public DeterministicRandom Random => Environment.Random;
 
     /// <summary>
-    /// Gets the controllable time provider. Only available when useFakeTime is true.
+    /// Gets the simulation time provider. Only available when useFakeTime is true.
+    /// Provides access to pending timer information and precise time control.
     /// </summary>
-    public FakeTimeProvider? FakeTimeProvider => Environment.FakeTimeProvider;
+    public SimulationTimeProvider? TimeProvider => Environment.SimulationTimeProvider;
 
     /// <summary>
     /// Gets the simulated network.
@@ -78,6 +78,8 @@ internal sealed class SimulationTestHarness(int seed, ILoggerFactory? loggerFact
 
     /// <summary>
     /// Creates and joins a new node to the cluster through the specified seed.
+    /// When using fake time, automatically advances time during the join process
+    /// to ensure message timeouts work correctly.
     /// </summary>
     public async Task<SimulationNode> CreateJoinerNodeAsync(
         SimulationNode seedNode,
@@ -91,7 +93,12 @@ internal sealed class SimulationTestHarness(int seed, ILoggerFactory? loggerFact
         opts.FailureDetectorInterval = TimeSpan.FromSeconds(1);
 
         var node = SimulationNode.Create(Environment, nodeId, opts, Environment.LoggerFactory);
-        await node.JoinClusterAsync(seedNode, cancellationToken: cancellationToken).ConfigureAwait(true);
+        
+        // Use RunWithTimeAdvancementAsync to ensure timeouts fire if a node is unreachable
+        await RunWithTimeAdvancementAsync(
+            () => node.JoinClusterAsync(seedNode, cancellationToken: cancellationToken),
+            cancellationToken: cancellationToken).ConfigureAwait(true);
+        
         _nodes.Add(node);
         return node;
     }
@@ -127,7 +134,15 @@ internal sealed class SimulationTestHarness(int seed, ILoggerFactory? loggerFact
             // This gives time for consensus messages to propagate
             if (i < size - 1)
             {
-                await Task.Delay(50, cancellationToken).ConfigureAwait(true);
+                if (Environment.UseFakeTime)
+                {
+                    // With fake time, just advance the time
+                    Environment.AdvanceTime(TimeSpan.FromMilliseconds(50));
+                }
+                else
+                {
+                    await Task.Delay(50, cancellationToken).ConfigureAwait(true);
+                }
             }
         }
 
@@ -139,6 +154,70 @@ internal sealed class SimulationTestHarness(int seed, ILoggerFactory? loggerFact
     /// Only works when useFakeTime is enabled.
     /// </summary>
     public void AdvanceTime(TimeSpan duration) => Environment.AdvanceTime(duration);
+
+    /// <summary>
+    /// Runs a task while advancing fake time in the background.
+    /// When using real time, simply runs the task directly.
+    /// This is useful for operations that depend on timeouts (like joins to unreachable nodes).
+    /// </summary>
+    /// <param name="taskFactory">Factory that creates the task to run.</param>
+    /// <param name="stepSize">How much fake time to advance per iteration. Default is 100ms.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task<T> RunWithTimeAdvancementAsync<T>(
+        Func<Task<T>> taskFactory,
+        TimeSpan? stepSize = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (!Environment.UseFakeTime)
+        {
+            return await taskFactory().ConfigureAwait(true);
+        }
+
+        var step = stepSize ?? TimeSpan.FromMilliseconds(100);
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+        // Start the time advancement loop in background
+        var timeAdvancementTask = Task.Run(async () =>
+        {
+            while (!cts.Token.IsCancellationRequested)
+            {
+                // Small real delay to allow other tasks to run
+                await Task.Delay(10, CancellationToken.None).ConfigureAwait(true);
+                Environment.AdvanceTime(step);
+            }
+        }, CancellationToken.None);
+
+        try
+        {
+            return await taskFactory().ConfigureAwait(true);
+        }
+        finally
+        {
+            await cts.CancelAsync().ConfigureAwait(true);
+            try
+            {
+                await timeAdvancementTask.WaitAsync(TimeSpan.FromSeconds(1)).ConfigureAwait(true);
+            }
+            catch (TimeoutException) { }
+            catch (OperationCanceledException) { }
+        }
+    }
+
+    /// <summary>
+    /// Runs a task while advancing fake time in the background.
+    /// When using real time, simply runs the task directly.
+    /// </summary>
+    public async Task RunWithTimeAdvancementAsync(
+        Func<Task> taskFactory,
+        TimeSpan? stepSize = null,
+        CancellationToken cancellationToken = default)
+    {
+        await RunWithTimeAdvancementAsync(async () =>
+        {
+            await taskFactory().ConfigureAwait(true);
+            return 0;
+        }, stepSize, cancellationToken).ConfigureAwait(true);
+    }
 
     /// <summary>
     /// Waits for all nodes to converge to the same membership size.
@@ -169,6 +248,8 @@ internal sealed class SimulationTestHarness(int seed, ILoggerFactory? loggerFact
             if (Environment.UseFakeTime)
             {
                 Environment.AdvanceTime(step);
+                // Give async continuations a chance to run after firing timers
+                await Task.Yield();
             }
             else
             {
@@ -207,6 +288,8 @@ internal sealed class SimulationTestHarness(int seed, ILoggerFactory? loggerFact
             if (Environment.UseFakeTime)
             {
                 Environment.AdvanceTime(step);
+                // Give async continuations a chance to run after firing timers
+                await Task.Yield();
             }
             else
             {

@@ -84,8 +84,13 @@ internal sealed class SimulationNode : IDisposable
         _sharedResources = new SharedResources(sharedResourcesLogger, environment.TimeProvider, environment.TaskScheduler);
 
 
-        // Create in-memory messaging client
-        MessagingClient = new InMemoryMessagingClient(environment, address);
+        // Create in-memory messaging client with a shorter timeout for simulations
+        MessagingClient = new InMemoryMessagingClient(environment, address)
+        {
+            // Use a 5 second timeout for simulations - this is long enough for consensus
+            // but short enough that tests don't hang when nodes are crashed
+            MessageTimeout = TimeSpan.FromSeconds(5)
+        };
 
         // Create view accessor
         _viewAccessor = new MembershipViewAccessor();

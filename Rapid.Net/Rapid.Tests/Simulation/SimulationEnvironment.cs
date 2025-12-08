@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Time.Testing;
 
 namespace Rapid.Tests.Simulation;
 
@@ -32,14 +31,14 @@ internal sealed class SimulationEnvironment : IDisposable
 
         if (useFakeTime)
         {
-            var fakeTime = new FakeTimeProvider(DateTimeOffset.UtcNow);
-            TimeProvider = fakeTime;
-            FakeTimeProvider = fakeTime;
+            var simTime = new SimulationTimeProvider(DateTimeOffset.UtcNow);
+            TimeProvider = simTime;
+            SimulationTimeProvider = simTime;
         }
         else
         {
             TimeProvider = TimeProvider.System;
-            FakeTimeProvider = null;
+            SimulationTimeProvider = null;
         }
     }
 
@@ -54,9 +53,10 @@ internal sealed class SimulationEnvironment : IDisposable
     public TimeProvider TimeProvider { get; }
 
     /// <summary>
-    /// Gets the fake time provider if useFakeTime was enabled, null otherwise.
+    /// Gets the simulation time provider if useFakeTime was enabled, null otherwise.
+    /// Provides access to pending timer information and precise time control.
     /// </summary>
-    public FakeTimeProvider? FakeTimeProvider { get; }
+    public SimulationTimeProvider? SimulationTimeProvider { get; }
 
     /// <summary>
     /// Gets whether this environment uses fake time.
@@ -119,31 +119,60 @@ internal sealed class SimulationEnvironment : IDisposable
     }
 
     /// <summary>
-    /// Advances the simulation time by the specified duration.
+    /// Advances the simulation time by the specified duration, firing any pending timers.
     /// Only works if useFakeTime was enabled.
     /// </summary>
     /// <param name="duration">The duration to advance time.</param>
-    public void AdvanceTime(TimeSpan duration)
+    /// <returns>The number of timers that were fired.</returns>
+    public int AdvanceTime(TimeSpan duration)
     {
-        if (FakeTimeProvider == null)
+        if (SimulationTimeProvider == null)
         {
             throw new InvalidOperationException("Cannot advance time when useFakeTime is false");
         }
-        FakeTimeProvider.Advance(duration);
+        return SimulationTimeProvider.Advance(duration);
     }
 
     /// <summary>
-    /// Advances the simulation time to a specific point.
+    /// Advances the simulation time to a specific point, firing any pending timers.
     /// Only works if useFakeTime was enabled.
     /// </summary>
     /// <param name="targetTime">The target time to advance to.</param>
-    public void AdvanceTimeTo(DateTimeOffset targetTime)
+    /// <returns>The number of timers that were fired.</returns>
+    public int AdvanceTimeTo(DateTimeOffset targetTime)
     {
-        if (FakeTimeProvider == null)
+        if (SimulationTimeProvider == null)
         {
             throw new InvalidOperationException("Cannot advance time when useFakeTime is false");
         }
-        FakeTimeProvider.SetUtcNow(targetTime);
+        return SimulationTimeProvider.AdvanceTo(targetTime);
+    }
+
+    /// <summary>
+    /// Advances time to fire the next pending timer.
+    /// Only works if useFakeTime was enabled.
+    /// </summary>
+    /// <returns>True if a timer was fired, false if no timers were pending.</returns>
+    public bool AdvanceToNextTimer()
+    {
+        if (SimulationTimeProvider == null)
+        {
+            throw new InvalidOperationException("Cannot advance time when useFakeTime is false");
+        }
+        return SimulationTimeProvider.AdvanceToNextTimer();
+    }
+
+    /// <summary>
+    /// Gets information about all pending timers.
+    /// Only available when useFakeTime is enabled.
+    /// </summary>
+    public IReadOnlyList<SimulationTimeProvider.TimerInfo> GetPendingTimers()
+    {
+        if (SimulationTimeProvider == null)
+        {
+            return [];
+        }
+        return SimulationTimeProvider.GetPendingTimers();
     }
 
     /// <summary>

@@ -86,9 +86,9 @@ public sealed class SimulationTestHarnessTests : IAsyncLifetime
     {
         // Create a harness with fake time enabled for this test
         await using var fakeTimeHarness = new SimulationTestHarness(seed: 99999, useFakeTime: true);
-        var initialTime = fakeTimeHarness.FakeTimeProvider!.GetUtcNow();
+        var initialTime = fakeTimeHarness.TimeProvider!.GetUtcNow();
         fakeTimeHarness.AdvanceTime(TimeSpan.FromMinutes(5));
-        var newTime = fakeTimeHarness.FakeTimeProvider.GetUtcNow();
+        var newTime = fakeTimeHarness.TimeProvider.GetUtcNow();
 
         Assert.Equal(initialTime + TimeSpan.FromMinutes(5), newTime);
     }
