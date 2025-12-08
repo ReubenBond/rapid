@@ -4,7 +4,13 @@
     <Platform Name="x64" />
     <Platform Name="x86" />
   </Configurations>
-  <Project Path="src/Rapid.Core/Rapid.Core.csproj" />
-  <Project Path="samples/Rapid.Examples/Rapid.Examples.csproj" />
-  <Project Path="tests/Rapid.Tests/Rapid.Tests.csproj" />
+  <Folder Name="/samples/">
+    <Project Path="samples/Rapid.Examples/Rapid.Examples.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/Rapid.Core/Rapid.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Rapid.Tests/Rapid.Tests.csproj" />
+  </Folder>
 </Solution>

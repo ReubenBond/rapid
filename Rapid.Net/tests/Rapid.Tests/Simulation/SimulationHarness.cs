@@ -205,6 +205,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
         RapidProtocolOptions? options = null,
         CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         return Task.FromResult(CreateJoinerNode(seedNode, nodeId, options));
     }
 
@@ -433,6 +434,12 @@ internal sealed class SimulationHarness : IAsyncDisposable
     #region Simulation Driving
 
     /// <summary>
+    /// Maximum simulated time to advance before considering the simulation stuck.
+    /// Default is 10 minutes of simulated time.
+    /// </summary>
+    public TimeSpan MaxSimulatedTimeAdvance { get; set; } = TimeSpan.FromMinutes(10);
+
+    /// <summary>
     /// Runs the simulation until the specified condition is met.
     /// </summary>
     public bool RunUntil(Func<bool> condition, int maxIterations = 100000)
@@ -449,6 +456,10 @@ internal sealed class SimulationHarness : IAsyncDisposable
     /// </summary>
     private bool RunUntilCore(Func<bool> condition, int maxIterations)
     {
+        var startTime = TimeProvider.GetUtcNow();
+        var maxEndTime = startTime + MaxSimulatedTimeAdvance;
+        var timeAdvanceCount = 0;
+
         for (var i = 0; i < maxIterations; i++)
         {
             if (condition())
@@ -460,12 +471,40 @@ internal sealed class SimulationHarness : IAsyncDisposable
             if (Scheduler.TryExecuteOne())
             {
                 LogicalTime++;
+                timeAdvanceCount = 0; // Reset time advance counter when real work happens
                 continue;
             }
 
-            if (!AdvanceToNextScheduledTime())
+            // No tasks to execute - need to advance time
+            var nextScheduledTime = GetNextScheduledTime();
+            if (!nextScheduledTime.HasValue)
             {
-                return condition();
+                // No more scheduled work - simulation is idle and cannot make progress
+                LogEvent(SimulationEventType.MaxStepsReached,
+                    $"Simulation is idle with no pending work - condition cannot be met. " +
+                    $"Iterations: {i}, Simulated time: {TimeProvider.GetUtcNow():O}");
+                return false;
+            }
+
+            // Check if we've been advancing time without making progress
+            if (nextScheduledTime.Value > maxEndTime)
+            {
+                LogEvent(SimulationEventType.MaxStepsReached,
+                    $"Simulation appears stuck: exceeded max simulated time ({MaxSimulatedTimeAdvance}). " +
+                    $"Start: {startTime:O}, Current: {TimeProvider.GetUtcNow():O}, Next scheduled: {nextScheduledTime.Value:O}");
+                return false;
+            }
+
+            // Advance time
+            TimeProvider.SetUtcNow(nextScheduledTime.Value);
+            timeAdvanceCount++;
+
+            // Safety check: if we've advanced time many times without executing tasks, we might be stuck
+            if (timeAdvanceCount > 10000)
+            {
+                LogEvent(SimulationEventType.MaxStepsReached,
+                    $"Simulation appears stuck: {timeAdvanceCount} consecutive time advances without task execution");
+                return false;
             }
         }
 
@@ -495,13 +534,15 @@ internal sealed class SimulationHarness : IAsyncDisposable
     private bool RunUntilIdleCore(TimeSpan? maxSimulatedTime, int maxIterations)
     {
         var startTime = TimeProvider.GetUtcNow();
-        var maxEndTime = maxSimulatedTime.HasValue ? startTime + maxSimulatedTime.Value : DateTimeOffset.MaxValue;
+        var maxEndTime = startTime + (maxSimulatedTime ?? MaxSimulatedTimeAdvance);
+        var timeAdvanceCount = 0;
 
         for (var i = 0; i < maxIterations; i++)
         {
             if (Scheduler.TryExecuteOne())
             {
                 LogicalTime++;
+                timeAdvanceCount = 0; // Reset time advance counter when real work happens
                 continue;
             }
 
@@ -514,11 +555,22 @@ internal sealed class SimulationHarness : IAsyncDisposable
 
             if (nextScheduledTime.Value > maxEndTime)
             {
-                LogEvent(SimulationEventType.MaxStepsReached, $"Max simulated time ({maxSimulatedTime}) reached");
+                LogEvent(SimulationEventType.MaxStepsReached,
+                    $"Simulation appears stuck: exceeded max simulated time ({maxSimulatedTime ?? MaxSimulatedTimeAdvance}). " +
+                    $"Start: {startTime:O}, Current: {TimeProvider.GetUtcNow():O}, Next scheduled: {nextScheduledTime.Value:O}");
                 return false;
             }
 
-            AdvanceToNextScheduledTime();
+            TimeProvider.SetUtcNow(nextScheduledTime.Value);
+            timeAdvanceCount++;
+
+            // Safety check: if we've advanced time many times without executing tasks, we might be stuck
+            if (timeAdvanceCount > 10000)
+            {
+                LogEvent(SimulationEventType.MaxStepsReached,
+                    $"Simulation appears stuck: {timeAdvanceCount} consecutive time advances without task execution");
+                return false;
+            }
         }
 
         LogEvent(SimulationEventType.MaxStepsReached, $"Max iterations ({maxIterations}) reached");

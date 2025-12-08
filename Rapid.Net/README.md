@@ -167,12 +167,6 @@ dotnet run --project Rapid.Examples -- --listen 127.0.0.1:1236 --seed 127.0.0.1:
 - [Fast Paxos Paper (Microsoft Research)](https://www.microsoft.com/en-us/research/wp-content/uploads/2016/02/tr-2005-112.pdf)
 - [Original Java Implementation](https://github.com/lalithsuresh/rapid)
 
-## License
-
-Copyright © 2016-2025 VMware, Inc. All Rights Reserved.
-
-Licensed under the Apache License, Version 2.0. See LICENSE file for details.
-
 ## Acknowledgments
 
 This is a C# port of the original Java implementation by Lalith Suresh and team at VMware.
