@@ -689,12 +689,19 @@ internal sealed class SimulationHarness : IAsyncDisposable
 
     /// <summary>
     /// Generates a unique log file path for a simulation.
+    /// Logs are written to a 'logs' directory next to the test executable for easy access.
     /// </summary>
     private static string GenerateLogFilePath(string? testName, int seed)
     {
         var sanitizedTestName = SanitizeFileName(testName ?? "unknown_test");
         var uniqueId = Guid.NewGuid().ToString("N")[..8];
-        return Path.Combine(Path.GetTempPath(), $"rapid_sim_{sanitizedTestName}_{seed}_{uniqueId}.log");
+        
+        // Use a 'logs' directory next to the test executable for easy access
+        var assemblyLocation = typeof(SimulationHarness).Assembly.Location;
+        var baseDirectory = Path.GetDirectoryName(assemblyLocation) ?? AppContext.BaseDirectory;
+        var logsDirectory = Path.Combine(baseDirectory, "logs");
+        
+        return Path.Combine(logsDirectory, $"rapid_sim_{sanitizedTestName}_{seed}_{uniqueId}.log");
     }
 
     /// <summary>
