@@ -338,11 +338,12 @@ internal sealed class SimulationNode : IDisposable
         for (var ringNumber = 0; ringNumber < observers.Count; ringNumber++)
         {
             var observer = observers[ringNumber];
-            if (!ringNumbersPerObserver.ContainsKey(observer))
+            if (!ringNumbersPerObserver.TryGetValue(observer, out var value))
             {
-                ringNumbersPerObserver[observer] = [];
+                ringNumbersPerObserver[observer] = value = [];
             }
-            ringNumbersPerObserver[observer].Add(ringNumber);
+
+            value.Add(ringNumber);
         }
 
         var tasks = ringNumbersPerObserver.Select(async entry =>
@@ -422,23 +423,29 @@ internal sealed class SimulationNode : IDisposable
     /// <summary>
     /// Registers a subscription for cluster events.
     /// </summary>
-    public void RegisterSubscription(ClusterEvents eventType, Action<ClusterStatusChange> callback) => _membershipService?.RegisterSubscription(eventType, callback);
+    public void RegisterSubscription(ClusterEvents eventType, Action<ClusterStatusChange> callback)
+    {
+        if (_membershipService is null)
+        {
+            throw new InvalidOperationException("Membership service has not been initialized.");
+        }
+
+        _membershipService.RegisterSubscription(eventType, callback);
+    }
 
     /// <summary>
     /// Gracefully leaves the cluster.
     /// </summary>
     public async Task LeaveAsync()
     {
-        if (_membershipService != null)
+        if (_membershipService is null)
         {
-            _logger.LogInformation("Node {Address} leaving cluster gracefully", RapidUtils.Loggable(Address));
-            await _membershipService.LeaveAsync().ConfigureAwait(true);
-            _logger.LogInformation("Node {Address} completed graceful leave", RapidUtils.Loggable(Address));
+            throw new InvalidOperationException("Membership service has not been initialized.");
         }
-        else
-        {
-            _logger.LogWarning("Node {Address} LeaveAsync called but node is not initialized", RapidUtils.Loggable(Address));
-        }
+
+        _logger.LogInformation("Node {Address} leaving cluster gracefully", RapidUtils.Loggable(Address));
+        await _membershipService.LeaveAsync().ConfigureAwait(true);
+        _logger.LogInformation("Node {Address} completed graceful leave", RapidUtils.Loggable(Address));
     }
 
     /// <summary>

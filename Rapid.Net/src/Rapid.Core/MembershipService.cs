@@ -551,6 +551,10 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
             // Track nodes that were added so we can notify their joiners after ALL nodes are processed
             var addedNodes = new List<Endpoint>();
 
+            // Build status changes during the loop, capturing state BEFORE modifications
+            // This ensures consistent semantics: Up = joining, Down = leaving/failing
+            var nodeStatusChanges = new List<NodeStatusChange>(proposal.Count);
+
             // Create a builder from the current view to make modifications
             var builder = _membershipView.ToBuilder();
 
@@ -559,10 +563,12 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
                 // If the node is already in the ring, remove it. Else, add it.
                 // XXX: Maybe there's a cleaner way to do this in the future because
                 // this ties us to just two states a node can be in.
-                if (_membershipView.IsHostPresent(node))
+                var isPresent = _membershipView.IsHostPresent(node);
+                if (isPresent)
                 {
                     LogRemovingNode(new LoggableEndpoint(node));
                     builder.RingDelete(node);
+                    nodeStatusChanges.Add(new NodeStatusChange(node, EdgeStatus.Down, _metadataManager.Get(node) ?? new Metadata()));
                 }
                 else
                 {
@@ -577,6 +583,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
                     LogAddingNode(new LoggableEndpoint(node));
                     builder.RingAdd(node, nodeId);
                     _metadataManager.Add(node, metadata);
+                    nodeStatusChanges.Add(new NodeStatusChange(node, EdgeStatus.Up, metadata));
 
                     _joinerUuid.Remove(node);
                     _joinerMetadata.Remove(node);
@@ -646,7 +653,6 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
             // Publish an event to the listeners.
             var configurationId = _membershipView.ConfigurationId;
             var currentMembership = _membershipView.GetRing(0);
-            var nodeStatusChanges = CreateNodeStatusChangeList(proposal);
             var clusterStatusChange = new ClusterStatusChange(configurationId, [.. currentMembership], nodeStatusChanges);
 
             LogPublishingViewChange(new CurrentConfigId(_membershipView), new MembershipSize(_membershipView));
@@ -821,7 +827,14 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     }
 
     /// <summary>
-    /// Formats a proposal or a view change for application subscriptions.
+    /// Formats a proposal or view change for application subscriptions.
+    /// Determines status based on current view state:
+    /// - Nodes NOT in view → EdgeStatus.Up (joining)
+    /// - Nodes IN view → EdgeStatus.Down (leaving/failing)
+    ///
+    /// For ViewChangeProposal: called BEFORE view update, so joining nodes aren't in view yet.
+    /// For ViewChange: status is captured inline BEFORE each node is added/removed.
+    /// Both cases produce consistent semantics: Up = joining, Down = leaving.
     /// </summary>
     private List<NodeStatusChange> CreateNodeStatusChangeList(IEnumerable<Endpoint> proposal)
     {

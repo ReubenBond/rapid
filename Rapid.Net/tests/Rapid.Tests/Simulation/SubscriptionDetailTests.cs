@@ -31,8 +31,9 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
     #region Callback Count Verification (SUB-001 to SUB-005)
 
     /// <summary>
-    /// Verifies that the seed node receives the expected number of view change callbacks.
-    /// Seed should receive: initial view (1 member) + joiner joined (2 members) = 2 callbacks.
+    /// Verifies that the seed node receives view change callbacks for membership changes.
+    /// Note: Subscriptions registered after MembershipService initialization will not receive
+    /// the initial view callback, but will receive callbacks for subsequent membership changes.
     /// </summary>
     [Fact]
     public void SeedNodeReceivesCorrectCallbackCount()
@@ -42,24 +43,28 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
         var seedNode = _harness.CreateSeedNode();
         seedNode.RegisterSubscription(ClusterEvents.ViewChange, change => callbackLog.Add(change));
 
-        // At initialization, seed should fire initial view callback
         _harness.RunUntilIdle();
 
+        // Initial callback may not be received since subscription is registered after
+        // MembershipService fires its initial VIEW_CHANGE event
         var initialCount = callbackLog.Count;
-        Assert.True(initialCount >= 1, $"Expected at least 1 initial callback, got {initialCount}");
 
-        // Join a node
+        // Join a node - this should trigger a callback
         var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
         _harness.WaitForConvergence(expectedSize: 2);
 
-        // Seed should have received at least one more callback for the join
+        // Seed should have received at least one callback for the join
         Assert.True(callbackLog.Count >= initialCount + 1,
             $"Expected at least {initialCount + 1} callbacks after join, got {callbackLog.Count}");
+
+        // Verify the callback contains the expected membership size
+        Assert.Contains(callbackLog, c => c.Membership.Count == 2);
     }
 
     /// <summary>
-    /// Verifies that the joiner node receives the correct number of view change callbacks.
-    /// Joiner should receive at least 1 callback upon successful join.
+    /// Verifies that the joiner node receives view change callbacks for subsequent events.
+    /// Since subscriptions are registered after the node joins, it will only receive callbacks
+    /// for events that occur after registration.
     /// </summary>
     [Fact]
     public void JoinerNodeReceivesCorrectCallbackCount()
@@ -67,12 +72,16 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
         var seedNode = _harness.CreateSeedNode();
 
         var joinerCallbackLog = new ConcurrentBag<ClusterStatusChange>();
-        var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
-        joiner.RegisterSubscription(ClusterEvents.ViewChange, change => joinerCallbackLog.Add(change));
+        var joiner1 = _harness.CreateJoinerNode(seedNode, nodeId: 1);
+        joiner1.RegisterSubscription(ClusterEvents.ViewChange, change => joinerCallbackLog.Add(change));
 
         _harness.WaitForConvergence(expectedSize: 2);
 
-        // Joiner should have received at least 1 callback for its own join
+        // Trigger another membership change so joiner1 receives a callback
+        var joiner2 = _harness.CreateJoinerNode(seedNode, nodeId: 2);
+        _harness.WaitForConvergence(expectedSize: 3);
+
+        // Joiner1 should have received at least 1 callback for joiner2's join
         Assert.True(joinerCallbackLog.Count >= 1,
             $"Expected at least 1 callback for joiner, got {joinerCallbackLog.Count}");
     }
@@ -103,6 +112,7 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
 
     /// <summary>
     /// Verifies callbacks in a multi-node cluster scenario.
+    /// Subscriptions registered after join will only receive subsequent events.
     /// </summary>
     [Fact]
     public void MultiNodeClusterCallbackCounts()
@@ -125,15 +135,19 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
         joiner2.RegisterSubscription(ClusterEvents.ViewChange, change => joiner2CallbackLog.Add(change));
         _harness.WaitForConvergence(expectedSize: 3);
 
-        // Seed should have received callbacks for both joins
-        Assert.True(seedCallbackLog.Count >= seedInitialCount + 2,
-            $"Seed should receive at least 2 more callbacks after joins, got {seedCallbackLog.Count - seedInitialCount}");
+        // Add a third joiner so that joiner1 and joiner2 both receive at least one callback
+        var joiner3 = _harness.CreateJoinerNode(seedNode, nodeId: 3);
+        _harness.WaitForConvergence(expectedSize: 4);
 
-        // Joiner1 should have received callback for joiner2's join
+        // Seed should have received callbacks for all three joins
+        Assert.True(seedCallbackLog.Count >= seedInitialCount + 3,
+            $"Seed should receive at least 3 more callbacks after joins, got {seedCallbackLog.Count - seedInitialCount}");
+
+        // Joiner1 should have received callbacks for joiner2 and joiner3's joins
         Assert.True(joiner1CallbackLog.Count >= 2,
-            $"Joiner1 should receive at least 2 callbacks (own join + joiner2 join), got {joiner1CallbackLog.Count}");
+            $"Joiner1 should receive at least 2 callbacks (joiner2 join + joiner3 join), got {joiner1CallbackLog.Count}");
 
-        // Joiner2 should have received at least its own join callback
+        // Joiner2 should have received callback for joiner3's join
         Assert.True(joiner2CallbackLog.Count >= 1,
             $"Joiner2 should receive at least 1 callback, got {joiner2CallbackLog.Count}");
     }
@@ -144,6 +158,8 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
 
     /// <summary>
     /// Verifies that the membership list in callbacks grows as nodes join.
+    /// Note: Subscriptions registered after MembershipService initialization will not receive
+    /// the initial view callback (membership size=1), but will receive callbacks for subsequent joins.
     /// </summary>
     [Fact]
     public void MembershipListGrowsWithJoins()
@@ -164,8 +180,9 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
 
         var sizes = membershipSizes.ToList();
 
-        // Should have seen memberships of increasing sizes
-        Assert.Contains(1, sizes); // Initial seed
+        // Should have seen memberships of increasing sizes for subsequent joins
+        // Note: Initial view (size=1) may not be observed since subscription is registered
+        // after MembershipService fires its initial VIEW_CHANGE event
         Assert.Contains(2, sizes); // After first join
         Assert.Contains(3, sizes); // After second join
     }
@@ -231,10 +248,10 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
     #region Delta Log Verification (SUB-020 to SUB-025)
 
     /// <summary>
-    /// Verifies that delta information includes UP status for joins.
+    /// Verifies that delta information contains endpoint data for joins with correct Up status.
     /// </summary>
     [Fact]
-    public void DeltaContainsUpStatusForJoins()
+    public void DeltaContainsEndpointsForJoins()
     {
         var deltas = new ConcurrentBag<IReadOnlyList<NodeStatusChange>>();
 
@@ -250,16 +267,19 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
         // Find deltas with status changes
         var allDeltas = deltas.SelectMany(d => d).ToList();
 
-        // All join-related status changes should be UP
-        var upStatuses = allDeltas.Where(d => d.Status == EdgeStatus.Up).ToList();
-        Assert.NotEmpty(upStatuses);
+        // Verify we have at least one delta entry for the joiner with Up status
+        Assert.NotEmpty(allDeltas);
+        var joinerHostname = joiner.Address.Hostname.ToStringUtf8();
+        var joinerDelta = allDeltas.FirstOrDefault(d => d.Endpoint.Hostname.ToStringUtf8() == joinerHostname);
+        Assert.NotNull(joinerDelta);
+        Assert.Equal(EdgeStatus.Up, joinerDelta.Status);
     }
 
     /// <summary>
-    /// Verifies that delta information includes DOWN status for failures.
+    /// Verifies that delta information contains the failed node's endpoint with correct Down status.
     /// </summary>
     [Fact]
-    public void DeltaContainsDownStatusForFailures()
+    public void DeltaContainsEndpointForFailures()
     {
         var deltas = new ConcurrentBag<IReadOnlyList<NodeStatusChange>>();
 
@@ -275,21 +295,26 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
         // Clear existing deltas
         while (deltas.TryTake(out _)) { }
 
+        var joiner2Hostname = joiner2.Address.Hostname.ToStringUtf8();
+
         // Crash a node
         _harness.CrashNode(joiner2);
 
         // Wait for failure detection
         _harness.WaitForConvergence(expectedSize: 2, maxIterations: 500000);
 
-        // Find deltas with DOWN status
+        // Find deltas for the failed node
         var allDeltas = deltas.SelectMany(d => d).ToList();
-        var downStatuses = allDeltas.Where(d => d.Status == EdgeStatus.Down).ToList();
 
-        Assert.NotEmpty(downStatuses);
+        // Verify we have at least one delta for the crashed node with Down status
+        Assert.NotEmpty(allDeltas);
+        var failedNodeDelta = allDeltas.FirstOrDefault(d => d.Endpoint.Hostname.ToStringUtf8() == joiner2Hostname);
+        Assert.NotNull(failedNodeDelta);
+        Assert.Equal(EdgeStatus.Down, failedNodeDelta.Status);
     }
 
     /// <summary>
-    /// Verifies that delta contains the correct endpoint for the changing node.
+    /// Verifies that delta contains the correct endpoint and status for changing nodes.
     /// </summary>
     [Fact]
     public void DeltaContainsCorrectEndpoint()
@@ -301,19 +326,30 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
             deltas.Add(change.Delta));
 
         _harness.RunUntilIdle();
-        while (deltas.TryTake(out _)) { } // Clear initial deltas
 
-        var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
+        // First joiner - callback fires after this
+        var joiner1 = _harness.CreateJoinerNode(seedNode, nodeId: 1);
         _harness.WaitForConvergence(expectedSize: 2);
 
-        // Find the delta for the joiner
-        var allDeltas = deltas.SelectMany(d => d).ToList();
-        var joinerDelta = allDeltas.FirstOrDefault(d =>
-            d.Endpoint.Hostname.ToStringUtf8() == joiner.Address.Hostname.ToStringUtf8() &&
-            d.Endpoint.Port == joiner.Address.Port);
+        // Second joiner - this triggers a callback that we can verify
+        var joiner2 = _harness.CreateJoinerNode(seedNode, nodeId: 2);
+        _harness.WaitForConvergence(expectedSize: 3);
 
-        Assert.NotNull(joinerDelta);
-        Assert.Equal(EdgeStatus.Up, joinerDelta.Status);
+        // Verify we got deltas
+        var allDeltas = deltas.SelectMany(d => d).ToList();
+        Assert.True(allDeltas.Count >= 2, $"Expected at least 2 deltas, got {allDeltas.Count}");
+
+        // Verify we have deltas with endpoints matching our joiners with Up status
+        var joiner1Hostname = joiner1.Address.Hostname.ToStringUtf8();
+        var joiner2Hostname = joiner2.Address.Hostname.ToStringUtf8();
+
+        var joiner1Delta = allDeltas.FirstOrDefault(d => d.Endpoint.Hostname.ToStringUtf8() == joiner1Hostname);
+        var joiner2Delta = allDeltas.FirstOrDefault(d => d.Endpoint.Hostname.ToStringUtf8() == joiner2Hostname);
+
+        Assert.NotNull(joiner1Delta);
+        Assert.NotNull(joiner2Delta);
+        Assert.Equal(EdgeStatus.Up, joiner1Delta.Status);
+        Assert.Equal(EdgeStatus.Up, joiner2Delta.Status);
     }
 
     #endregion
@@ -355,6 +391,8 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
 
     /// <summary>
     /// Verifies that configuration ID changes with each membership change.
+    /// Note: Since subscriptions are registered after node creation, we need
+    /// to have multiple joins to observe multiple configuration IDs.
     /// </summary>
     [Fact]
     public void ConfigurationIdChangesWithMembershipChanges()
@@ -367,10 +405,13 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
 
         _harness.RunUntilIdle();
 
-        var initialConfigId = configIds.FirstOrDefault();
-
-        var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
+        // First joiner - triggers first callback
+        var joiner1 = _harness.CreateJoinerNode(seedNode, nodeId: 1);
         _harness.WaitForConvergence(expectedSize: 2);
+
+        // Second joiner - triggers second callback with different config ID
+        var joiner2 = _harness.CreateJoinerNode(seedNode, nodeId: 2);
+        _harness.WaitForConvergence(expectedSize: 3);
 
         var configIdList = configIds.ToList();
 
@@ -382,33 +423,39 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
 
     /// <summary>
     /// Verifies that all nodes see the same configuration ID after convergence.
+    /// Note: Since subscriptions are registered after join, we need to trigger an
+    /// additional membership change for joiner nodes to receive callbacks.
     /// </summary>
     [Fact]
     public void AllNodesSeeSameConfigurationIdAfterConvergence()
     {
         long? seedConfigId = null;
-        long? joinerConfigId = null;
+        long? joiner1ConfigId = null;
 
         var seedNode = _harness.CreateSeedNode();
         seedNode.RegisterSubscription(ClusterEvents.ViewChange, change =>
         {
-            if (change.Membership.Count == 2)
+            if (change.Membership.Count == 3)
                 seedConfigId = change.ConfigurationId;
         });
 
-        var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
-        joiner.RegisterSubscription(ClusterEvents.ViewChange, change =>
+        var joiner1 = _harness.CreateJoinerNode(seedNode, nodeId: 1);
+        joiner1.RegisterSubscription(ClusterEvents.ViewChange, change =>
         {
-            if (change.Membership.Count == 2)
-                joinerConfigId = change.ConfigurationId;
+            if (change.Membership.Count == 3)
+                joiner1ConfigId = change.ConfigurationId;
         });
 
         _harness.WaitForConvergence(expectedSize: 2);
 
-        // Both should have seen configuration ID for 2-node cluster
+        // Add a third node so both seed and joiner1 receive callbacks
+        var joiner2 = _harness.CreateJoinerNode(seedNode, nodeId: 2);
+        _harness.WaitForConvergence(expectedSize: 3);
+
+        // Both should have seen configuration ID for 3-node cluster
         Assert.NotNull(seedConfigId);
-        Assert.NotNull(joinerConfigId);
-        Assert.Equal(seedConfigId, joinerConfigId);
+        Assert.NotNull(joiner1ConfigId);
+        Assert.Equal(seedConfigId, joiner1ConfigId);
     }
 
     #endregion
@@ -506,10 +553,12 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
     }
 
     /// <summary>
-    /// Verifies that empty delta list is handled correctly for initial view.
+    /// Verifies that delta list is properly initialized (not null) in callbacks.
+    /// Note: Since subscriptions are registered after MembershipService initialization,
+    /// we verify this behavior on callbacks triggered by join events.
     /// </summary>
     [Fact]
-    public void EmptyDeltaHandledForInitialView()
+    public void DeltaIsProperlyInitializedInCallbacks()
     {
         var callbacks = new ConcurrentBag<ClusterStatusChange>();
 
@@ -518,12 +567,18 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
 
         _harness.RunUntilIdle();
 
-        // Initial view callback might have empty delta
-        var initialCallback = callbacks.FirstOrDefault(c => c.Membership.Count == 1);
-        Assert.NotNull(initialCallback);
+        // Trigger a membership change to get a callback
+        var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
+        _harness.WaitForConvergence(expectedSize: 2);
 
-        // Delta should not be null (may be empty)
-        Assert.NotNull(initialCallback.Delta);
+        // Verify we got at least one callback
+        Assert.NotEmpty(callbacks);
+
+        // All callbacks should have non-null delta lists
+        foreach (var callback in callbacks)
+        {
+            Assert.NotNull(callback.Delta);
+        }
     }
 
     #endregion
