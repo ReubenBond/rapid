@@ -13,6 +13,7 @@ namespace Rapid.Tests.Simulation;
 internal sealed class SimulationNode : IDisposable
 {
     private readonly SimulationHarness _harness;
+    private readonly NodeSimulationContext _context;
     private readonly SharedResources _sharedResources;
     private readonly SimulationFailureDetectorFactory _failureDetectorFactory;
     private readonly IFastPaxosFactory _fastPaxosFactory;
@@ -20,6 +21,7 @@ internal sealed class SimulationNode : IDisposable
     private readonly IOptions<RapidProtocolOptions> _protocolOptions;
     private readonly ILogger<SimulationNode> _logger;
     private readonly ILogger<MembershipService> _membershipServiceLogger;
+    private readonly TaskCompletionSource<MembershipService> _membershipServiceTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private MembershipService? _membershipService;
     private bool _disposed;
 
@@ -60,11 +62,13 @@ internal sealed class SimulationNode : IDisposable
 
     private SimulationNode(
         SimulationHarness harness,
+        NodeSimulationContext context,
         Endpoint address,
         RapidProtocolOptions? protocolOptions,
         ILoggerFactory? loggerFactory)
     {
         _harness = harness;
+        _context = context;
         Address = address;
         Random = harness.CreateDerivedRandom();
 
@@ -78,13 +82,13 @@ internal sealed class SimulationNode : IDisposable
         var options = protocolOptions ?? new RapidProtocolOptions();
         _protocolOptions = Options.Create(options);
 
-        // Create shared resources with the simulation's time provider, task scheduler, random, and guid factory
+        // Create shared resources with the node's time provider and task scheduler
         var sharedResourcesLogger = factory?.CreateLogger<SharedResources>()
             ?? NullLogger<SharedResources>.Instance;
-        _sharedResources = new SharedResources(sharedResourcesLogger, harness.TimeProvider, harness.TaskScheduler, Random, Random.NextGuid);
+        _sharedResources = new SharedResources(sharedResourcesLogger, context.TimeProvider, context.TaskScheduler, Random, Random.NextGuid);
 
         // Create in-memory messaging client with a shorter timeout for simulations
-        MessagingClient = new InMemoryMessagingClient(harness, address)
+        MessagingClient = new InMemoryMessagingClient(harness, this, address)
         {
             // Use a 5 second timeout for simulations - this is long enough for consensus
             // but short enough that tests don't hang when nodes are crashed
@@ -120,18 +124,20 @@ internal sealed class SimulationNode : IDisposable
     }
 
     /// <summary>
-    /// Creates a new simulation node.
+    /// Creates a new simulation node with a pre-created context.
     /// </summary>
     public static SimulationNode Create(
         SimulationHarness harness,
+        NodeSimulationContext context,
         string hostname,
         int port,
         RapidProtocolOptions? protocolOptions = null,
         ILoggerFactory? loggerFactory = null)
     {
         ArgumentNullException.ThrowIfNull(harness);
+        ArgumentNullException.ThrowIfNull(context);
         var address = RapidUtils.HostFromParts(hostname, port);
-        return new SimulationNode(harness, address, protocolOptions, loggerFactory);
+        return new SimulationNode(harness, context, address, protocolOptions, loggerFactory);
     }
 
     /// <summary>
@@ -139,9 +145,10 @@ internal sealed class SimulationNode : IDisposable
     /// </summary>
     public static SimulationNode Create(
         SimulationHarness harness,
+        NodeSimulationContext context,
         int nodeId,
         RapidProtocolOptions? protocolOptions = null,
-        ILoggerFactory? loggerFactory = null) => Create(harness, "node", nodeId, protocolOptions, loggerFactory);
+        ILoggerFactory? loggerFactory = null) => Create(harness, context, "node", nodeId, protocolOptions, loggerFactory);
 
     /// <summary>
     /// Starts this node as a new single-node cluster (seed node).
@@ -182,6 +189,9 @@ internal sealed class SimulationNode : IDisposable
             metadataMap,
             subscriptions,
             _membershipServiceLogger);
+
+        // Signal that the node is now initialized and ready to handle requests
+        _membershipServiceTcs.TrySetResult(_membershipService);
 
         _logger.LogInformation("Cluster started for node {Address} with {MembershipSize} members",
             RapidUtils.Loggable(Address), membershipView.Size);
@@ -228,7 +238,7 @@ internal sealed class SimulationNode : IDisposable
             {
                 _logger.LogWarning("Node {Address} join attempt {Attempt} failed: {Message}. Retrying in {Delay}ms",
                     RapidUtils.Loggable(Address), attempt + 1, ex.Message, retryDelay.TotalMilliseconds);
-                await Task.Delay(retryDelay, _harness.TimeProvider, cancellationToken).ConfigureAwait(true);
+                await Task.Delay(retryDelay, _context.TimeProvider, cancellationToken).ConfigureAwait(true);
                 retryDelay *= 2; // Exponential backoff
             }
         }
@@ -272,6 +282,9 @@ internal sealed class SimulationNode : IDisposable
             metadataMap,
             subscriptions,
             _membershipServiceLogger);
+
+        // Signal that the node is now initialized and ready to handle requests
+        _membershipServiceTcs.TrySetResult(_membershipService);
 
         _logger.LogInformation("Node {Address} successfully joined cluster with {MembershipSize} members, ConfigId={ConfigId}",
             RapidUtils.Loggable(Address), membershipView.Size, membershipView.ConfigurationId);
@@ -392,19 +405,18 @@ internal sealed class SimulationNode : IDisposable
 
     /// <summary>
     /// Handles an incoming request from another node.
+    /// Waits for the node to be initialized before processing the request.
     /// </summary>
-    internal Task<RapidResponse> HandleRequestAsync(RapidRequest request, CancellationToken cancellationToken)
+    internal async Task<RapidResponse> HandleRequestAsync(RapidRequest request, CancellationToken cancellationToken)
     {
-        if (_membershipService == null)
-        {
-            _logger.LogError("Node {Address} received request but is not initialized", RapidUtils.Loggable(Address));
-            throw new InvalidOperationException("Node is not initialized");
-        }
+        // Wait for the node to be initialized. This handles the case where
+        // messages arrive before the node has completed joining the cluster.
+        var membershipService = await _membershipServiceTcs.Task.WaitAsync(cancellationToken).ConfigureAwait(true);
 
         _logger.LogTrace("Node {Address} handling request of type {RequestType}",
             RapidUtils.Loggable(Address), request.ContentCase);
 
-        return _membershipService.HandleMessageAsync(request, cancellationToken);
+        return await membershipService.HandleMessageAsync(request, cancellationToken).ConfigureAwait(true);
     }
 
     /// <summary>

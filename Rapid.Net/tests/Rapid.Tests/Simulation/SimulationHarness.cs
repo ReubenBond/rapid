@@ -7,23 +7,28 @@ namespace Rapid.Tests.Simulation;
 /// Unified simulation harness for fully deterministic testing of Rapid clusters.
 /// 
 /// Provides:
-/// - Deterministic task scheduling via <see cref="SimulationTaskScheduler"/>
-/// - Controlled time via <see cref="SimulationTimeProvider"/>
+/// - Deterministic task scheduling via per-node <see cref="SimulationTaskScheduler"/> instances
+/// - Controlled time via shared <see cref="SimulationClock"/>
 /// - Seeded random number generation via <see cref="SimulationRandom"/>
 /// - Simulated network with partition injection via <see cref="SimulationNetwork"/>
 /// - Node lifecycle management (create, join, crash, leave)
+/// - Per-node execution control (suspend, resume, step)
 /// - Event logging for debugging and verification
 /// - Simulation driving APIs (Step, RunUntil, DriveToCompletion)
 /// </summary>
 internal sealed class SimulationHarness : IAsyncDisposable
 {
     private readonly ConcurrentDictionary<string, SimulationNode> _nodeRegistry = new();
+    private readonly Dictionary<SimulationNode, NodeSimulationContext> _nodeContexts = new();
     private readonly List<SimulationNode> _nodes = [];
     private readonly List<SimulationEvent> _eventLog = [];
     private readonly Lock _eventLogLock = new();
     private readonly Lock _randomLock = new();
     private readonly ILogger<SimulationHarness>? _logger;
     private readonly string _logFilePath;
+    private readonly SimulationClock _clock;
+    private readonly SimulationTaskQueue _harnessQueue;
+    private readonly SimulationTaskScheduler _harnessScheduler;
     private bool _disposed;
 
     /// <summary>
@@ -36,11 +41,18 @@ internal sealed class SimulationHarness : IAsyncDisposable
         var context = TestContext.Current;
         TeardownCancellationToken = context.CancellationToken;
         Seed = seed;
+        StartDateTime = DateTimeOffset.UtcNow;
 
         Random = new SimulationRandom(seed);
-        _scheduler = new SimulationTaskQueue();
-        _taskScheduler = new SimulationTaskScheduler(_scheduler);
-        _timeProvider = new SimulationTimeProvider(_scheduler, DateTimeOffset.UtcNow);
+        
+        // Create shared clock and harness-level queue
+        _clock = new SimulationClock();
+        _harnessQueue = new SimulationTaskQueue(_clock);
+        _harnessScheduler = new SimulationTaskScheduler(_harnessQueue);
+        
+        // Create time provider using harness queue (for GetUtcNow queries)
+        _timeProvider = new SimulationTimeProvider(_harnessQueue, StartDateTime);
+        
         Network = new SimulationNetwork(this, Random);
 
         // Create logger factory with file and xUnit providers
@@ -71,6 +83,11 @@ internal sealed class SimulationHarness : IAsyncDisposable
     public int Seed { get; }
 
     /// <summary>
+    /// Gets the starting date/time for the simulation.
+    /// </summary>
+    public DateTimeOffset StartDateTime { get; }
+
+    /// <summary>
     /// Gets the logger factory.
     /// </summary>
     public ILoggerFactory LoggerFactory { get; }
@@ -80,24 +97,12 @@ internal sealed class SimulationHarness : IAsyncDisposable
     /// </summary>
     public SimulationRandom Random { get; }
 
+    /// <summary>
+    /// Gets the shared simulation clock.
+    /// </summary>
+    public SimulationClock Clock => _clock;
+
     private readonly SimulationTimeProvider _timeProvider;
-    private readonly SimulationTaskQueue _scheduler;
-    private readonly SimulationTaskScheduler _taskScheduler;
-
-    /// <summary>
-    /// Gets the simulation task queue.
-    /// </summary>
-    public SimulationTaskQueue TaskQueue => _scheduler;
-
-    /// <summary>
-    /// Gets the simulation task scheduler.
-    /// </summary>
-    public TaskScheduler TaskScheduler => _taskScheduler;
-
-    /// <summary>
-    /// Gets the simulation synchronization context.
-    /// </summary>
-    public SimulationSynchronizationContext SynchronizationContext => _scheduler.SynchronizationContext;
 
     /// <summary>
     /// Gets the simulation time provider.
@@ -118,6 +123,143 @@ internal sealed class SimulationHarness : IAsyncDisposable
     /// Gets the current logical time (number of tasks executed).
     /// </summary>
     public long LogicalTime { get; private set; }
+
+    /// <summary>
+    /// Gets the harness-level task queue for scheduling general simulation work.
+    /// For node-specific work, use <see cref="GetNodeContext"/> to get the node's queue.
+    /// </summary>
+    public SimulationTaskQueue TaskQueue => _harnessQueue;
+
+    /// <summary>
+    /// Gets the harness-level task scheduler for scheduling general simulation work.
+    /// For node-specific work, use <see cref="GetNodeContext"/> to get the node's scheduler.
+    /// </summary>
+    public SimulationTaskScheduler TaskScheduler => _harnessScheduler;
+
+    #endregion
+
+    #region Node Context Management
+
+    /// <summary>
+    /// Gets the simulation context for a specific node.
+    /// </summary>
+    /// <param name="node">The node to get the context for.</param>
+    /// <returns>The node's simulation context.</returns>
+    /// <exception cref="ArgumentException">Thrown if the node is not registered with this harness.</exception>
+    public NodeSimulationContext GetNodeContext(SimulationNode node)
+    {
+        ArgumentNullException.ThrowIfNull(node);
+        if (!_nodeContexts.TryGetValue(node, out var context))
+        {
+            throw new ArgumentException($"Node is not registered with this harness", nameof(node));
+        }
+        return context;
+    }
+
+    /// <summary>
+    /// Creates a new node simulation context for the specified node.
+    /// </summary>
+    private NodeSimulationContext CreateNodeContext()
+    {
+        return new NodeSimulationContext(_clock, StartDateTime);
+    }
+
+    /// <summary>
+    /// Registers a node context with the harness.
+    /// </summary>
+    private void RegisterNodeContext(SimulationNode node, NodeSimulationContext context)
+    {
+        _nodeContexts[node] = context;
+    }
+
+    /// <summary>
+    /// Unregisters a node context from the harness.
+    /// </summary>
+    private void UnregisterNodeContext(SimulationNode node)
+    {
+        if (_nodeContexts.TryGetValue(node, out var context))
+        {
+            context.Clear();
+            _nodeContexts.Remove(node);
+        }
+    }
+
+    #endregion
+
+    #region Per-Node Execution Control
+
+    /// <summary>
+    /// Executes one ready task from the specified node's queue.
+    /// </summary>
+    /// <param name="node">The node to step.</param>
+    /// <returns>True if a task was executed; false if no tasks are ready or the node is suspended.</returns>
+    public bool StepNode(SimulationNode node)
+    {
+        ArgumentNullException.ThrowIfNull(node);
+        var context = GetNodeContext(node);
+        if (context.Step())
+        {
+            LogicalTime++;
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Suspends a node, preventing it from executing tasks.
+    /// Messages sent to the node will be queued but not processed until resumed.
+    /// </summary>
+    /// <param name="node">The node to suspend.</param>
+    public void SuspendNode(SimulationNode node)
+    {
+        ArgumentNullException.ThrowIfNull(node);
+        var context = GetNodeContext(node);
+        context.Suspend();
+        LogEvent(SimulationEventType.NodeSuspended, $"Node suspended");
+    }
+
+    /// <summary>
+    /// Resumes a suspended node, allowing it to execute tasks again.
+    /// </summary>
+    /// <param name="node">The node to resume.</param>
+    public void ResumeNode(SimulationNode node)
+    {
+        ArgumentNullException.ThrowIfNull(node);
+        var context = GetNodeContext(node);
+        context.Resume();
+        LogEvent(SimulationEventType.NodeResumed, $"Node resumed");
+    }
+
+    /// <summary>
+    /// Suspends a node for the specified duration, then automatically resumes it.
+    /// The resume occurs when simulated time advances past the duration.
+    /// </summary>
+    /// <param name="node">The node to suspend.</param>
+    /// <param name="duration">How long to suspend the node (in simulated time).</param>
+    public void SuspendNodeFor(SimulationNode node, TimeSpan duration)
+    {
+        ArgumentNullException.ThrowIfNull(node);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(duration, TimeSpan.Zero);
+
+        SuspendNode(node);
+        
+        // Schedule auto-resume on the harness queue
+        _harnessQueue.EnqueueAfter(() => ResumeNode(node), duration);
+        
+        LogEvent(SimulationEventType.NodeSuspended, $"Node suspended for {duration}");
+    }
+
+    /// <summary>
+    /// Gets whether a node is currently suspended.
+    /// </summary>
+    /// <param name="node">The node to check.</param>
+    /// <returns>True if the node is suspended; false otherwise.</returns>
+    public bool IsNodeSuspended(SimulationNode node)
+    {
+        ArgumentNullException.ThrowIfNull(node);
+        var context = GetNodeContext(node);
+        return context.State == NodeSimulationState.Suspended;
+    }
 
     #endregion
 
@@ -171,12 +313,29 @@ internal sealed class SimulationHarness : IAsyncDisposable
     #region Node Lifecycle
 
     /// <summary>
+    /// Creates a node without initializing it (for testing edge cases).
+    /// The node is registered but not started or joined to any cluster.
+    /// </summary>
+    public SimulationNode CreateUninitializedNode(int nodeId, RapidProtocolOptions? options = null)
+    {
+        var opts = ConfigureOptions(options);
+        var context = CreateNodeContext();
+        var node = SimulationNode.Create(this, context, nodeId, opts, LoggerFactory);
+        RegisterNodeContext(node, context);
+        _nodes.Add(node);
+        LogEvent(SimulationEventType.NodeCreated, $"Uninitialized node {nodeId} created");
+        return node;
+    }
+
+    /// <summary>
     /// Creates and starts a new seed node.
     /// </summary>
     public SimulationNode CreateSeedNode(int nodeId = 0, RapidProtocolOptions? options = null)
     {
         var opts = ConfigureOptions(options);
-        var node = SimulationNode.Create(this, nodeId, opts, LoggerFactory);
+        var context = CreateNodeContext();
+        var node = SimulationNode.Create(this, context, nodeId, opts, LoggerFactory);
+        RegisterNodeContext(node, context);
         node.StartCluster();
         _nodes.Add(node);
         LogEvent(SimulationEventType.NodeCreated, $"Seed node {nodeId} created");
@@ -193,7 +352,9 @@ internal sealed class SimulationHarness : IAsyncDisposable
         RapidProtocolOptions? options = null)
     {
         var opts = ConfigureOptions(options);
-        var node = SimulationNode.Create(this, nodeId, opts, LoggerFactory);
+        var context = CreateNodeContext();
+        var node = SimulationNode.Create(this, context, nodeId, opts, LoggerFactory);
+        RegisterNodeContext(node, context);
 
         LogEvent(SimulationEventType.NodeJoining, $"Node {nodeId} joining via seed");
 
@@ -237,6 +398,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
     public void CrashNode(SimulationNode node)
     {
         ArgumentNullException.ThrowIfNull(node);
+        UnregisterNodeContext(node);
         node.Shutdown();
         node.Dispose();
         _nodes.Remove(node);
@@ -261,12 +423,6 @@ internal sealed class SimulationHarness : IAsyncDisposable
 
         // The leaving node must remain active to participate in consensus.
         // Run the simulation until all remaining nodes converge to the new size.
-        // This allows:
-        // 1. HandleLeaveMessage -> EdgeFailureNotification -> EnqueueAlertMessage
-        // 2. AlertBatcher broadcasts the DOWN alert to all nodes (including leaving node)
-        // 3. HandleBatchedAlertMessage -> cut detection -> consensus proposal
-        // 4. FastPaxos/Paxos consensus completes (leaving node votes too)
-        // 5. DecideViewChange updates membership on all nodes
         var converged = RunUntil(
             () => remainingNodes.All(n => n.MembershipSize == targetSize),
             maxIterations: 100000);
@@ -281,6 +437,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
         }
 
         // Now that consensus is complete, shut down and dispose the leaving node
+        UnregisterNodeContext(node);
         node.Shutdown();
         node.Dispose();
         _nodes.Remove(node);
@@ -370,6 +527,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
 
     /// <summary>
     /// Core implementation of RunUntil without context installation (for internal use).
+    /// Uses round-robin execution across all non-suspended node contexts, plus the harness queue.
     /// </summary>
     private bool RunUntilCore(Func<bool> condition, int maxIterations)
     {
@@ -385,7 +543,8 @@ internal sealed class SimulationHarness : IAsyncDisposable
                 return true;
             }
 
-            if (_scheduler.RunOnce())
+            // Try to execute one ready task using round-robin across all sources
+            if (RunOneTaskRoundRobin())
             {
                 LogicalTime++;
                 timeAdvanceCount = 0; // Reset time advance counter when real work happens
@@ -393,7 +552,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
             }
 
             // No tasks to execute - need to advance time
-            var nextScheduledTime = _scheduler.NextWaitingDueTime;
+            var nextScheduledTime = GetNextWaitingDueTime();
             if (!nextScheduledTime.HasValue)
             {
                 // No more scheduled work - simulation is idle and cannot make progress
@@ -404,17 +563,20 @@ internal sealed class SimulationHarness : IAsyncDisposable
             }
 
             // Check if we've been advancing time without making progress
-            var nextScheduledDateTimeOffset = TimeProvider.GetUtcNow() + nextScheduledTime.Value;
-            if (nextScheduledTime.Value > maxEndTime)
+            var timeDelta = nextScheduledTime.Value - _clock.CurrentTime;
+            if (timeDelta > maxEndTime)
             {
                 LogEvent(SimulationEventType.MaxStepsReached,
                     $"Simulation appears stuck: exceeded max simulated time ({MaxSimulatedTimeAdvance}). " +
-                    $"Start: {startTime:O}, Current: {TimeProvider.GetUtcNow():O}, Next scheduled: {nextScheduledDateTimeOffset:O}");
+                    $"Start: {startTime:O}, Current: {TimeProvider.GetUtcNow():O}, Next scheduled time delta: {timeDelta}");
                 return false;
             }
 
-            // Advance time
-            _scheduler.AdvanceTime(nextScheduledTime.Value - _scheduler.CurrentTime);
+            // Advance time to the next scheduled task
+            if (timeDelta > TimeSpan.Zero)
+            {
+                _clock.Advance(timeDelta);
+            }
             timeAdvanceCount++;
 
             // Safety check: if we've advanced time many times without executing tasks, we might be stuck
@@ -431,6 +593,57 @@ internal sealed class SimulationHarness : IAsyncDisposable
     }
 
     /// <summary>
+    /// Attempts to execute one ready task using round-robin across all node contexts and the harness queue.
+    /// Returns true if a task was executed.
+    /// </summary>
+    private bool RunOneTaskRoundRobin()
+    {
+        // First, try to execute from non-suspended node contexts (round-robin)
+        foreach (var (_, context) in _nodeContexts)
+        {
+            if (context.State == NodeSimulationState.Running && context.Step())
+            {
+                return true;
+            }
+        }
+
+        // Then try the harness queue (for scheduled operations like auto-resume)
+        if (_harnessQueue.RunOnce())
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Gets the earliest due time across all queues (node contexts + harness queue).
+    /// </summary>
+    private TimeSpan? GetNextWaitingDueTime()
+    {
+        TimeSpan? earliest = null;
+
+        // Check all node contexts (including suspended ones - their timers still tick)
+        foreach (var (_, context) in _nodeContexts)
+        {
+            var nextTime = context.NextWaitingDueTime;
+            if (nextTime.HasValue && (!earliest.HasValue || nextTime.Value < earliest.Value))
+            {
+                earliest = nextTime;
+            }
+        }
+
+        // Check harness queue
+        var harnessNextTime = _harnessQueue.NextWaitingDueTime;
+        if (harnessNextTime.HasValue && (!earliest.HasValue || harnessNextTime.Value < earliest.Value))
+        {
+            earliest = harnessNextTime;
+        }
+
+        return earliest;
+    }
+
+    /// <summary>
     /// Runs until all nodes have the expected membership size.
     /// </summary>
     public bool RunUntilConverged(int expectedSize, int maxIterations = 100000) =>
@@ -443,6 +656,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
 
     /// <summary>
     /// Core implementation of RunUntilIdle without context installation (for internal use).
+    /// Uses round-robin execution across all non-suspended node contexts, plus the harness queue.
     /// </summary>
     private bool RunUntilIdleCore(TimeSpan? maxSimulatedTime, int maxIterations)
     {
@@ -452,30 +666,34 @@ internal sealed class SimulationHarness : IAsyncDisposable
 
         for (var i = 0; i < maxIterations; i++)
         {
-            if (_scheduler.RunOnce())
+            if (RunOneTaskRoundRobin())
             {
                 LogicalTime++;
                 timeAdvanceCount = 0; // Reset time advance counter when real work happens
                 continue;
             }
 
-            var nextScheduledTime = _scheduler.NextWaitingDueTime;
+            var nextScheduledTime = GetNextWaitingDueTime();
             if (!nextScheduledTime.HasValue)
             {
                 LogEvent(SimulationEventType.ConditionMet, "Simulation reached idle state");
                 return true;
             }
 
-            var nextScheduledDateTimeOffset = TimeProvider.GetUtcNow() + nextScheduledTime.Value;
-            if (nextScheduledTime.Value > maxEndTime)
+            var timeDelta = nextScheduledTime.Value - _clock.CurrentTime;
+            if (timeDelta > maxEndTime)
             {
                 LogEvent(SimulationEventType.MaxStepsReached,
                     $"Simulation appears stuck: exceeded max simulated time ({maxSimulatedTime ?? MaxSimulatedTimeAdvance}). " +
-                    $"Start: {startTime:O}, Current: {TimeProvider.GetUtcNow():O}, Next scheduled: {nextScheduledDateTimeOffset:O}");
+                    $"Start: {startTime:O}, Current: {TimeProvider.GetUtcNow():O}, Next scheduled time delta: {timeDelta}");
                 return false;
             }
 
-            _scheduler.AdvanceTime(nextScheduledTime.Value - _scheduler.CurrentTime);
+            // Advance time to the next scheduled task
+            if (timeDelta > TimeSpan.Zero)
+            {
+                _clock.Advance(timeDelta);
+            }
             timeAdvanceCount++;
 
             // Safety check: if we've advanced time many times without executing tasks, we might be stuck
@@ -493,12 +711,15 @@ internal sealed class SimulationHarness : IAsyncDisposable
 
     /// <summary>
     /// Drives a task to completion by running the simulation.
+    /// The task factory is invoked with the harness's synchronization context installed,
+    /// ensuring async continuations are captured on the simulation scheduler.
     /// </summary>
     public T DriveToCompletion<T>(Func<Task<T>> taskFactory, int maxIterations = 100000)
     {
         ArgumentNullException.ThrowIfNull(taskFactory);
 
-        using var _ = SynchronizationContext.Install();
+        // Use the harness queue's sync context for the task factory invocation
+        using var _ = _harnessQueue.SynchronizationContext.Install();
 
         var task = taskFactory();
 
@@ -515,12 +736,15 @@ internal sealed class SimulationHarness : IAsyncDisposable
 
     /// <summary>
     /// Drives a task to completion by running the simulation.
+    /// The task factory is invoked with the harness's synchronization context installed,
+    /// ensuring async continuations are captured on the simulation scheduler.
     /// </summary>
     public void DriveToCompletion(Func<Task> taskFactory, int maxIterations = 100000)
     {
         ArgumentNullException.ThrowIfNull(taskFactory);
 
-        using var _ = SynchronizationContext.Install();
+        // Use the harness queue's sync context for the task factory invocation
+        using var _ = _harnessQueue.SynchronizationContext.Install();
 
         var task = taskFactory();
 
@@ -580,7 +804,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
         }
 
         // Advance time to trigger timers, then run until idle
-        _scheduler.AdvanceTime(delta);
+        _clock.Advance(delta);
         LogEvent(SimulationEventType.TimeAdvanced, $"Advanced time by {delta}");
 
         return RunUntilIdleCore(maxSimulatedTime: null, maxIterations);
@@ -656,7 +880,15 @@ internal sealed class SimulationHarness : IAsyncDisposable
         if (_disposed) return;
         _disposed = true;
 
-        _scheduler.Clear();
+        // Clear harness queue
+        _harnessQueue.Clear();
+        
+        // Clear all node contexts
+        foreach (var (_, context) in _nodeContexts)
+        {
+            context.Clear();
+        }
+        _nodeContexts.Clear();
 
         foreach (var node in _nodes)
         {
@@ -737,6 +969,8 @@ internal enum SimulationEventType
     NodeCrashed,
     NodeIsolated,
     NodeReconnected,
+    NodeSuspended,
+    NodeResumed,
     PartitionCreated,
     PartitionHealed,
     MessageSent,

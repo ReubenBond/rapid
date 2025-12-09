@@ -9,17 +9,16 @@ namespace Rapid.Tests.Simulation;
 /// In-memory messaging client for simulation testing.
 /// Routes messages through the SimulationNetwork instead of gRPC.
 /// 
-/// IMPORTANT: This client dispatches message handlers asynchronously using the simulation's
-/// TaskScheduler to break synchronous call chains and prevent deadlocks. The pattern is:
-/// 1. Caller invokes SendMessageAsync
-/// 2. Client validates the message can be delivered (network partition check)
-/// 3. Client schedules the handler to run on the simulation TaskScheduler
-/// 4. Caller awaits the response via TaskCompletionSource
-/// 5. Handler runs independently and completes the TCS when done
+/// IMPORTANT: This client dispatches message handlers by enqueuing work on the target node's
+/// SimulationTaskQueue. This provides:
+/// 1. Per-node scheduling - messages are processed in the target node's execution context
+/// 2. Deterministic execution - work is queued and executed during simulation stepping
+/// 3. Suspension support - messages to suspended nodes queue up until resumed
 /// </summary>
 internal sealed class InMemoryMessagingClient : IMessagingClient
 {
     private readonly SimulationHarness _harness;
+    private readonly SimulationNode _sourceNode;
     private readonly Endpoint _localEndpoint;
     private readonly ILogger<InMemoryMessagingClient> _logger;
     private readonly ConcurrentDictionary<int, Task> _pendingTasks = new();
@@ -32,9 +31,10 @@ internal sealed class InMemoryMessagingClient : IMessagingClient
     /// </summary>
     public TimeSpan MessageTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
-    public InMemoryMessagingClient(SimulationHarness harness, Endpoint localEndpoint)
+    public InMemoryMessagingClient(SimulationHarness harness, SimulationNode sourceNode, Endpoint localEndpoint)
     {
         _harness = harness;
+        _sourceNode = sourceNode;
         _localEndpoint = localEndpoint;
         _logger = harness.LoggerFactory?.CreateLogger<InMemoryMessagingClient>()
             ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<InMemoryMessagingClient>.Instance;
@@ -63,14 +63,11 @@ internal sealed class InMemoryMessagingClient : IMessagingClient
             case DeliveryStatus.Dropped:
                 _logger.LogDebug("Message {MessageType} from {Local} to {Remote} dropped (simulated packet loss)",
                     request.ContentCase, localAddr, remoteAddr);
-                // Return a timeout exception for dropped messages - this simulates the message being lost
-                // and allows retry logic to work correctly
                 return Task.FromException<RapidResponse>(
                     new TimeoutException($"Message from {localAddr} to {remoteAddr} was dropped (simulated packet loss)"));
 
             case DeliveryStatus.Success:
             default:
-                // Continue with normal delivery
                 break;
         }
 
@@ -84,27 +81,24 @@ internal sealed class InMemoryMessagingClient : IMessagingClient
                 new InvalidOperationException($"Target node not found: {remoteAddr}"));
         }
 
-        // Create a TCS for the response - this breaks the synchronous call chain
+        // Create a TCS for the response
         var responseTcs = new TaskCompletionSource<RapidResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         _logger.LogTrace("Scheduling delivery of {MessageType} from {Local} to {Remote}",
             request.ContentCase, localAddr, remoteAddr);
 
-        // Schedule the handler to run on the simulation's TaskScheduler
-        // This breaks the synchronous call chain and allows other async operations to proceed
-        // Note: timeoutCts ownership is transferred to ScheduleMessageDelivery which will dispose it
+        // Schedule message delivery on the target node's task queue
         ScheduleMessageDelivery(targetNode, request, responseTcs, cancellationToken, localAddr, remoteAddr);
 
         return responseTcs.Task;
     }
 
     /// <summary>
-    /// Schedules message delivery on the simulation's TaskScheduler using Task.Factory.StartNew.
-    /// This method is void-returning to ensure the caller doesn't block waiting for it.
-    /// The async lambda is scheduled on the provided TaskScheduler, breaking the synchronous call chain.
+    /// Schedules message delivery on the target node's task queue.
+    /// The message handler runs when the target node is stepped during simulation.
     /// </summary>
-#pragma warning disable CA1031 // Catch general exception - required for TCS completion in message delivery
-#pragma warning disable CA1068 // CancellationToken not last - intentional grouping with TCS for clarity
+#pragma warning disable CA1031 // Catch general exception - required for TCS completion
+#pragma warning disable CA1068 // CancellationToken not last - grouping with TCS for clarity
     private void ScheduleMessageDelivery(
         SimulationNode targetNode,
         RapidRequest request,
@@ -114,73 +108,106 @@ internal sealed class InMemoryMessagingClient : IMessagingClient
         string remoteAddr)
 #pragma warning restore CA1068
     {
-        // Get the task scheduler to use
-        var scheduler = _harness.TaskScheduler;
+        // Get the target node's context
+        var targetContext = _harness.GetNodeContext(targetNode);
+        var targetQueue = targetContext.TaskQueue;
 
         // Apply network delay if configured
         var delay = _harness.Network.GetMessageDelay();
 
-        // Schedule the delivery using Task.Factory.StartNew with the simulation's TaskScheduler
-        // The .Unwrap() is needed because StartNew returns Task<Task> for async delegates
-        _ = Task.Factory.StartNew(
-            async () =>
+        // Create the delivery action
+        void DeliverMessage()
+        {
+            if (cancellationToken.IsCancellationRequested)
             {
-                // Create a CTS that we can cancel from multiple sources
-                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                responseTcs.TrySetCanceled(cancellationToken);
+                return;
+            }
 
-                // Start a timeout task using the harness's TimeProvider
-                // This ensures timeouts work correctly with FakeTimeProvider in tests
-                var timeoutTask = Task.Delay(MessageTimeout, _harness.TimeProvider, CancellationToken.None)
-                    .ContinueWith(_ =>
-                    {
-                        if (!responseTcs.Task.IsCompleted && !cancellationToken.IsCancellationRequested)
-                        {
-                            _logger.LogWarning("Message {MessageType} from {Local} to {Remote} timed out after {Timeout}",
-                                request.ContentCase, localAddr, remoteAddr, MessageTimeout);
-                            responseTcs.TrySetException(new TimeoutException($"Message to {remoteAddr} timed out after {MessageTimeout}"));
-                            timeoutCts.Cancel();
-                        }
-                    }, TaskScheduler.Default);
+            try
+            {
+                _logger.LogTrace("Delivering {MessageType} from {Local} to {Remote}",
+                    request.ContentCase, localAddr, remoteAddr);
 
-                try
+                // Handle the request synchronously within the simulation context
+                // The task returned by HandleRequestAsync will be driven by the simulation
+                var responseTask = targetNode.HandleRequestAsync(request, cancellationToken);
+                
+                // If already completed, set result immediately
+                if (responseTask.IsCompletedSuccessfully)
                 {
-                    // Apply network delay
-                    if (delay > TimeSpan.Zero)
-                    {
-                        _logger.LogTrace("Simulating {Delay}ms delay for message from {Local} to {Remote}",
-                            delay.TotalMilliseconds, localAddr, remoteAddr);
-                        await Task.Delay(delay, _harness.TimeProvider, timeoutCts.Token).ConfigureAwait(true);
-                    }
-
-                    _logger.LogTrace("Delivering {MessageType} from {Local} to {Remote}",
-                        request.ContentCase, localAddr, remoteAddr);
-
-                    var response = await targetNode.HandleRequestAsync(request, timeoutCts.Token).ConfigureAwait(true);
-
-                    _logger.LogTrace("Received response for {MessageType} from {Remote} to {Local}",
-                        request.ContentCase, remoteAddr, localAddr);
-
-                    responseTcs.TrySetResult(response);
+                    responseTcs.TrySetResult(responseTask.Result);
+                    return;
                 }
-                catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !responseTcs.Task.IsCompleted)
+                
+                if (responseTask.IsFaulted)
                 {
-                    // If the original token was cancelled, propagate that
-                    if (cancellationToken.IsCancellationRequested)
+                    responseTcs.TrySetException(responseTask.Exception!.InnerExceptions);
+                    return;
+                }
+                
+                if (responseTask.IsCanceled)
+                {
+                    responseTcs.TrySetCanceled(cancellationToken);
+                    return;
+                }
+
+                // For pending tasks, attach a continuation that completes the TCS
+                responseTask.ContinueWith(t =>
+                {
+                    if (t.IsCompletedSuccessfully)
+                    {
+                        _logger.LogTrace("Received response for {MessageType} from {Remote} to {Local}",
+                            request.ContentCase, remoteAddr, localAddr);
+                        responseTcs.TrySetResult(t.Result);
+                    }
+                    else if (t.IsFaulted)
+                    {
+                        _logger.LogDebug("Message {MessageType} from {Local} to {Remote} failed: {Error}",
+                            request.ContentCase, localAddr, remoteAddr, t.Exception?.InnerException?.Message);
+                        responseTcs.TrySetException(t.Exception!.InnerExceptions);
+                    }
+                    else if (t.IsCanceled)
                     {
                         responseTcs.TrySetCanceled(cancellationToken);
                     }
-                    // Otherwise timeout was already handled by the timeout task
-                }
-                catch (Exception ex)
+                }, TaskScheduler.Default);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug("Message {MessageType} from {Local} to {Remote} failed: {Error}",
+                    request.ContentCase, localAddr, remoteAddr, ex.Message);
+                responseTcs.TrySetException(ex);
+            }
+        }
+
+        // Schedule timeout on the target node's queue
+        var timeoutItem = targetQueue.EnqueueAfter(
+            new ScheduledActionItem(() =>
+            {
+                if (!responseTcs.Task.IsCompleted)
                 {
-                    _logger.LogDebug("Message {MessageType} from {Local} to {Remote} failed: {Error}",
-                        request.ContentCase, localAddr, remoteAddr, ex.Message);
-                    responseTcs.TrySetException(ex);
+                    _logger.LogWarning("Message {MessageType} from {Local} to {Remote} timed out after {Timeout}",
+                        request.ContentCase, localAddr, remoteAddr, MessageTimeout);
+                    responseTcs.TrySetException(new TimeoutException($"Message to {remoteAddr} timed out after {MessageTimeout}"));
                 }
-            },
-            cancellationToken,
-            TaskCreationOptions.None,
-            scheduler).Unwrap();
+            }),
+            MessageTimeout + delay);
+
+        // Cancel timeout when response is received
+        responseTcs.Task.ContinueWith(_ => timeoutItem.Dispose(), TaskScheduler.Default);
+
+        // Schedule the delivery (with optional delay)
+        if (delay > TimeSpan.Zero)
+        {
+            _logger.LogTrace("Simulating {Delay}ms delay for message from {Local} to {Remote}",
+                delay.TotalMilliseconds, localAddr, remoteAddr);
+            targetQueue.EnqueueAfter(DeliverMessage, delay);
+        }
+        else
+        {
+            targetQueue.Enqueue(new ScheduledActionItem(DeliverMessage));
+        }
     }
 #pragma warning restore CA1031
 

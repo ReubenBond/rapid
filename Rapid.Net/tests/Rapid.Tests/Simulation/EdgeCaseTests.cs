@@ -166,7 +166,7 @@ public sealed class EdgeCaseTests : IAsyncLifetime
     [Fact]
     public void UninitializedNodeThrowsOnHandleRequest()
     {
-        var node = SimulationNode.Create(_harness, nodeId: 99);
+        var node = _harness.CreateUninitializedNode(nodeId: 99);
 
         // Node not initialized - should not be in a valid state
         Assert.False(node.IsInitialized);
