@@ -43,9 +43,6 @@ internal sealed partial class SimulationTimeProvider : TimeProvider
         {
             ArgumentOutOfRangeException.ThrowIfLessThan(startDateTime.Value.Ticks, 0);
         }
-
-        // Initialize the task queue's time to zero (start time is tracked separately)
-        _taskQueue.CurrentTime = TimeSpan.Zero;
     }
 
     /// <summary>
@@ -68,12 +65,13 @@ internal sealed partial class SimulationTimeProvider : TimeProvider
     public void SetUtcNow(DateTimeOffset value)
     {
         var currentTime = GetUtcNow();
-        if (value < currentTime)
+        var delta = value - currentTime;
+        if (delta < TimeSpan.Zero)
         {
             throw new ArgumentOutOfRangeException(nameof(value), $"Cannot go back in time. Current time is {currentTime}.");
         }
 
-        _taskQueue.CurrentTime = value - Start;
+        _taskQueue.AdvanceTime(delta);
     }
 
     /// <summary>
@@ -94,7 +92,7 @@ internal sealed partial class SimulationTimeProvider : TimeProvider
         LogAdvance(delta,
             fromTime.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture),
             toTime.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture));
-        _taskQueue.CurrentTime += delta;
+        _taskQueue.AdvanceTime(delta);
     }
 
     /// <inheritdoc />
@@ -138,9 +136,10 @@ internal sealed partial class SimulationTimeProvider : TimeProvider
         if (!nextDueTime.HasValue)
             return false;
 
-        if (nextDueTime.Value > _taskQueue.CurrentTime)
+        var delta = nextDueTime.Value - _taskQueue.CurrentTime;
+        if (delta > TimeSpan.Zero)
         {
-            _taskQueue.CurrentTime = nextDueTime.Value;
+            _taskQueue.AdvanceTime(delta);
         }
 
         return true;

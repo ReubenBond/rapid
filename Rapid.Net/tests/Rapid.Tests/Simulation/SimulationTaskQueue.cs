@@ -123,7 +123,7 @@ internal sealed class SimulationTaskQueue
     /// <summary>
     /// Gets or sets the current time offset from the start.
     /// </summary>
-    public TimeSpan CurrentTime { get; set; }
+    public TimeSpan CurrentTime { get; private set; }
 
     /// <summary>
     /// Gets the synchronization context used to execute callbacks.
