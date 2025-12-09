@@ -10,7 +10,7 @@ namespace Rapid;
 /// A mutable builder for creating <see cref="MembershipView"/> instances.
 /// Hosts K permutations of the memberlist that represent the monitoring relationship between nodes;
 /// every node (an observer) observes its successor (a subject) on each ring.
-/// Once <see cref="Build"/> is called, the builder becomes sealed and cannot be used again.
+/// Once a Build method is called, the builder becomes sealed and cannot be used again.
 /// </summary>
 internal sealed class MembershipViewBuilder
 {
@@ -254,17 +254,19 @@ internal sealed class MembershipViewBuilder
     }
 
     /// <summary>
-    /// Builds and returns the immutable MembershipView.
+    /// Builds and returns the immutable MembershipView with a new configuration ID
+    /// that has an incremented version from the previous configuration.
     /// After this method is called, the builder becomes sealed and cannot be used again.
     /// </summary>
+    /// <param name="previousConfigurationId">The previous configuration ID to increment from.</param>
     /// <returns>An immutable MembershipView instance.</returns>
     /// <exception cref="InvalidOperationException">Thrown if the builder has already been sealed.</exception>
-    public MembershipView Build()
+    public MembershipView Build(ConfigurationId previousConfigurationId)
     {
         ThrowIfSealed();
         _isSealed = true;
 
-        var configurationId = MembershipViewConfiguration.GetConfigurationId(_identifiersSeen, _rings[0]);
+        var configurationId = previousConfigurationId.Next(_identifiersSeen, _rings[0]);
 
         // Create immutable ring copies
         var ringsBuilder = ImmutableArray.CreateBuilder<ImmutableArray<Endpoint>>(_ringCount);
@@ -274,6 +276,18 @@ internal sealed class MembershipViewBuilder
         }
 
         return new MembershipView(_ringCount, configurationId, ringsBuilder.MoveToImmutable(), [.. _identifiersSeen]);
+    }
+
+    /// <summary>
+    /// Builds and returns the immutable MembershipView with a configuration ID starting at version 0.
+    /// Use this overload only for initial cluster creation.
+    /// After this method is called, the builder becomes sealed and cannot be used again.
+    /// </summary>
+    /// <returns>An immutable MembershipView instance.</returns>
+    /// <exception cref="InvalidOperationException">Thrown if the builder has already been sealed.</exception>
+    public MembershipView Build()
+    {
+        return Build(ConfigurationId.Empty);
     }
 
     /// <summary>

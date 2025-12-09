@@ -29,7 +29,7 @@ public sealed class MembershipView
     /// <param name="configurationId">The configuration identifier for this view.</param>
     /// <param name="rings">The rings of endpoints (each ring is sorted by its comparator).</param>
     /// <param name="nodeIds">The set of node identifiers seen.</param>
-    internal MembershipView(int ringCount, long configurationId, ImmutableArray<ImmutableArray<Endpoint>> rings, ImmutableArray<NodeId> nodeIds)
+    internal MembershipView(int ringCount, ConfigurationId configurationId, ImmutableArray<ImmutableArray<Endpoint>> rings, ImmutableArray<NodeId> nodeIds)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(ringCount);
         ArgumentOutOfRangeException.ThrowIfNotEqual(rings.Length, ringCount, "Number of rings does not match ring count");
@@ -48,8 +48,9 @@ public sealed class MembershipView
 
     /// <summary>
     /// Gets the configuration identifier for this view.
+    /// This combines a monotonic version counter with a membership hash.
     /// </summary>
-    public long ConfigurationId { get; }
+    public ConfigurationId ConfigurationId { get; }
 
     /// <summary>
     /// Gets the list of member endpoints in the cluster (from ring 0).
@@ -302,7 +303,7 @@ public sealed class MembershipView
         {
             emptyRingsBuilder.Add([]);
         }
-        return new MembershipView(ringCount, 0, emptyRingsBuilder.MoveToImmutable(), []);
+        return new MembershipView(ringCount, ConfigurationId.Empty, emptyRingsBuilder.MoveToImmutable(), []);
     }
 }
 
@@ -325,27 +326,8 @@ public sealed class MembershipViewConfiguration
     public ImmutableArray<Endpoint> Endpoints { get; }
 
     /// <summary>
-    /// Gets the configuration ID for the list of endpoints and identifiers.
+    /// Gets the configuration ID for the list of endpoints and identifiers with version 0.
     /// </summary>
     /// <returns>A configuration identifier.</returns>
-    public long GetConfigurationId() => GetConfigurationId(NodeIds, Endpoints);
-
-    public static long GetConfigurationId(IEnumerable<NodeId> identifiers, IEnumerable<Endpoint> endpoints)
-    {
-        ArgumentNullException.ThrowIfNull(identifiers);
-        ArgumentNullException.ThrowIfNull(endpoints);
-
-        long hash = 1;
-        foreach (var id in identifiers)
-        {
-            hash = hash * 37 + (long)XxHash64.HashToUInt64(BitConverter.GetBytes(id.High));
-            hash = hash * 37 + (long)XxHash64.HashToUInt64(BitConverter.GetBytes(id.Low));
-        }
-        foreach (var endpoint in endpoints)
-        {
-            hash = hash * 37 + (long)XxHash64.HashToUInt64(endpoint.Hostname.Span);
-            hash = hash * 37 + (long)XxHash64.HashToUInt64(BitConverter.GetBytes(endpoint.Port));
-        }
-        return hash;
-    }
+    public ConfigurationId GetConfigurationId() => ConfigurationId.Create(0, NodeIds, Endpoints);
 }

@@ -74,9 +74,9 @@ public sealed class JoinProtocolTests : IAsyncLifetime
 
         _harness.WaitForConvergence(expectedSize: 2);
 
-        // Both should have non-zero configuration IDs
-        Assert.NotEqual(0, seedNode.CurrentView.ConfigurationId);
-        Assert.NotEqual(0, joiner.CurrentView.ConfigurationId);
+        // Both should have non-zero configuration IDs (version > 0 after join)
+        Assert.True(seedNode.CurrentView.ConfigurationId.Version > 0);
+        Assert.True(joiner.CurrentView.ConfigurationId.Version > 0);
 
         // Both should have the same configuration ID
         Assert.Equal(seedNode.CurrentView.ConfigurationId, joiner.CurrentView.ConfigurationId);

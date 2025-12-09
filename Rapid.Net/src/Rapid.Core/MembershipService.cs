@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
@@ -123,7 +124,10 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     private partial void LogMembershipServiceInitialized(LoggableEndpoint MyAddr, CurrentConfigId ConfigId, MembershipSize MembershipSize);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "HandleMessageAsync: received {MessageType} from request")]
-    private partial void LogHandleMessageReceived(RapidRequest.ContentOneofCase MessageType);
+    private partial void LogHandleMessageReceivedDebug(RapidRequest.ContentOneofCase MessageType);
+
+    [LoggerMessage(Level = LogLevel.Trace, Message = "HandleMessageAsync: received {MessageType} from request")]
+    private partial void LogHandleMessageReceivedTrace(RapidRequest.ContentOneofCase MessageType);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "HandlePreJoinMessage: joiner={Joiner}, statusCode={StatusCode}, observers count={ObserversCount}")]
     private partial void LogHandlePreJoinResult(LoggableEndpoint Joiner, JoinStatusCode StatusCode, int ObserversCount);
@@ -152,7 +156,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     [LoggerMessage(Level = LogLevel.Debug, Message = "HandleConsensusMessages: forwarding to FastPaxos instance")]
     private partial void LogHandleConsensusMessages();
 
-    [LoggerMessage(Level = LogLevel.Debug, Message = "HandleProbeMessage: responding to probe")]
+    [LoggerMessage(Level = LogLevel.Trace, Message = "HandleProbeMessage: responding to probe")]
     private partial void LogHandleProbeMessage();
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "DecideViewChange: processing {Count} nodes in proposal")]
@@ -305,7 +309,16 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     /// </summary>
     public async Task<RapidResponse> HandleMessageAsync(RapidRequest msg, CancellationToken cancellationToken)
     {
-        LogHandleMessageReceived(msg.ContentCase);
+        ArgumentNullException.ThrowIfNull(msg);
+
+        if (IsTraceMessage(msg.ContentCase))
+        {
+            LogHandleMessageReceivedTrace(msg.ContentCase);
+        }
+        else
+        {
+            LogHandleMessageReceivedDebug(msg.ContentCase);
+        }
 
         return msg.ContentCase switch
         {
@@ -321,6 +334,9 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
             RapidRequest.ContentOneofCase.LeaveMessage => HandleLeaveMessage(msg, cancellationToken),
             _ => throw new ArgumentException($"Unidentified RapidRequest type {msg.ContentCase}")
         };
+
+        static bool IsTraceMessage(RapidRequest.ContentOneofCase contentCase)
+            => contentCase == RapidRequest.ContentOneofCase.ProbeMessage;
     }
 
     /// <summary>
@@ -407,7 +423,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
                 var responseBuilder = new JoinResponse
                 {
                     Sender = _myAddr,
-                    ConfigurationId = configuration.GetConfigurationId()
+                    ConfigurationId = _membershipView.ConfigurationId
                 };
 
                 if (_membershipView.IsHostPresent(joinMessage.Sender) &&
@@ -593,8 +609,8 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
                 }
             }
 
-            // Build the new immutable view
-            _membershipView = builder.Build();
+            // Build the new immutable view with incremented version
+            _membershipView = builder.Build(_membershipView.ConfigurationId);
 
             // Publish the new view to the accessor
             _viewAccessor.PublishView(_membershipView);
@@ -610,7 +626,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
                     {
                         Sender = _myAddr,
                         StatusCode = JoinStatusCode.SafeToJoin,
-                        ConfigurationId = config.GetConfigurationId()
+                        ConfigurationId = _membershipView.ConfigurationId
                     };
                     response.Endpoints.AddRange(config.Endpoints);
                     response.Identifiers.AddRange(config.NodeIds);

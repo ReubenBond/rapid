@@ -291,7 +291,7 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
     }
 
     [Fact]
-    public void GracefulLeave_ConfigurationIdIncreases()
+    public void GracefulLeave_ConfigurationIdChanges()
     {
         // Arrange: Create a 4-node cluster
         var nodes = _harness.CreateCluster(size: 4);
@@ -303,9 +303,11 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         _harness.RemoveNodeGracefully(nodes[3]);
         _harness.WaitForConvergence(expectedSize: 3);
 
-        // Assert: Configuration ID increased
-        Assert.True(nodes[0].CurrentView.ConfigurationId > initialConfigId,
-            $"Configuration ID should increase after leave. Initial: {initialConfigId}, Current: {nodes[0].CurrentView.ConfigurationId}");
+        // Assert: Configuration ID changed and version increased
+        var newConfigId = nodes[0].CurrentView.ConfigurationId;
+        Assert.NotEqual(initialConfigId, newConfigId);
+        Assert.True(newConfigId.Version > initialConfigId.Version,
+            $"Version should increase after leave. Initial: {initialConfigId.Version}, Current: {newConfigId.Version}");
     }
 
     [Fact]
@@ -315,7 +317,7 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         var nodes = _harness.CreateCluster(size: 5);
         _harness.WaitForConvergence(expectedSize: 5);
 
-        var configIds = new List<long> { nodes[0].CurrentView.ConfigurationId };
+        var configIds = new List<ConfigurationId> { nodes[0].CurrentView.ConfigurationId };
 
         // Act: Multiple nodes leave
         _harness.RemoveNodeGracefully(nodes[4]);
@@ -326,11 +328,11 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 3);
         configIds.Add(nodes[0].CurrentView.ConfigurationId);
 
-        // Assert: Configuration IDs are strictly increasing
+        // Assert: Configuration IDs have strictly increasing versions
         for (var i = 1; i < configIds.Count; i++)
         {
-            Assert.True(configIds[i] > configIds[i - 1],
-                $"Config ID at index {i} ({configIds[i]}) should be greater than at {i - 1} ({configIds[i - 1]})");
+            Assert.True(configIds[i].Version > configIds[i - 1].Version,
+                $"Version at index {i} ({configIds[i].Version}) should be greater than at {i - 1} ({configIds[i - 1].Version})");
         }
     }
 
