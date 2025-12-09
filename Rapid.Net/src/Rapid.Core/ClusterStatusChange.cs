@@ -6,11 +6,11 @@ namespace Rapid;
 /// Represents a cluster membership status change.
 /// </summary>
 public sealed class ClusterStatusChange(
-    long configurationId,
+    ConfigurationId configurationId,
     IReadOnlyList<Endpoint> membership,
     IReadOnlyList<NodeStatusChange> delta)
 {
-    public long ConfigurationId { get; } = configurationId;
+    public ConfigurationId ConfigurationId { get; } = configurationId;
     public IReadOnlyList<Endpoint> Membership { get; } = membership;
     public IReadOnlyList<NodeStatusChange> Delta { get; } = delta;
 

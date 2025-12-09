@@ -103,10 +103,10 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     private partial void LogNodeAlreadyRemoved();
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Ignoring failure notification from old configuration {Subject}, config: {CurrentConfig}, oldConfiguration: {OldConfig}")]
-    private partial void LogIgnoringOldConfigNotification(LoggableEndpoint Subject, CurrentConfigId CurrentConfig, long OldConfig);
+    private partial void LogIgnoringOldConfigNotification(LoggableEndpoint Subject, CurrentConfigId CurrentConfig, ConfigurationId OldConfig);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Announcing EdgeFail event {Subject}, observer: {MyAddr}, config: {Config}, size: {Size}")]
-    private partial void LogAnnouncingEdgeFail(LoggableEndpoint Subject, LoggableEndpoint MyAddr, long Config, MembershipSize Size);
+    private partial void LogAnnouncingEdgeFail(LoggableEndpoint Subject, LoggableEndpoint MyAddr, ConfigurationId Config, MembershipSize Size);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Error in EdgeFailureNotification for {Subject}")]
     private partial void LogErrorInEdgeFailureNotification(Exception ex, LoggableEndpoint Subject);
@@ -118,7 +118,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     private partial void LogEnqueueingSafeToJoin(LoggableEndpoint Sender, CurrentConfigId Config, MembershipSize Size);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Wrong configuration for {{sender:{Sender}, config:{Config}, myConfig:{MyConfig}, size:{Size}}}")]
-    private partial void LogWrongConfiguration(LoggableEndpoint Sender, long Config, CurrentConfigId MyConfig, MembershipSize Size);
+    private partial void LogWrongConfiguration(LoggableEndpoint Sender, ConfigurationId Config, CurrentConfigId MyConfig, MembershipSize Size);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "MembershipService initialized: myAddr={MyAddr}, configId={ConfigId}, membershipSize={MembershipSize}")]
     private partial void LogMembershipServiceInitialized(LoggableEndpoint MyAddr, CurrentConfigId ConfigId, MembershipSize MembershipSize);
@@ -133,7 +133,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     private partial void LogHandlePreJoinResult(LoggableEndpoint Joiner, JoinStatusCode StatusCode, int ObserversCount);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "HandleJoinMessageAsync: processing join from {Sender}, configId={ConfigId}")]
-    private partial void LogHandleJoinMessage(LoggableEndpoint Sender, long ConfigId);
+    private partial void LogHandleJoinMessage(LoggableEndpoint Sender, ConfigurationId ConfigId);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "HandleJoinMessageAsync: joiner already in ring, responding SAFE_TO_JOIN")]
     private partial void LogJoinerAlreadyInRing();
@@ -202,7 +202,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     private partial void LogFastPaxosDecidedFaulted(Exception ex);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "EdgeFailureNotification: scheduling callback for subject {Subject}, configId={ConfigId}")]
-    private partial void LogEdgeFailureNotificationScheduled(LoggableEndpoint Subject, long ConfigId);
+    private partial void LogEdgeFailureNotificationScheduled(LoggableEndpoint Subject, ConfigurationId ConfigId);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "EdgeFailureNotification: enqueueing DOWN alert for subject {Subject}, ringNumbers={RingNumbers}")]
     private partial void LogEdgeFailureNotificationEnqueued(LoggableEndpoint Subject, LoggableRingNumbers RingNumbers);
@@ -214,7 +214,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     private partial void LogFastPaxosDecidedSkippedShutdown();
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Callback exception for event {Event} with configId={ConfigId}")]
-    private partial void LogCallbackException(Exception ex, ClusterEvents Event, long ConfigId);
+    private partial void LogCallbackException(Exception ex, ClusterEvents Event, ConfigurationId ConfigId);
 
     private readonly struct LoggableRingNumbers(IEnumerable<int> ringNumbers)
     {
@@ -353,7 +353,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
             var builder = new JoinResponse
             {
                 Sender = _myAddr,
-                ConfigurationId = _membershipView.ConfigurationId,
+                ConfigurationId = _membershipView.ConfigurationId.ToProto(),
                 StatusCode = statusCode
             };
 
@@ -383,14 +383,15 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     private async Task<RapidResponse> HandleJoinMessageAsync(JoinMessage joinMessage, CancellationToken cancellationToken)
     {
         var tcs = new TaskCompletionSource<RapidResponse>();
+        var msgConfigId = ConfigurationId.FromProto(joinMessage.ConfigurationId);
 
-        LogHandleJoinMessage(new LoggableEndpoint(joinMessage.Sender), joinMessage.ConfigurationId);
+        LogHandleJoinMessage(new LoggableEndpoint(joinMessage.Sender), msgConfigId);
 
         lock (_membershipUpdateLock)
         {
             var currentConfiguration = _membershipView.ConfigurationId;
 
-            if (currentConfiguration == joinMessage.ConfigurationId)
+            if (currentConfiguration == msgConfigId)
             {
                 LogEnqueueingSafeToJoin(new LoggableEndpoint(joinMessage.Sender), new CurrentConfigId(_membershipView),
                     new MembershipSize(_membershipView));
@@ -404,7 +405,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
                     EdgeSrc = _myAddr,
                     EdgeDst = joinMessage.Sender,
                     EdgeStatus = EdgeStatus.Up,
-                    ConfigurationId = currentConfiguration,
+                    ConfigurationId = currentConfiguration.ToProto(),
                     NodeId = joinMessage.NodeId,
                     Metadata = joinMessage.Metadata
                 };
@@ -417,13 +418,13 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
                 // This handles the corner case where the configuration changed between phase 1 and phase 2
                 // of the joining node's bootstrap. It should attempt to rejoin the network.
                 var configuration = _membershipView.Configuration;
-                LogWrongConfiguration(new LoggableEndpoint(joinMessage.Sender), joinMessage.ConfigurationId,
+                LogWrongConfiguration(new LoggableEndpoint(joinMessage.Sender), msgConfigId,
                     new CurrentConfigId(_membershipView), new MembershipSize(_membershipView));
 
                 var responseBuilder = new JoinResponse
                 {
                     Sender = _myAddr,
-                    ConfigurationId = _membershipView.ConfigurationId
+                    ConfigurationId = _membershipView.ConfigurationId.ToProto()
                 };
 
                 if (_membershipView.IsHostPresent(joinMessage.Sender) &&
@@ -626,7 +627,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
                     {
                         Sender = _myAddr,
                         StatusCode = JoinStatusCode.SafeToJoin,
-                        ConfigurationId = _membershipView.ConfigurationId
+                        ConfigurationId = _membershipView.ConfigurationId.ToProto()
                     };
                     response.Endpoints.AddRange(config.Endpoints);
                     response.Identifiers.AddRange(config.NodeIds);
@@ -828,7 +829,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     /// configuration that the current node is not a part of, and messages that violate the semantics
     /// of a node being a part of a configuration.
     /// </summary>
-    private static bool FilterAlertMessages(BatchedAlertMessage batchedAlertMessage, long currentConfigurationId) => batchedAlertMessage.Messages.Any(m => m.ConfigurationId == currentConfigurationId);
+    private static bool FilterAlertMessages(BatchedAlertMessage batchedAlertMessage, ConfigurationId currentConfigurationId) => batchedAlertMessage.Messages.Any(m => ConfigurationId.FromProto(m.ConfigurationId) == currentConfigurationId);
 
     private AlertMessage ExtractJoinerUuidAndMetadata(AlertMessage alertMessage)
     {
@@ -939,7 +940,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     /// </summary>
     /// <param name="subject">The subject that has failed.</param>
     /// <param name="configurationId">Configuration ID when the failure was detected</param>
-    private void EdgeFailureNotification(Endpoint subject, long configurationId)
+    private void EdgeFailureNotification(Endpoint subject, ConfigurationId configurationId)
     {
         LogEdgeFailureNotificationScheduled(new LoggableEndpoint(subject), configurationId);
 
@@ -962,7 +963,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
                 EdgeSrc = _myAddr,
                 EdgeDst = subject,
                 EdgeStatus = EdgeStatus.Down,
-                ConfigurationId = configurationId
+                ConfigurationId = configurationId.ToProto()
             };
             msg.RingNumber.AddRange(ringNumbers);
 

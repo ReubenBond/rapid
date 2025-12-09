@@ -10,10 +10,10 @@ public class MultiNodeCutDetectorTests
     private const int K = 10;
     private const int H = 8;
     private const int L = 2;
-    private const long ConfigurationId = -1; // Should not affect the following tests
+    private static readonly ConfigurationIdMsg ConfigurationId = new() { Version = -1, Hash = 0 }; // Should not affect the following tests
 
     private static AlertMessage CreateAlertMessage(Endpoint src, Endpoint dst, EdgeStatus status,
-        long configurationId, int ringNumber)
+        ConfigurationIdMsg configurationId, int ringNumber)
     {
         var msg = new AlertMessage
         {
@@ -474,7 +474,7 @@ public class MultiNodeCutDetectorTests
             EdgeSrc = src,
             EdgeDst = dst,
             EdgeStatus = EdgeStatus.Up,
-            ConfigurationId = ConfigurationId
+            ConfigurationId = ConfigurationId.Clone()
         };
         for (var i = 0; i < K; i++)
         {
