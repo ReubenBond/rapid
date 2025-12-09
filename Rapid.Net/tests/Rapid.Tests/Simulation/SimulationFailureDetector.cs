@@ -48,6 +48,7 @@ internal sealed partial class SimulationFailureDetector(
     private readonly ILogger<SimulationFailureDetector> _logger = logger;
     private readonly CancellationTokenSource _cts = new();
     private Task? _probeTask;
+    private int _disposed;
 
     private readonly struct LoggableEndpoint(Endpoint endpoint)
     {
@@ -129,11 +130,27 @@ internal sealed partial class SimulationFailureDetector(
 #pragma warning restore CA1031
     }
 
-    public void StopMonitoring() => _cts.Cancel();
+    public void StopMonitoring()
+    {
+        try
+        {
+            _cts.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // Already disposed, ignore
+        }
+    }
 
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
+
         StopMonitoring();
+        _probeTask?.Ignore();
         _cts.Dispose();
     }
 }
