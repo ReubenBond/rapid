@@ -143,7 +143,7 @@ public sealed class ChaosTests : IAsyncLifetime
 
         // Check invariants
         var result = _checker.CheckAll();
-        
+
         // Output diagnostic information if invariants failed
         if (!result)
         {
@@ -153,7 +153,7 @@ public sealed class ChaosTests : IAsyncLifetime
             {
                 output?.WriteLine($"  [{violation.Type}] {violation.Message} (LogicalTime={violation.LogicalTime})");
             }
-            
+
             // Output node membership info
             output?.WriteLine($"Node membership states:");
             foreach (var node in _harness.Nodes)
@@ -162,7 +162,7 @@ public sealed class ChaosTests : IAsyncLifetime
                 output?.WriteLine($"  {RapidUtils.Loggable(node.Address)}: IsInitialized={node.IsInitialized}, MembershipSize={node.MembershipSize}, ConfigId={view?.ConfigurationId}");
             }
         }
-        
+
         Assert.True(result);
     }
 

@@ -393,39 +393,39 @@ public sealed class ConsensusProtocolTests : IAsyncLifetime
         // - After 1 crash: 3 remaining, need majority of 4 (3) - achievable with 3 nodes
         // - After removing crashed node: N=3, majority = 2
         // - After 2nd crash: 2 remaining, need majority of 3 (2) - achievable with 2 nodes
-        
+
         var nodes = _harness.CreateCluster(size: 4);
         _harness.WaitForConvergence(expectedSize: 4);
-        
+
         // Verify initial state
         Assert.All(nodes, n => Assert.Equal(4, n.MembershipSize));
-        
+
         // Crash first node
         _harness.CrashNode(nodes[3]);
-        
+
         // Wait for convergence to 3 - the remaining 3 nodes can reach majority (3/4)
         _harness.WaitForConvergence(expectedSize: 3);
-        
+
         // Verify all remaining nodes see size 3
         Assert.Equal(3, nodes[0].MembershipSize);
         Assert.Equal(3, nodes[1].MembershipSize);
         Assert.Equal(3, nodes[2].MembershipSize);
-        
+
         // Record config ID after first removal
         var configAfterFirstRemoval = nodes[0].CurrentView.ConfigurationId;
         Assert.Equal(configAfterFirstRemoval, nodes[1].CurrentView.ConfigurationId);
         Assert.Equal(configAfterFirstRemoval, nodes[2].CurrentView.ConfigurationId);
-        
+
         // Crash second node
         _harness.CrashNode(nodes[2]);
-        
+
         // Wait for convergence to 2 - the remaining 2 nodes can reach majority (2/3)
         _harness.WaitForConvergence(expectedSize: 2);
-        
+
         // Verify all remaining nodes see size 2
         Assert.Equal(2, nodes[0].MembershipSize);
         Assert.Equal(2, nodes[1].MembershipSize);
-        
+
         // Verify config ID changed
         var configAfterSecondRemoval = nodes[0].CurrentView.ConfigurationId;
         Assert.NotEqual(configAfterFirstRemoval, configAfterSecondRemoval);
