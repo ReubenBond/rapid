@@ -361,20 +361,75 @@ public sealed class ConsensusProtocolTests : IAsyncLifetime
         // Test that when multiple coordinators start classic rounds,
         // the higher rank wins
 
-        // With 4 nodes, if we crash 2, we have 2 remaining
-        // Both may try to become coordinator
-        var nodes = _harness.CreateCluster(size: 4);
-        _harness.WaitForConvergence(expectedSize: 4);
+        // With 5 nodes, if we crash 2, we have 3 remaining
+        // For N=5, Fast Paxos needs N-f = 5 - (5-1)/4 = 4 nodes
+        // Classic Paxos needs majority = 5/2 + 1 = 3 nodes
+        // With 3 remaining, Classic Paxos can succeed
+        // Multiple remaining nodes may try to become coordinator
+        var nodes = _harness.CreateCluster(size: 5);
+        _harness.WaitForConvergence(expectedSize: 5);
 
         // Crash 2 nodes to force Classic Paxos
-        _harness.CrashNode(nodes[2]);
         _harness.CrashNode(nodes[3]);
+        _harness.CrashNode(nodes[4]);
 
         // Should converge despite potential coordinator competition
-        _harness.WaitForConvergence(expectedSize: 2);
+        _harness.WaitForConvergence(expectedSize: 3);
 
+        Assert.Equal(3, nodes[0].MembershipSize);
+        Assert.Equal(3, nodes[1].MembershipSize);
+        Assert.Equal(3, nodes[2].MembershipSize);
+    }
+
+    [Fact]
+    public void SequentialNodeRemoval_ConvergesAfterEachCrash()
+    {
+        // Test sequential node removal with convergence verification after each crash.
+        // This tests the scenario where the cluster shrinks one node at a time,
+        // and the quorum requirements adjust dynamically.
+        //
+        // With 4 nodes:
+        // - Initially: N=4, majority = 3
+        // - After 1 crash: 3 remaining, need majority of 4 (3) - achievable with 3 nodes
+        // - After removing crashed node: N=3, majority = 2
+        // - After 2nd crash: 2 remaining, need majority of 3 (2) - achievable with 2 nodes
+        
+        var nodes = _harness.CreateCluster(size: 4);
+        _harness.WaitForConvergence(expectedSize: 4);
+        
+        // Verify initial state
+        Assert.All(nodes, n => Assert.Equal(4, n.MembershipSize));
+        
+        // Crash first node
+        _harness.CrashNode(nodes[3]);
+        
+        // Wait for convergence to 3 - the remaining 3 nodes can reach majority (3/4)
+        _harness.WaitForConvergence(expectedSize: 3);
+        
+        // Verify all remaining nodes see size 3
+        Assert.Equal(3, nodes[0].MembershipSize);
+        Assert.Equal(3, nodes[1].MembershipSize);
+        Assert.Equal(3, nodes[2].MembershipSize);
+        
+        // Record config ID after first removal
+        var configAfterFirstRemoval = nodes[0].CurrentView.ConfigurationId;
+        Assert.Equal(configAfterFirstRemoval, nodes[1].CurrentView.ConfigurationId);
+        Assert.Equal(configAfterFirstRemoval, nodes[2].CurrentView.ConfigurationId);
+        
+        // Crash second node
+        _harness.CrashNode(nodes[2]);
+        
+        // Wait for convergence to 2 - the remaining 2 nodes can reach majority (2/3)
+        _harness.WaitForConvergence(expectedSize: 2);
+        
+        // Verify all remaining nodes see size 2
         Assert.Equal(2, nodes[0].MembershipSize);
         Assert.Equal(2, nodes[1].MembershipSize);
+        
+        // Verify config ID changed
+        var configAfterSecondRemoval = nodes[0].CurrentView.ConfigurationId;
+        Assert.NotEqual(configAfterFirstRemoval, configAfterSecondRemoval);
+        Assert.Equal(configAfterSecondRemoval, nodes[1].CurrentView.ConfigurationId);
     }
 
     #endregion

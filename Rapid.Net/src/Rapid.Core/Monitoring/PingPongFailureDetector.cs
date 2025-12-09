@@ -22,8 +22,13 @@ public sealed partial class PingPongFailureDetectorFactory(Endpoint localEndpoin
 /// <summary>
 /// Simple ping-pong failure detector that probes a subject endpoint.
 /// </summary>
-public sealed partial class PingPongFailureDetector(Endpoint subject, Endpoint observer, IMessagingClient client,
-    SharedResources sharedResources, Action notifier, ILogger<PingPongFailureDetector>? logger = null) : IEdgeFailureDetector
+public sealed partial class PingPongFailureDetector(
+    Endpoint subject,
+    Endpoint observer,
+    IMessagingClient client,
+    SharedResources sharedResources,
+    Action notifier,
+    ILogger<PingPongFailureDetector>? logger = null) : IEdgeFailureDetector
 {
     private readonly Endpoint _subject = subject;
     private readonly Endpoint _observer = observer;

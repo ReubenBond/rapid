@@ -23,7 +23,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
     private readonly Lock _eventLogLock = new();
     private readonly Lock _randomLock = new();
     private readonly ILogger<SimulationHarness>? _logger;
-    private readonly SimulationLoggerFactory _simulationLoggerFactory;
+    private readonly string _logFilePath;
     private bool _disposed;
 
     /// <summary>
@@ -43,14 +43,22 @@ internal sealed class SimulationHarness : IAsyncDisposable
         _timeProvider = new SimulationTimeProvider(_scheduler, DateTimeOffset.UtcNow);
         Network = new SimulationNetwork(this, Random);
 
-        // Create file-based logger factory for this simulation
+        // Create logger factory with file and xUnit providers
         var testName = context.Test?.TestDisplayName;
-        _simulationLoggerFactory = new SimulationLoggerFactory(testName, seed, _timeProvider);
+        _logFilePath = GenerateLogFilePath(testName, seed);
+        LoggerFactory = Microsoft.Extensions.Logging.LoggerFactory.Create(builder =>
+        {
+            builder.AddProvider(new FileLoggerProvider(_logFilePath, _timeProvider));
+            if (context.TestOutputHelper is { } outputHelper)
+            {
+                builder.AddXUnit(outputHelper);
+            }
+            builder.SetMinimumLevel(LogLevel.Debug);
+        });
 
-        LoggerFactory = _simulationLoggerFactory.Factory;
-        _logger = _simulationLoggerFactory.CreateLogger<SimulationHarness>();
-        _timeProvider.SetLogger(_simulationLoggerFactory.CreateLogger<SimulationTimeProvider>());
-        Network.SetLogger(_simulationLoggerFactory.CreateLogger<SimulationNetwork>());
+        _logger = LoggerFactory.CreateLogger<SimulationHarness>();
+        _timeProvider.SetLogger(LoggerFactory.CreateLogger<SimulationTimeProvider>());
+        Network.SetLogger(LoggerFactory.CreateLogger<SimulationNetwork>());
 
         LogEvent(SimulationEventType.HarnessCreated, $"Seed: {seed}");
     }
@@ -659,10 +667,50 @@ internal sealed class SimulationHarness : IAsyncDisposable
         _nodeRegistry.Clear();
 
         // Dispose the logger factory and attach log file to test context
-        _simulationLoggerFactory.Dispose();
-        _simulationLoggerFactory.AttachToTestContext(TestContext.Current);
+        LoggerFactory.Dispose();
+        AttachLogFileToTestContext(TestContext.Current);
 
         await Task.CompletedTask.ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Attaches the log file to the test context if it exists.
+    /// </summary>
+    private void AttachLogFileToTestContext(ITestContext? testContext)
+    {
+        if (testContext == null || !File.Exists(_logFilePath))
+        {
+            return;
+        }
+
+        var logFileName = Path.GetFileName(_logFilePath);
+        testContext.AddAttachment(logFileName, _logFilePath);
+    }
+
+    /// <summary>
+    /// Generates a unique log file path for a simulation.
+    /// </summary>
+    private static string GenerateLogFilePath(string? testName, int seed)
+    {
+        var sanitizedTestName = SanitizeFileName(testName ?? "unknown_test");
+        var uniqueId = Guid.NewGuid().ToString("N")[..8];
+        return Path.Combine(Path.GetTempPath(), $"rapid_sim_{sanitizedTestName}_{seed}_{uniqueId}.log");
+    }
+
+    /// <summary>
+    /// Sanitizes a string to be used as a file name by removing invalid characters.
+    /// </summary>
+    private static string SanitizeFileName(string name)
+    {
+        var invalidChars = Path.GetInvalidFileNameChars();
+        var sanitized = new System.Text.StringBuilder();
+        foreach (var c in name)
+        {
+            sanitized.Append(invalidChars.Contains(c) ? '_' : c);
+        }
+        // Truncate to a reasonable length to avoid path length issues
+        var result = sanitized.ToString();
+        return result.Length > 100 ? result[..100] : result;
     }
 
     #endregion
