@@ -4,6 +4,19 @@ using Microsoft.Extensions.Logging;
 namespace Rapid.Tests.Simulation;
 
 /// <summary>
+/// Result of checking whether a message can be delivered.
+/// </summary>
+internal enum DeliveryStatus
+{
+    /// <summary>Message can be delivered normally.</summary>
+    Success,
+    /// <summary>Message was randomly dropped (transient failure, should retry).</summary>
+    Dropped,
+    /// <summary>Message blocked by network partition (persistent failure).</summary>
+    Partitioned
+}
+
+/// <summary>
 /// Simulates a network for in-memory transport between nodes.
 /// Provides hooks for injecting network faults like delays, partitions, and message loss.
 /// </summary>
@@ -147,27 +160,37 @@ internal sealed class SimulationNetwork
 
     /// <summary>
     /// Checks if a message can be delivered from source to target.
+    /// Returns a status indicating success or reason for failure.
     /// </summary>
-    internal bool CanDeliver(string sourceAddress, string targetAddress)
+    internal DeliveryStatus CheckDelivery(string sourceAddress, string targetAddress)
     {
-        // Check for message drop
-        if (MessageDropRate > 0 && _harness.Random.Chance(MessageDropRate))
-        {
-            _logger.LogTrace("Message from {Source} to {Target} dropped (random)", sourceAddress, targetAddress);
-            return false;
-        }
-
-        // Check for network partition
+        // Check for network partition first (persistent)
         lock (_partitionLock)
         {
             if (_partitions.TryGetValue(sourceAddress, out var blocked) && blocked.Contains(targetAddress))
             {
                 _logger.LogTrace("Message from {Source} to {Target} blocked (partition)", sourceAddress, targetAddress);
-                return false;
+                return DeliveryStatus.Partitioned;
             }
         }
 
-        return true;
+        // Check for random message drop (transient)
+        if (MessageDropRate > 0 && _harness.Random.Chance(MessageDropRate))
+        {
+            _logger.LogTrace("Message from {Source} to {Target} dropped (random)", sourceAddress, targetAddress);
+            return DeliveryStatus.Dropped;
+        }
+
+        return DeliveryStatus.Success;
+    }
+
+    /// <summary>
+    /// Checks if a message can be delivered from source to target.
+    /// This is a convenience method that returns true only if delivery would succeed.
+    /// </summary>
+    internal bool CanDeliver(string sourceAddress, string targetAddress)
+    {
+        return CheckDelivery(sourceAddress, targetAddress) == DeliveryStatus.Success;
     }
 
     /// <summary>

@@ -253,25 +253,26 @@ public sealed class InvariantVerificationTests(ITestOutputHelper output) : IAsyn
     /// Tests the liveness property that node failures are eventually detected by the cluster.
     /// When a node crashes, the failure detection mechanism should identify it within the
     /// configured timeout period and trigger membership updates.
-    /// Note: In a 2-node cluster, the remaining node cannot reach consensus to remove the 
-    /// failed node (needs quorum), so we only verify that the failure is detected (alerts queued).
+    /// Uses a 3-node cluster so the remaining 2 nodes can reach consensus to remove the failed node.
     /// </summary>
-    [Fact(Skip = "Requires 3+ node cluster for consensus after failure - 2-node cluster cannot reach quorum")]
+    [Fact(Skip = "Requires simulation failure detection to propagate and reach consensus - see infrastructure issue")]
     public void FailureDetectionEventuallyOccurs()
     {
         var seedNode = _harness.CreateSeedNode();
-        var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
+        var joiner1 = _harness.CreateJoinerNode(seedNode, nodeId: 1);
+        var joiner2 = _harness.CreateJoinerNode(seedNode, nodeId: 2);
 
-        _harness.RunUntilConverged(expectedSize: 2);
+        _harness.RunUntilConverged(expectedSize: 3);
 
-        // Crash the joiner
-        _harness.CrashNode(joiner);
+        // Crash one joiner
+        _harness.CrashNode(joiner2);
 
-        // Failure should eventually be detected - run until seed node sees size of 1
-        var detected = _harness.RunUntil(() => seedNode.MembershipSize == 1, maxIterations: 50000);
+        // Failure should eventually be detected - run until remaining nodes see size of 2
+        var detected = _harness.RunUntil(() => seedNode.MembershipSize == 2 && joiner1.MembershipSize == 2, maxIterations: 100000);
 
-        Assert.True(detected, "Seed node did not detect joiner failure");
-        Assert.Equal(1, seedNode.MembershipSize);
+        Assert.True(detected, "Remaining nodes did not detect joiner failure");
+        Assert.Equal(2, seedNode.MembershipSize);
+        Assert.Equal(2, joiner1.MembershipSize);
     }
 
     /// <summary>

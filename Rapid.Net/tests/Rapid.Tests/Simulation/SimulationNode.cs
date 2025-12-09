@@ -381,11 +381,13 @@ internal sealed class SimulationNode : IDisposable
     /// </summary>
     private static bool IsRetryableJoinError(Exception ex)
     {
-        // Network partition errors, message drops, and config changes are retryable
-        return ex.Message.Contains("Network partition", StringComparison.OrdinalIgnoreCase) ||
+        // Network partition errors, message drops (timeout), and config changes are retryable
+        return ex is TimeoutException ||  // Dropped messages cause timeouts
+               ex.Message.Contains("Network partition", StringComparison.OrdinalIgnoreCase) ||
                ex.Message.Contains("cannot reach", StringComparison.OrdinalIgnoreCase) ||
                ex.Message.Contains("Configuration changed", StringComparison.OrdinalIgnoreCase) ||
-               ex.Message.Contains("Failed to get successful response", StringComparison.OrdinalIgnoreCase);
+               ex.Message.Contains("Failed to get successful response", StringComparison.OrdinalIgnoreCase) ||
+               ex.Message.Contains("dropped", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

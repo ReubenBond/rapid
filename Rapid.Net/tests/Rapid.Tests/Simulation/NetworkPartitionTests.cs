@@ -63,7 +63,7 @@ public sealed class NetworkPartitionTests(ITestOutputHelper output) : IAsyncLife
         Assert.True(_harness.Network.CanDeliver(joinerAddr, seedAddr));
     }
 
-    [Fact(Skip = "Requires failure detection timing - slow test")]
+    [Fact(Skip = "Requires simulation failure detection to propagate and reach consensus - see infrastructure issue")]
     public void PartitionedNodeEventuallyDetected()
     {
         var seedNode = _harness.CreateSeedNode();
@@ -76,9 +76,11 @@ public sealed class NetworkPartitionTests(ITestOutputHelper output) : IAsyncLife
         _harness.IsolateNode(joiner2);
 
         // Wait for failure detection and removal
-        _harness.WaitForNodeSize(seedNode, expectedSize: 2);
+        // With 3 nodes, the remaining 2 can reach consensus to remove the isolated node
+        _harness.WaitForConvergence(expectedSize: 2);
 
         Assert.Equal(2, seedNode.MembershipSize);
+        Assert.Equal(2, joiner1.MembershipSize);
     }
 
     [Fact]

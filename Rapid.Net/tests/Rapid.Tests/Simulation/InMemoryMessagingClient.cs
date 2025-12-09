@@ -50,13 +50,28 @@ internal sealed class InMemoryMessagingClient : IMessagingClient
         _logger.LogTrace("Attempting to send {MessageType} from {Local} to {Remote}",
             request.ContentCase, localAddr, remoteAddr);
 
-        // Check if message can be delivered
-        if (!_harness.Network.CanDeliver(localAddr, remoteAddr))
+        // Check delivery status (partitions, random drops)
+        var deliveryStatus = _harness.Network.CheckDelivery(localAddr, remoteAddr);
+        switch (deliveryStatus)
         {
-            _logger.LogWarning("Message {MessageType} from {Local} to {Remote} blocked by network partition",
-                request.ContentCase, localAddr, remoteAddr);
-            return Task.FromException<RapidResponse>(
-                new InvalidOperationException($"Network partition: {localAddr} cannot reach {remoteAddr}"));
+            case DeliveryStatus.Partitioned:
+                _logger.LogWarning("Message {MessageType} from {Local} to {Remote} blocked by network partition",
+                    request.ContentCase, localAddr, remoteAddr);
+                return Task.FromException<RapidResponse>(
+                    new InvalidOperationException($"Network partition: {localAddr} cannot reach {remoteAddr}"));
+
+            case DeliveryStatus.Dropped:
+                _logger.LogDebug("Message {MessageType} from {Local} to {Remote} dropped (simulated packet loss)",
+                    request.ContentCase, localAddr, remoteAddr);
+                // Return a timeout exception for dropped messages - this simulates the message being lost
+                // and allows retry logic to work correctly
+                return Task.FromException<RapidResponse>(
+                    new TimeoutException($"Message from {localAddr} to {remoteAddr} was dropped (simulated packet loss)"));
+
+            case DeliveryStatus.Success:
+            default:
+                // Continue with normal delivery
+                break;
         }
 
         // Find the target node

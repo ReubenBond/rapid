@@ -159,26 +159,28 @@ public sealed class IntegrationTests(ITestOutputHelper output) : IAsyncLifetime
         Assert.Equal(2, _harness.Nodes.Count);
     }
 
-    [Fact(Skip = "Requires failure detection timing - slow test")]
+    [Fact(Skip = "Requires simulation failure detection to propagate and reach consensus - see infrastructure issue")]
     public void NewJoinsWorkAfterMembershipChange()
     {
+        // Use 3-node cluster so remaining 2 nodes can reach quorum after crash
         var seedNode = _harness.CreateSeedNode();
         var joiner1 = _harness.CreateJoinerNode(seedNode, nodeId: 1);
-
-        _harness.WaitForConvergence(expectedSize: 2);
-
-        // Remove joiner1
-        _harness.CrashNode(joiner1);
-
-        // Wait for the seed node to detect the failure and remove joiner1 from membership.
-        // This is required because consensus needs a quorum - with 2 members, we need 2 votes.
-        // After the failed node is removed, membership goes back to 1 and consensus can proceed.
-        _harness.WaitForNodeSize(seedNode, expectedSize: 1);
-
-        // Add a new joiner through seed
         var joiner2 = _harness.CreateJoinerNode(seedNode, nodeId: 2);
 
-        Assert.True(joiner2.IsInitialized);
+        _harness.WaitForConvergence(expectedSize: 3);
+
+        // Remove joiner2
+        _harness.CrashNode(joiner2);
+
+        // Wait for the remaining nodes to detect the failure and remove joiner2 from membership
+        // With 3 nodes, the remaining 2 can reach quorum for consensus
+        _harness.WaitForConvergence(expectedSize: 2);
+
+        // Add a new joiner through seed
+        var joiner3 = _harness.CreateJoinerNode(seedNode, nodeId: 3);
+
+        Assert.True(joiner3.IsInitialized);
+        _harness.WaitForConvergence(expectedSize: 3);
     }
 
     #endregion

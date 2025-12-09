@@ -138,38 +138,44 @@ public sealed class ClusterBasicTests(ITestOutputHelper output) : IAsyncLifetime
         Assert.Equal(seedNode.CurrentView.ConfigurationId, joiner.CurrentView.ConfigurationId);
     }
 
-    [Fact(Skip = "Requires failure detection to trigger removal - slow test")]
-    public void JoinerCanLeaveTwoNodeCluster()
+    [Fact(Skip = "Requires simulation to properly drive consensus after graceful leave - see infrastructure issue")]
+    public void JoinerCanLeaveThreeNodeCluster()
     {
+        // Use 3-node cluster so remaining 2 nodes can reach quorum for consensus
         var seedNode = _harness.CreateSeedNode();
-        var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
+        var joiner1 = _harness.CreateJoinerNode(seedNode, nodeId: 1);
+        var joiner2 = _harness.CreateJoinerNode(seedNode, nodeId: 2);
 
+        _harness.WaitForConvergence(expectedSize: 3);
+
+        // Joiner2 leaves gracefully
+        _harness.RemoveNodeGracefully(joiner2);
+
+        // Wait for remaining nodes to see the leave
         _harness.WaitForConvergence(expectedSize: 2);
 
-        // Joiner leaves gracefully
-        _harness.RemoveNodeGracefully(joiner);
-
-        // Wait for seed to see the leave
-        _harness.WaitForNodeSize(seedNode, expectedSize: 1);
-
-        Assert.Equal(1, seedNode.MembershipSize);
+        Assert.Equal(2, seedNode.MembershipSize);
+        Assert.Equal(2, joiner1.MembershipSize);
     }
 
-    [Fact(Skip = "Requires failure detection to trigger removal - slow test")]
-    public void SeedCanLeaveTwoNodeCluster()
+    [Fact(Skip = "Requires simulation to properly drive consensus after graceful leave - see infrastructure issue")]
+    public void SeedCanLeaveThreeNodeCluster()
     {
+        // Use 3-node cluster so remaining 2 nodes can reach quorum for consensus
         var seedNode = _harness.CreateSeedNode();
-        var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
+        var joiner1 = _harness.CreateJoinerNode(seedNode, nodeId: 1);
+        var joiner2 = _harness.CreateJoinerNode(seedNode, nodeId: 2);
 
-        _harness.WaitForConvergence(expectedSize: 2);
+        _harness.WaitForConvergence(expectedSize: 3);
 
         // Seed leaves gracefully
         _harness.RemoveNodeGracefully(seedNode);
 
-        // Wait for joiner to see the leave
-        _harness.WaitForNodeSize(joiner, expectedSize: 1);
+        // Wait for remaining nodes to see the leave
+        _harness.WaitForConvergence(expectedSize: 2);
 
-        Assert.Equal(1, joiner.MembershipSize);
+        Assert.Equal(2, joiner1.MembershipSize);
+        Assert.Equal(2, joiner2.MembershipSize);
     }
 
     #endregion

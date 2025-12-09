@@ -212,9 +212,8 @@ public sealed class EdgeCaseTests(ITestOutputHelper output) : IAsyncLifetime
     /// Tests that the cluster can scale to a large size (20 nodes) and maintain
     /// consistency across all members. Verifies that the consensus protocol and
     /// membership management can handle larger cluster sizes without degradation.
-    /// This is marked as slow due to the time required for all nodes to converge.
     /// </summary>
-    [Fact(Skip = "Slow test - large cluster formation")]
+    [Fact]
     public void MaximumClusterSizeHandled()
     {
         // Test a large cluster (20 nodes)
