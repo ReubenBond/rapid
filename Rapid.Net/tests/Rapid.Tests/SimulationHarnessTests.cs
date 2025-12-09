@@ -63,7 +63,7 @@ public sealed class SimulationHarnessTests(ITestOutputHelper output) : IAsyncLif
     public void RunUntilReturnsWhenConditionMet()
     {
         var conditionMet = false;
-        var scheduler = _harness.Scheduler;
+        var scheduler = _harness.TaskScheduler;
 
         // Queue a task that sets the condition
         var task = new Task(() => conditionMet = true);
@@ -133,7 +133,7 @@ public sealed class SimulationHarnessTests(ITestOutputHelper output) : IAsyncLif
     public void RunUntilIdleExecutesAllPendingTasks()
     {
         var executionCount = 0;
-        var scheduler = _harness.Scheduler;
+        var scheduler = _harness.TaskScheduler;
 
         for (var i = 0; i < 5; i++)
         {
@@ -185,7 +185,7 @@ public sealed class SimulationHarnessTests(ITestOutputHelper output) : IAsyncLif
         Assert.False(_harness.TaskQueue.HasItems);
 
         var task = new Task(() => { });
-        task.Start(_harness.Scheduler);
+        task.Start(_harness.TaskScheduler);
 
         Assert.True(_harness.TaskQueue.HasItems);
 

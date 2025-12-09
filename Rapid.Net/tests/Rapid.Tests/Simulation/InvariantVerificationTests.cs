@@ -208,7 +208,7 @@ public sealed class InvariantVerificationTests(ITestOutputHelper output) : IAsyn
     {
         // Create a task that will allow progress
         var task = new Task(() => { });
-        task.Start(_harness.Scheduler);
+        task.Start(_harness.TaskScheduler);
 
         // CheckLiveness should succeed when there are tasks to execute
         var result = _checker.CheckLiveness(maxSteps: 100);

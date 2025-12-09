@@ -115,7 +115,7 @@ internal sealed class InMemoryMessagingClient : IMessagingClient
 #pragma warning restore CA1068
     {
         // Get the task scheduler to use
-        var scheduler = _harness.Scheduler;
+        var scheduler = _harness.TaskScheduler;
 
         // Apply network delay if configured
         var delay = _harness.Network.GetMessageDelay();

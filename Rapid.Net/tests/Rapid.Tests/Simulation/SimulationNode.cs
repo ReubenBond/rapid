@@ -81,7 +81,7 @@ internal sealed class SimulationNode : IDisposable
         // Create shared resources with the simulation's time provider, task scheduler, random, and guid factory
         var sharedResourcesLogger = factory?.CreateLogger<SharedResources>()
             ?? NullLogger<SharedResources>.Instance;
-        _sharedResources = new SharedResources(sharedResourcesLogger, harness.TimeProvider, harness.Scheduler, Random, Random.NextGuid);
+        _sharedResources = new SharedResources(sharedResourcesLogger, harness.TimeProvider, harness.TaskScheduler, Random, Random.NextGuid);
 
         // Create in-memory messaging client with a shorter timeout for simulations
         MessagingClient = new InMemoryMessagingClient(harness, address)

@@ -92,9 +92,6 @@ internal sealed partial class Paxos
     [LoggerMessage(Level = LogLevel.Debug, Message = "HandlePhase2bMessage: config mismatch, expected={Expected}, got={Got}")]
     private partial void LogPhase2bConfigMismatch(long Expected, long Got);
 
-    [LoggerMessage(Level = LogLevel.Debug, Message = "HandlePhase2bMessage: round mismatch, expected={Expected}, got={Got}")]
-    private partial void LogPhase2bRoundMismatch(Rank Expected, Rank Got);
-
     [LoggerMessage(Level = LogLevel.Debug, Message = "HandlePhase2bMessage: collected {Count} accept responses for round {Rnd}, threshold={Threshold}, f={F}")]
     private partial void LogPhase2bCollected(int Count, Rank Rnd, int Threshold, int F);
 
@@ -165,11 +162,20 @@ internal sealed partial class Paxos
     public void RegisterFastRoundVote(List<Endpoint> proposal)
     {
         // Do not participate in our only fast round if we are already participating in a classic round.
+        if (_rnd.Round > 1)
+        {
+            return;
+        }
+
         // This is the 1st round in the consensus instance, is always a fast round, and is always the *only* fast round.
         // If this round does not succeed and we fallback to a classic round, we start with round number 2
         // and each node sets its node-index as the hash of its hostname. Doing so ensures that all classic
         // rounds initiated by any host is higher than the fast round, and there is an ordering between rounds
         // initiated by different endpoints.
+        _rnd = new Rank { Round = 1, NodeIndex = 1 };
+        _vrnd = _rnd;
+        _vval = [.. proposal];
+
         ref var voteCount = ref CollectionsMarshal.GetValueRefOrAddDefault(_fastRoundVotes, proposal, out var _);
         ++voteCount;
         LogRegisterFastRoundVote(new LoggableEndpoints(proposal), voteCount);
@@ -267,11 +273,12 @@ internal sealed partial class Paxos
 
         _phase1bMessages.Add(phase1bMessage);
 
+        // Classic Paxos uses majority quorum (N/2 + 1), not Fast Paxos threshold
+        var majorityThreshold = (_membershipSize / 2) + 1;
         var f = (int)Math.Floor((_membershipSize - 1) / 4.0);
-        var threshold = _membershipSize - f;
-        LogPhase1bCollected(_phase1bMessages.Count, threshold, f);
+        LogPhase1bCollected(_phase1bMessages.Count, majorityThreshold, f);
 
-        if (_phase1bMessages.Count >= threshold)
+        if (_phase1bMessages.Count >= majorityThreshold)
         {
             // selectProposalUsingCoordinator rule may execute multiple times with each additional phase1bMessage
             // being received, but we can enter the following if statement only once when a valid cval is identified.
@@ -295,6 +302,7 @@ internal sealed partial class Paxos
 
     /// <summary>
     /// At acceptor, handle an accept message from a coordinator.
+    /// When accepting, broadcast the phase2b vote to all nodes so they can independently learn the decision.
     /// </summary>
     /// <param name="phase2aMessage">accept message from coordinator</param>
     /// <param name="cancellationToken">Cancellation token</param>
@@ -308,7 +316,8 @@ internal sealed partial class Paxos
             return;
         }
 
-        if (phase2aMessage.Rnd.CompareTo(_rnd) >= 0)
+        // Accept if this round is >= our current round and we haven't already accepted in this round
+        if (phase2aMessage.Rnd.CompareTo(_rnd) >= 0 && !_vrnd.Equals(phase2aMessage.Rnd))
         {
             _rnd = phase2aMessage.Rnd;
             _vrnd = phase2aMessage.Rnd;
@@ -324,8 +333,10 @@ internal sealed partial class Paxos
 
             LogSendingPhase2b(new LoggableEndpoint(phase2aMessage.Sender), _rnd, new LoggableEndpoints(_vval));
 
+            // Broadcast to all nodes so they can independently learn the decision
+            // This matches the Java implementation
             var request = RapidUtils.ToRapidRequest(phase2b);
-            _client.SendOneWayMessage(phase2aMessage.Sender, request, cancellationToken);
+            _broadcaster.Broadcast(request, cancellationToken);
         }
         else
         {
@@ -335,6 +346,8 @@ internal sealed partial class Paxos
 
     /// <summary>
     /// At acceptor, learn about another acceptor's vote (phase2b messages).
+    /// All acceptors collect phase2b messages and can independently learn the decision
+    /// once they receive a majority of votes for any round.
     /// </summary>
     /// <param name="phase2bMessage">acceptor's vote</param>
     public void HandlePhase2bMessage(Phase2bMessage phase2bMessage)
@@ -347,24 +360,22 @@ internal sealed partial class Paxos
             return;
         }
 
-        if (!phase2bMessage.Rnd.Equals(_crnd))
+        // Store by the message's round (not our crnd) so all acceptors can learn the decision
+        // This matches the Java implementation where all nodes collect phase2b messages
+        var messageRnd = phase2bMessage.Rnd;
+        if (!_acceptResponses.TryGetValue(messageRnd, out var acceptResponses))
         {
-            LogPhase2bRoundMismatch(_crnd, phase2bMessage.Rnd);
-            return;
-        }
-
-        if (!_acceptResponses.TryGetValue(_crnd, out var acceptResponses))
-        {
-            _acceptResponses[_crnd] = acceptResponses = [];
+            _acceptResponses[messageRnd] = acceptResponses = [];
         }
 
         acceptResponses[phase2bMessage.Sender] = phase2bMessage;
 
+        // Classic Paxos uses majority quorum (N/2 + 1), not Fast Paxos threshold
+        var majorityThreshold = (_membershipSize / 2) + 1;
         var f = (int)Math.Floor((_membershipSize - 1) / 4.0);
-        var threshold = _membershipSize - f;
-        LogPhase2bCollected(acceptResponses.Count, _crnd, threshold, f);
+        LogPhase2bCollected(acceptResponses.Count, messageRnd, majorityThreshold, f);
 
-        if (acceptResponses.Count >= threshold)
+        if (acceptResponses.Count >= majorityThreshold)
         {
             var endpoints = new List<Endpoint>(phase2bMessage.Endpoints);
             if (_completion.TrySetResult(endpoints))

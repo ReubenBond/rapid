@@ -95,7 +95,6 @@ internal sealed class SimulationTaskQueue
 {
     // Single queue ordered by due time, then sequence number
     private readonly SortedSet<ScheduledItem> _queue = new(new ScheduledItemComparer());
-
     private long _sequenceNumber;
 
     /// <summary>

@@ -156,7 +156,7 @@ public sealed class DeterminismTests(ITestOutputHelper output) : IAsyncLifetime
     {
         var conditionMet = false;
         var task = new Task(() => conditionMet = true);
-        task.Start(_harness.Scheduler);
+        task.Start(_harness.TaskScheduler);
 
         var result = _harness.RunUntil(() => conditionMet);
 

@@ -16,8 +16,8 @@ namespace Rapid.Tests.Simulation;
 /// </summary>
 internal sealed partial class SimulationTimeProvider : TimeProvider
 {
-    private readonly ILogger<SimulationTimeProvider> _logger;
     private readonly SimulationTaskQueue _taskQueue;
+    private ILogger<SimulationTimeProvider> _logger;
 
     [LoggerMessage(Level = LogLevel.Trace, Message = "Advance({Duration}) from {FromTime} to {ToTime}")]
     private partial void LogAdvance(TimeSpan duration, string fromTime, string toTime);
@@ -44,6 +44,8 @@ internal sealed partial class SimulationTimeProvider : TimeProvider
             ArgumentOutOfRangeException.ThrowIfLessThan(startDateTime.Value.Ticks, 0);
         }
     }
+
+    internal void SetLogger(ILogger<SimulationTimeProvider> logger) => _logger = logger;
 
     /// <summary>
     /// Gets the starting date and time for this provider.

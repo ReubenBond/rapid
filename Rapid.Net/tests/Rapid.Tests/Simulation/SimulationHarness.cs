@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
-using MartinCostello.Logging.XUnit;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Rapid.Tests.Simulation;
 
@@ -24,7 +24,6 @@ internal sealed class SimulationHarness : IAsyncDisposable
     private readonly Lock _eventLogLock = new();
     private readonly Lock _randomLock = new();
     private readonly ILogger<SimulationHarness>? _logger;
-    private readonly bool _ownsLoggerFactory;
     private bool _disposed;
 
     /// <summary>
@@ -32,51 +31,35 @@ internal sealed class SimulationHarness : IAsyncDisposable
     /// The logger factory will be created automatically from the test output helper.
     /// </summary>
     /// <param name="seed">The seed for deterministic random number generation.</param>
-    /// <param name="testOutput">The xUnit test output helper for logging.</param>
-    public SimulationHarness(int seed, ITestOutputHelper testOutput)
-        : this(seed, CreateLoggerFactory(testOutput), ownsLoggerFactory: true)
+    /// <param name="context">The xUnit test context.</param>
+    public SimulationHarness(int seed, ITestContext context)
     {
-    }
-
-    /// <summary>
-    /// Creates a new simulation harness with the specified seed, logger factory, and test output.
-    /// </summary>
-    /// <param name="seed">The seed for deterministic random number generation.</param>
-    /// <param name="loggerFactory">The logger factory for logging (can be null).</param>
-    /// <param name="ownsLoggerFactory">Whether this harness owns the logger factory and should dispose it.</param>
-    private SimulationHarness(
-        int seed,
-        ILoggerFactory? loggerFactory,
-        bool ownsLoggerFactory)
-    {
+        TeardownCancellationToken = context.CancellationToken;
         Seed = seed;
-        LoggerFactory = loggerFactory;
-        _logger = loggerFactory?.CreateLogger<SimulationHarness>();
-        _ownsLoggerFactory = ownsLoggerFactory;
 
-        // Create deterministic components
         Random = new SimulationRandom(seed);
-        _taskQueue = new SimulationTaskQueue();
-        _taskScheduler = new SimulationTaskScheduler(_taskQueue);
-        _synchronizationContext = _taskQueue.SynchronizationContext;
-
-        // Create time provider that shares the task queue with the scheduler
-        var timeProviderLogger = loggerFactory?.CreateLogger<SimulationTimeProvider>();
-        TimeProvider = new SimulationTimeProvider(_taskQueue, DateTimeOffset.UtcNow, timeProviderLogger);
-
-        // Create network
+        _scheduler = new SimulationTaskQueue();
+        _taskScheduler = new SimulationTaskScheduler(_scheduler);
+        _timeProvider = new SimulationTimeProvider(_scheduler, DateTimeOffset.UtcNow);
         Network = new SimulationNetwork(this);
+
+        var loggerFactory = context.TestOutputHelper switch
+        {
+            { } output => Microsoft.Extensions.Logging.LoggerFactory.Create(builder => builder
+                .AddXUnit(output, options =>
+                {
+                    options.TimeProvider = _timeProvider;
+                })
+                .SetMinimumLevel(LogLevel.Debug)),
+            null => NullLoggerFactory.Instance
+        };
+        LoggerFactory = loggerFactory;
+        _logger = loggerFactory.CreateLogger<SimulationHarness>();
+        _timeProvider.SetLogger(loggerFactory.CreateLogger<SimulationTimeProvider>());
+        Network.SetLogger(loggerFactory.CreateLogger<SimulationNetwork>());
 
         LogEvent(SimulationEventType.HarnessCreated, $"Seed: {seed}");
     }
-
-    /// <summary>
-    /// Creates an ILoggerFactory that writes to the xUnit test output.
-    /// </summary>
-    private static ILoggerFactory CreateLoggerFactory(ITestOutputHelper testOutput) =>
-        Microsoft.Extensions.Logging.LoggerFactory.Create(builder => builder
-            .AddXUnit(testOutput)
-            .SetMinimumLevel(LogLevel.Debug));
 
     #region Core Components
 
@@ -88,36 +71,36 @@ internal sealed class SimulationHarness : IAsyncDisposable
     /// <summary>
     /// Gets the logger factory.
     /// </summary>
-    public ILoggerFactory? LoggerFactory { get; }
+    public ILoggerFactory LoggerFactory { get; }
 
     /// <summary>
     /// Gets the simulation random instance.
     /// </summary>
     public SimulationRandom Random { get; }
 
-    private readonly SimulationTaskQueue _taskQueue;
+    private readonly SimulationTimeProvider _timeProvider;
+    private readonly SimulationTaskQueue _scheduler;
     private readonly SimulationTaskScheduler _taskScheduler;
-    private readonly SimulationSynchronizationContext _synchronizationContext;
 
     /// <summary>
     /// Gets the simulation task queue.
     /// </summary>
-    public SimulationTaskQueue TaskQueue => _taskQueue;
+    public SimulationTaskQueue TaskQueue => _scheduler;
 
     /// <summary>
     /// Gets the simulation task scheduler.
     /// </summary>
-    public TaskScheduler Scheduler => _taskScheduler;
+    public TaskScheduler TaskScheduler => _taskScheduler;
 
     /// <summary>
     /// Gets the simulation synchronization context.
     /// </summary>
-    public SimulationSynchronizationContext SynchronizationContext => _synchronizationContext;
+    public SimulationSynchronizationContext SynchronizationContext => _scheduler.SynchronizationContext;
 
     /// <summary>
     /// Gets the simulation time provider.
     /// </summary>
-    public SimulationTimeProvider TimeProvider { get; }
+    public TimeProvider TimeProvider => _timeProvider;
 
     /// <summary>
     /// Gets the simulation network.
@@ -380,8 +363,6 @@ internal sealed class SimulationHarness : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(condition);
 
-        using var _ = _synchronizationContext.Install();
-
         return RunUntilCore(condition, maxIterations);
     }
 
@@ -391,7 +372,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
     private bool RunUntilCore(Func<bool> condition, int maxIterations)
     {
         var startTime = TimeProvider.GetUtcNow();
-        var maxEndTime = startTime + MaxSimulatedTimeAdvance;
+        var maxEndTime = MaxSimulatedTimeAdvance;
         var timeAdvanceCount = 0;
 
         for (var i = 0; i < maxIterations; i++)
@@ -402,7 +383,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
                 return true;
             }
 
-            if (_taskQueue.RunOnce())
+            if (_scheduler.RunOnce())
             {
                 LogicalTime++;
                 timeAdvanceCount = 0; // Reset time advance counter when real work happens
@@ -410,7 +391,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
             }
 
             // No tasks to execute - need to advance time
-            var nextScheduledTime = GetNextScheduledTime();
+            var nextScheduledTime = _scheduler.NextWaitingDueTime;
             if (!nextScheduledTime.HasValue)
             {
                 // No more scheduled work - simulation is idle and cannot make progress
@@ -430,7 +411,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
             }
 
             // Advance time
-            TimeProvider.SetUtcNow(nextScheduledTime.Value);
+            _scheduler.AdvanceTime(nextScheduledTime.Value - _scheduler.CurrentTime);
             timeAdvanceCount++;
 
             // Safety check: if we've advanced time many times without executing tasks, we might be stuck
@@ -455,12 +436,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
     /// <summary>
     /// Runs the simulation until it becomes idle.
     /// </summary>
-    public bool RunUntilIdle(TimeSpan? maxSimulatedTime = null, int maxIterations = 100000)
-    {
-        using var _ = _synchronizationContext.Install();
-
-        return RunUntilIdleCore(maxSimulatedTime, maxIterations);
-    }
+    public bool RunUntilIdle(TimeSpan? maxSimulatedTime = null, int maxIterations = 100000) => RunUntilIdleCore(maxSimulatedTime, maxIterations);
 
     /// <summary>
     /// Core implementation of RunUntilIdle without context installation (for internal use).
@@ -468,19 +444,19 @@ internal sealed class SimulationHarness : IAsyncDisposable
     private bool RunUntilIdleCore(TimeSpan? maxSimulatedTime, int maxIterations)
     {
         var startTime = TimeProvider.GetUtcNow();
-        var maxEndTime = startTime + (maxSimulatedTime ?? MaxSimulatedTimeAdvance);
+        var maxEndTime = maxSimulatedTime ?? MaxSimulatedTimeAdvance;
         var timeAdvanceCount = 0;
 
         for (var i = 0; i < maxIterations; i++)
         {
-            if (_taskQueue.RunOnce())
+            if (_scheduler.RunOnce())
             {
                 LogicalTime++;
                 timeAdvanceCount = 0; // Reset time advance counter when real work happens
                 continue;
             }
 
-            var nextScheduledTime = GetNextScheduledTime();
+            var nextScheduledTime = _scheduler.NextWaitingDueTime;
             if (!nextScheduledTime.HasValue)
             {
                 LogEvent(SimulationEventType.ConditionMet, "Simulation reached idle state");
@@ -495,7 +471,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
                 return false;
             }
 
-            TimeProvider.SetUtcNow(nextScheduledTime.Value);
+            _scheduler.AdvanceTime(nextScheduledTime.Value - _scheduler.CurrentTime);
             timeAdvanceCount++;
 
             // Safety check: if we've advanced time many times without executing tasks, we might be stuck
@@ -518,7 +494,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(taskFactory);
 
-        using var _ = _synchronizationContext.Install();
+        using var _ = SynchronizationContext.Install();
 
         var task = taskFactory();
 
@@ -540,7 +516,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(taskFactory);
 
-        using var _ = _synchronizationContext.Install();
+        using var _ = SynchronizationContext.Install();
 
         var task = taskFactory();
 
@@ -599,21 +575,11 @@ internal sealed class SimulationHarness : IAsyncDisposable
             return true;
         }
 
-        using var _ = _synchronizationContext.Install();
-
-        var targetTime = TimeProvider.GetUtcNow() + delta;
-
         // Advance time to trigger timers, then run until idle
-        TimeProvider.SetUtcNow(targetTime);
+        _scheduler.AdvanceTime(delta);
         LogEvent(SimulationEventType.TimeAdvanced, $"Advanced time by {delta}");
 
         return RunUntilIdleCore(maxSimulatedTime: null, maxIterations);
-    }
-
-    private DateTimeOffset? GetNextScheduledTime()
-    {
-        var nextDueTime = _taskQueue.NextWaitingDueTime;
-        return nextDueTime.HasValue ? TimeProvider.Start + nextDueTime.Value : null;
     }
 
     #endregion
@@ -633,6 +599,8 @@ internal sealed class SimulationHarness : IAsyncDisposable
             }
         }
     }
+
+    public CancellationToken TeardownCancellationToken { get; }
 
     /// <summary>
     /// Logs the seed to the test output for reproduction.
@@ -684,7 +652,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
         if (_disposed) return;
         _disposed = true;
 
-        _taskQueue.Clear();
+        _scheduler.Clear();
 
         foreach (var node in _nodes)
         {
@@ -694,10 +662,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
         _nodes.Clear();
         _nodeRegistry.Clear();
 
-        if (_ownsLoggerFactory)
-        {
-            LoggerFactory?.Dispose();
-        }
+        LoggerFactory.Dispose();
 
         await Task.CompletedTask.ConfigureAwait(false);
     }

@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Rapid.Tests.Simulation;
 
@@ -25,7 +26,7 @@ internal sealed class SimulationNetwork
     private readonly SimulationHarness _harness;
     private readonly ConcurrentDictionary<string, HashSet<string>> _partitions = new();
     private readonly Lock _partitionLock = new();
-    private readonly ILogger<SimulationNetwork> _logger;
+    private ILogger<SimulationNetwork> _logger;
 
     /// <summary>
     /// Gets or sets the base message delay for all messages.
@@ -45,7 +46,7 @@ internal sealed class SimulationNetwork
     /// <summary>
     /// Gets or sets whether to simulate message delays.
     /// </summary>
-    public bool EnableDelays { get; set; } = true;
+    public bool EnableDelays { get; set; }
 
     /// <summary>
     /// Gets or sets the default timeout for message delivery.
@@ -57,12 +58,10 @@ internal sealed class SimulationNetwork
     internal SimulationNetwork(SimulationHarness harness)
     {
         _harness = harness;
-        _logger = harness.LoggerFactory?.CreateLogger<SimulationNetwork>()
-            ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<SimulationNetwork>.Instance;
-        // Disable delays by default for faster tests
-        EnableDelays = false;
-        _logger.LogDebug("SimulationNetwork created with delays {DelaysEnabled}", EnableDelays);
+        _logger = NullLogger<SimulationNetwork>.Instance;
     }
+
+    internal void SetLogger(ILogger<SimulationNetwork> logger) => _logger = logger;
 
     /// <summary>
     /// Creates a network partition between two nodes (unidirectional).
