@@ -130,14 +130,11 @@ public sealed class ChaosTests(ITestOutputHelper output) : IAsyncLifetime
         Assert.True(_harness.Nodes.Count >= 2);
     }
 
-    [Fact(Skip = "Pre-existing test issue - nodes created as independent seed nodes, not joined cluster")]
+    [Fact]
     public void InvariantsHoldUnderLightChaos()
     {
-        var nodes = new List<SimulationNode>();
-        for (var i = 0; i < 3; i++)
-        {
-            nodes.Add(_harness.CreateSeedNode(i));
-        }
+        // Create a proper cluster with joined nodes
+        var nodes = _harness.CreateCluster(size: 3);
 
         _chaos.NodeCrashRate = 0.0; // No crashes
         _chaos.PartitionRate = 0.02; // Light partitions

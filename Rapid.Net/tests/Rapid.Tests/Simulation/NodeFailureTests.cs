@@ -180,21 +180,24 @@ public sealed class NodeFailureTests(ITestOutputHelper output) : IAsyncLifetime
         });
     }
 
-    [Fact(Skip = "2-node cluster cannot reach consensus when 1 node fails - needs 3+ nodes for majority")]
+    [Fact]
     public void AlternativeSeedAllowsJoin()
     {
+        // Need a 3-node cluster so that after crashing one node,
+        // the remaining 2 nodes can still reach quorum for consensus
         var seedNode = _harness.CreateSeedNode();
         var joiner1 = _harness.CreateJoinerNode(seedNode, nodeId: 1);
+        var joiner2 = _harness.CreateJoinerNode(seedNode, nodeId: 2);
 
-        _harness.WaitForConvergence(expectedSize: 2);
+        _harness.WaitForConvergence(expectedSize: 3);
 
         // Crash the original seed
         _harness.CrashNode(seedNode);
 
-        // Join through the remaining joiner (which is now the only member)
-        var joiner2 = _harness.CreateJoinerNode(joiner1, nodeId: 2);
+        // Join through one of the remaining joiners (which are still part of the cluster)
+        var joiner3 = _harness.CreateJoinerNode(joiner1, nodeId: 3);
 
-        Assert.True(joiner2.IsInitialized);
+        Assert.True(joiner3.IsInitialized);
     }
 
     #endregion

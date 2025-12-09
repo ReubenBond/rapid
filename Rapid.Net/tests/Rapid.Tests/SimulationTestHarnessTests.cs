@@ -68,7 +68,7 @@ public sealed class SimulationTestHarnessTests(ITestOutputHelper output) : IAsyn
         Assert.Equal(2, joiner.MembershipSize);
     }
 
-    [Fact(Skip = "Slow test - consensus roundtrips with batching delays. Use for integration testing only.")]
+    [Fact]
     public void CreateClusterCreatesCorrectNumberOfNodes()
     {
         var nodes = _harness.CreateCluster(size: 3);
@@ -132,7 +132,7 @@ public sealed class SimulationTestHarnessTests(ITestOutputHelper output) : IAsyn
     [Fact]
     public void SeedIsAccessible() => Assert.Equal(12345, _harness.Seed);
 
-    [Fact(Skip = "Slow test - consensus roundtrips with batching delays. Use for integration testing only.")]
+    [Fact]
     public async Task SubscribeToViewChangesReceivesNotifications()
     {
         var viewChanges = new List<MembershipView>();
