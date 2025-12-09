@@ -61,13 +61,13 @@ public class PaxosTests
         var msg = new Phase1bMessage
         {
             Sender = sender,
-            ConfigurationId = new ConfigurationIdMsg { Version = 100, Hash = 0 },
+            ConfigurationId = 100,
             Rnd = rnd,
             Vrnd = vrnd
         };
 
         Assert.Equal(sender, msg.Sender);
-        Assert.Equal(100, msg.ConfigurationId.Version);
+        Assert.Equal(100, msg.ConfigurationId);
         Assert.Equal(5, msg.Rnd.Round);
         Assert.Equal(3, msg.Vrnd.Round);
     }
@@ -85,13 +85,13 @@ public class PaxosTests
         var msg = new Phase2aMessage
         {
             Sender = sender,
-            ConfigurationId = new ConfigurationIdMsg { Version = 100, Hash = 0 },
+            ConfigurationId = 100,
             Rnd = rnd
         };
         msg.Vval.Add(value);
 
         Assert.Equal(sender, msg.Sender);
-        Assert.Equal(100, msg.ConfigurationId.Version);
+        Assert.Equal(100, msg.ConfigurationId);
         Assert.Equal(5, msg.Rnd.Round);
         Assert.Single(msg.Vval);
     }
@@ -114,12 +114,12 @@ public class PaxosTests
         var msg = new Phase1aMessage
         {
             Sender = sender,
-            ConfigurationId = new ConfigurationIdMsg { Version = 1000, Hash = 0 },
+            ConfigurationId = 1000,
             Rank = rank
         };
 
         Assert.Equal(sender, msg.Sender);
-        Assert.Equal(1000, msg.ConfigurationId.Version);
+        Assert.Equal(1000, msg.ConfigurationId);
         Assert.Equal(5, msg.Rank.Round);
         Assert.Equal(10, msg.Rank.NodeIndex);
     }
@@ -130,7 +130,7 @@ public class PaxosTests
         var msg = new Phase1aMessage
         {
             Sender = Utils.HostFromParts("127.0.0.1", 1234),
-            ConfigurationId = new ConfigurationIdMsg { Version = 100, Hash = 0 }
+            ConfigurationId = 100
         };
 
         Assert.Null(msg.Rank);
@@ -142,17 +142,17 @@ public class PaxosTests
         var original = new Phase1aMessage
         {
             Sender = Utils.HostFromParts("127.0.0.1", 1234),
-            ConfigurationId = new ConfigurationIdMsg { Version = 100, Hash = 0 },
+            ConfigurationId = 100,
             Rank = new Rank { Round = 5, NodeIndex = 10 }
         };
 
         var clone = original.Clone();
 
-        Assert.Equal(original.ConfigurationId.Version, clone.ConfigurationId.Version);
+        Assert.Equal(original.ConfigurationId, clone.ConfigurationId);
         Assert.Equal(original.Rank.Round, clone.Rank.Round);
 
-        clone.ConfigurationId = new ConfigurationIdMsg { Version = 200, Hash = 0 };
-        Assert.Equal(100, original.ConfigurationId.Version);
+        clone.ConfigurationId = 200;
+        Assert.Equal(100, original.ConfigurationId);
     }
 
     #endregion
@@ -170,14 +170,14 @@ public class PaxosTests
         var msg = new Phase1bMessage
         {
             Sender = sender,
-            ConfigurationId = new ConfigurationIdMsg { Version = 100, Hash = 0 },
+            ConfigurationId = 100,
             Rnd = rnd,
             Vrnd = vrnd
         };
         msg.Vval.Add(vval);
 
         Assert.Equal(sender, msg.Sender);
-        Assert.Equal(100, msg.ConfigurationId.Version);
+        Assert.Equal(100, msg.ConfigurationId);
         Assert.Equal(5, msg.Rnd.Round);
         Assert.Equal(3, msg.Vrnd.Round);
         Assert.Single(msg.Vval);
@@ -190,7 +190,7 @@ public class PaxosTests
         var msg = new Phase1bMessage
         {
             Sender = Utils.HostFromParts("127.0.0.1", 1234),
-            ConfigurationId = new ConfigurationIdMsg { Version = 100, Hash = 0 },
+            ConfigurationId = 100,
             Rnd = new Rank { Round = 5, NodeIndex = 1 },
             Vrnd = new Rank { Round = 0, NodeIndex = 0 }
         };
@@ -204,7 +204,7 @@ public class PaxosTests
         var msg = new Phase1bMessage
         {
             Sender = Utils.HostFromParts("127.0.0.1", 1234),
-            ConfigurationId = new ConfigurationIdMsg { Version = 100, Hash = 0 },
+            ConfigurationId = 100,
             Rnd = new Rank { Round = 5, NodeIndex = 1 },
             Vrnd = new Rank { Round = 1, NodeIndex = 0 }
         };
@@ -228,13 +228,13 @@ public class PaxosTests
         var msg = new Phase2aMessage
         {
             Sender = sender,
-            ConfigurationId = new ConfigurationIdMsg { Version = 100, Hash = 0 },
+            ConfigurationId = 100,
             Rnd = rnd
         };
         msg.Vval.Add(Utils.HostFromParts("127.0.0.1", 5678));
 
         Assert.Equal(sender, msg.Sender);
-        Assert.Equal(100, msg.ConfigurationId.Version);
+        Assert.Equal(100, msg.ConfigurationId);
         Assert.Equal(5, msg.Rnd.Round);
         Assert.Single(msg.Vval);
     }
@@ -245,7 +245,7 @@ public class PaxosTests
         var msg = new Phase2aMessage
         {
             Sender = Utils.HostFromParts("127.0.0.1", 1234),
-            ConfigurationId = new ConfigurationIdMsg { Version = 100, Hash = 0 },
+            ConfigurationId = 100,
             Rnd = new Rank { Round = 2, NodeIndex = 1 }
         };
 
@@ -273,13 +273,13 @@ public class PaxosTests
         var msg = new Phase2bMessage
         {
             Sender = sender,
-            ConfigurationId = new ConfigurationIdMsg { Version = 100, Hash = 0 },
+            ConfigurationId = 100,
             Rnd = rnd
         };
         msg.Endpoints.Add(Utils.HostFromParts("127.0.0.1", 5678));
 
         Assert.Equal(sender, msg.Sender);
-        Assert.Equal(100, msg.ConfigurationId.Version);
+        Assert.Equal(100, msg.ConfigurationId);
         Assert.Equal(5, msg.Rnd.Round);
         Assert.Single(msg.Endpoints);
     }
@@ -290,7 +290,7 @@ public class PaxosTests
         var msg = new Phase2bMessage
         {
             Sender = Utils.HostFromParts("127.0.0.1", 1234),
-            ConfigurationId = new ConfigurationIdMsg { Version = 100, Hash = 0 },
+            ConfigurationId = 100,
             Rnd = new Rank { Round = 2, NodeIndex = 1 }
         };
 
@@ -314,12 +314,12 @@ public class PaxosTests
         var msg = new FastRoundPhase2bMessage
         {
             Sender = sender,
-            ConfigurationId = new ConfigurationIdMsg { Version = 100, Hash = 0 }
+            ConfigurationId = 100
         };
         msg.Endpoints.Add(Utils.HostFromParts("127.0.0.1", 5678));
 
         Assert.Equal(sender, msg.Sender);
-        Assert.Equal(100, msg.ConfigurationId.Version);
+        Assert.Equal(100, msg.ConfigurationId);
         Assert.Single(msg.Endpoints);
     }
 
@@ -329,7 +329,7 @@ public class PaxosTests
         var msg = new FastRoundPhase2bMessage
         {
             Sender = Utils.HostFromParts("127.0.0.1", 1234),
-            ConfigurationId = new ConfigurationIdMsg { Version = 100, Hash = 0 }
+            ConfigurationId = 100
         };
 
         Assert.Empty(msg.Endpoints);
@@ -341,7 +341,7 @@ public class PaxosTests
         var msg = new FastRoundPhase2bMessage
         {
             Sender = Utils.HostFromParts("127.0.0.1", 1234),
-            ConfigurationId = new ConfigurationIdMsg { Version = 100, Hash = 0 }
+            ConfigurationId = 100
         };
 
         for (var i = 0; i < 100; i++)
@@ -431,14 +431,14 @@ public class PaxosTests
         var original = new Phase1aMessage
         {
             Sender = Utils.HostFromParts("127.0.0.1", 1234),
-            ConfigurationId = new ConfigurationIdMsg { Version = 999, Hash = 0 },
+            ConfigurationId = 999,
             Rank = new Rank { Round = 10, NodeIndex = 20 }
         };
 
         var bytes = Google.Protobuf.MessageExtensions.ToByteArray(original);
         var deserialized = Phase1aMessage.Parser.ParseFrom(bytes);
 
-        Assert.Equal(original.ConfigurationId.Version, deserialized.ConfigurationId.Version);
+        Assert.Equal(original.ConfigurationId, deserialized.ConfigurationId);
         Assert.Equal(original.Rank.Round, deserialized.Rank.Round);
         Assert.Equal(original.Rank.NodeIndex, deserialized.Rank.NodeIndex);
     }
@@ -449,7 +449,7 @@ public class PaxosTests
         var original = new Phase2aMessage
         {
             Sender = Utils.HostFromParts("127.0.0.1", 1234),
-            ConfigurationId = new ConfigurationIdMsg { Version = 100, Hash = 0 },
+            ConfigurationId = 100,
             Rnd = new Rank { Round = 5, NodeIndex = 10 }
         };
         original.Vval.Add(Utils.HostFromParts("10.0.0.1", 5001));
@@ -482,7 +482,7 @@ public class PaxosTests
         var msg = new Phase1bMessage
         {
             Sender = Utils.HostFromParts("127.0.0.1", 1234),
-            ConfigurationId = new ConfigurationIdMsg { Version = 100, Hash = 0 },
+            ConfigurationId = 100,
             Rnd = new Rank { Round = 5, NodeIndex = 10 },
             Vrnd = new Rank { Round = 5, NodeIndex = 10 }
         };
@@ -496,11 +496,11 @@ public class PaxosTests
         var msg = new Phase1aMessage
         {
             Sender = Utils.HostFromParts("127.0.0.1", 1234),
-            ConfigurationId = new ConfigurationIdMsg { Version = -1, Hash = 0 },
+            ConfigurationId = -1,
             Rank = new Rank { Round = 1, NodeIndex = 1 }
         };
 
-        Assert.Equal(-1, msg.ConfigurationId.Version);
+        Assert.Equal(-1, msg.ConfigurationId);
     }
 
     [Fact]
@@ -509,11 +509,11 @@ public class PaxosTests
         var msg = new Phase1aMessage
         {
             Sender = Utils.HostFromParts("127.0.0.1", 1234),
-            ConfigurationId = new ConfigurationIdMsg { Version = long.MaxValue, Hash = 0 },
+            ConfigurationId = long.MaxValue,
             Rank = new Rank { Round = 1, NodeIndex = 1 }
         };
 
-        Assert.Equal(long.MaxValue, msg.ConfigurationId.Version);
+        Assert.Equal(long.MaxValue, msg.ConfigurationId);
     }
 
     #endregion
@@ -528,7 +528,7 @@ public class PaxosTests
         var msg = new Phase1bMessage
         {
             Sender = Utils.HostFromParts("127.0.0.1", 1234),
-            ConfigurationId = new ConfigurationIdMsg { Version = 100, Hash = 0 },
+            ConfigurationId = 100,
             Rnd = new Rank { Round = 2, NodeIndex = 1 },
             Vrnd = new Rank { Round = vrndRound, NodeIndex = vrndNodeIndex }
         };

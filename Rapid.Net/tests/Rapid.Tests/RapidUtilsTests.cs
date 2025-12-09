@@ -209,14 +209,14 @@ public class RapidUtilsTests
         {
             Sender = RapidUtils.HostFromParts("127.0.0.1", 1234),
             NodeId = RapidUtils.NodeIdFromUuid(Guid.NewGuid()),
-            ConfigurationId = new ConfigurationIdMsg { Version = 100, Hash = 0 }
+            ConfigurationId = 100
         };
 
         var request = RapidUtils.ToRapidRequest(msg);
 
         Assert.NotNull(request.JoinMessage);
         Assert.Equal(msg.Sender, request.JoinMessage.Sender);
-        Assert.Equal(100, request.JoinMessage.ConfigurationId.Version);
+        Assert.Equal(100, request.JoinMessage.ConfigurationId);
     }
 
     [Fact]
@@ -228,7 +228,7 @@ public class RapidUtilsTests
             EdgeSrc = RapidUtils.HostFromParts("127.0.0.1", 1234),
             EdgeDst = RapidUtils.HostFromParts("127.0.0.1", 1235),
             EdgeStatus = EdgeStatus.Down,
-            ConfigurationId = new ConfigurationIdMsg { Version = 100, Hash = 0 }
+            ConfigurationId = 100
         });
 
         var request = RapidUtils.ToRapidRequest(msg);
@@ -256,7 +256,7 @@ public class RapidUtilsTests
     {
         var msg = new FastRoundPhase2bMessage
         {
-            ConfigurationId = new ConfigurationIdMsg { Version = 100, Hash = 0 },
+            ConfigurationId = 100,
             Sender = RapidUtils.HostFromParts("127.0.0.1", 1234)
         };
         msg.Endpoints.Add(RapidUtils.HostFromParts("127.0.0.1", 1235));
@@ -264,7 +264,7 @@ public class RapidUtilsTests
         var request = RapidUtils.ToRapidRequest(msg);
 
         Assert.NotNull(request.FastRoundPhase2BMessage);
-        Assert.Equal(100, request.FastRoundPhase2BMessage.ConfigurationId.Version);
+        Assert.Equal(100, request.FastRoundPhase2BMessage.ConfigurationId);
     }
 
     [Fact]
@@ -272,7 +272,7 @@ public class RapidUtilsTests
     {
         var msg = new Phase1aMessage
         {
-            ConfigurationId = new ConfigurationIdMsg { Version = 100, Hash = 0 },
+            ConfigurationId = 100,
             Sender = RapidUtils.HostFromParts("127.0.0.1", 1234),
             Rank = new Rank { Round = 2, NodeIndex = 5 }
         };
@@ -288,7 +288,7 @@ public class RapidUtilsTests
     {
         var msg = new Phase1bMessage
         {
-            ConfigurationId = new ConfigurationIdMsg { Version = 100, Hash = 0 },
+            ConfigurationId = 100,
             Sender = RapidUtils.HostFromParts("127.0.0.1", 1234),
             Rnd = new Rank { Round = 2, NodeIndex = 5 },
             Vrnd = new Rank { Round = 1, NodeIndex = 3 }
@@ -305,7 +305,7 @@ public class RapidUtilsTests
     {
         var msg = new Phase2aMessage
         {
-            ConfigurationId = new ConfigurationIdMsg { Version = 100, Hash = 0 },
+            ConfigurationId = 100,
             Sender = RapidUtils.HostFromParts("127.0.0.1", 1234),
             Rnd = new Rank { Round = 2, NodeIndex = 5 }
         };
@@ -322,7 +322,7 @@ public class RapidUtilsTests
     {
         var msg = new Phase2bMessage
         {
-            ConfigurationId = new ConfigurationIdMsg { Version = 100, Hash = 0 },
+            ConfigurationId = 100,
             Sender = RapidUtils.HostFromParts("127.0.0.1", 1234),
             Rnd = new Rank { Round = 2, NodeIndex = 5 }
         };
@@ -358,7 +358,7 @@ public class RapidUtilsTests
         var msg = new JoinResponse
         {
             StatusCode = JoinStatusCode.SafeToJoin,
-            ConfigurationId = new ConfigurationIdMsg { Version = 100, Hash = 0 }
+            ConfigurationId = 100
         };
         msg.Endpoints.Add(RapidUtils.HostFromParts("127.0.0.1", 1234));
 

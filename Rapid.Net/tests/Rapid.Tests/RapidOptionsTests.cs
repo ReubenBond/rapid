@@ -262,7 +262,7 @@ public class RapidOptionsTests
 
         options.AddSubscription(ClusterEvents.ViewChange, callback);
 
-        var change = new ClusterStatusChange(new ConfigurationId(1, 0), [], []);
+        var change = new ClusterStatusChange(1, [], []);
         options.Subscriptions[ClusterEvents.ViewChange][0](change);
 
         Assert.Equal(1, invokeCount);

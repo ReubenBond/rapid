@@ -291,30 +291,6 @@ internal sealed class MembershipViewBuilder
     }
 
     /// <summary>
-    /// Builds and returns the immutable MembershipView using the provided configuration ID directly.
-    /// Use this overload when joining an existing cluster where the configuration ID is already known
-    /// (e.g., from a JoinResponse).
-    /// After this method is called, the builder becomes sealed and cannot be used again.
-    /// </summary>
-    /// <param name="configurationId">The configuration ID to use.</param>
-    /// <returns>An immutable MembershipView instance.</returns>
-    /// <exception cref="InvalidOperationException">Thrown if the builder has already been sealed.</exception>
-    public MembershipView BuildWithConfigurationId(ConfigurationId configurationId)
-    {
-        ThrowIfSealed();
-        _isSealed = true;
-
-        // Create immutable ring copies
-        var ringsBuilder = ImmutableArray.CreateBuilder<ImmutableArray<Endpoint>>(_ringCount);
-        for (var i = 0; i < _ringCount; i++)
-        {
-            ringsBuilder.Add([.. _rings[i]]);
-        }
-
-        return new MembershipView(_ringCount, configurationId, ringsBuilder.MoveToImmutable(), [.. _identifiersSeen]);
-    }
-
-    /// <summary>
     /// Computes the hash for an endpoint on a specific ring.
     /// Used for determining ring ordering.
     /// </summary>

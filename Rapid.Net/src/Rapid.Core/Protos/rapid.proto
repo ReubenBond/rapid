@@ -54,20 +54,13 @@ message NodeId
    int64 low = 2;
 }
 
-// Configuration identifier combining monotonic version with membership hash
-message ConfigurationIdMsg
-{
-   int64 version = 1;
-   int64 hash = 2;
-}
-
 // TODO: JoinMessage and JoinResponse are overloaded because they are being used for phase 1 and 2 of the bootstrap.
 message PreJoinMessage
 {
    Endpoint sender = 1;
    NodeId nodeId = 2;
    repeated int32 ringNumber = 3;
-   ConfigurationIdMsg configurationId = 4;
+   int64 configurationId = 4;
 }
 
 message JoinMessage
@@ -75,7 +68,7 @@ message JoinMessage
    Endpoint sender = 1;
    NodeId nodeId = 2;
    repeated int32 ringNumber = 3;
-   ConfigurationIdMsg configurationId = 4;
+   int64 configurationId = 4;
    Metadata metadata = 5;
 }
 
@@ -83,7 +76,7 @@ message JoinResponse
 {
    Endpoint sender = 1;
    JoinStatusCode statusCode = 2;
-   ConfigurationIdMsg configurationId = 3;
+   int64 configurationId = 3;
    repeated Endpoint endpoints = 4;
    repeated NodeId identifiers = 5;
    repeated Endpoint metadataKeys = 6;
@@ -111,7 +104,7 @@ message AlertMessage
     Endpoint edgeSrc = 1;
     Endpoint edgeDst = 2;
     EdgeStatus edgeStatus = 3;
-    ConfigurationIdMsg configurationId = 4;
+    int64 configurationId = 4;
     repeated int32 ringNumber = 5;
     NodeId nodeId = 6;                      // Required only for join protocol
     Metadata metadata = 7;                // Required only for join protocol
@@ -132,7 +125,7 @@ message Response
 message FastRoundPhase2bMessage
 {
     Endpoint sender = 1;
-    ConfigurationIdMsg configurationId = 2;
+    int64 configurationId = 2;
     repeated Endpoint endpoints = 3;
 }
 
@@ -147,14 +140,14 @@ message Rank
 message Phase1aMessage
 {
     Endpoint sender = 1;
-    ConfigurationIdMsg configurationId = 2;
+    int64 configurationId = 2;
     Rank rank = 3;
 }
 
 message Phase1bMessage
 {
     Endpoint sender = 1;
-    ConfigurationIdMsg configurationId = 2;
+    int64 configurationId = 2;
     Rank rnd = 3;
     Rank vrnd = 4;
     repeated Endpoint vval = 5;
@@ -163,7 +156,7 @@ message Phase1bMessage
 message Phase2aMessage
 {
     Endpoint sender = 1;
-    ConfigurationIdMsg configurationId = 2;
+    int64 configurationId = 2;
     Rank rnd = 3;
     repeated Endpoint vval = 5;
 }
@@ -171,7 +164,7 @@ message Phase2aMessage
 message Phase2bMessage
 {
     Endpoint sender = 1;
-    ConfigurationIdMsg configurationId = 2;
+    int64 configurationId = 2;
     Rank rnd = 3;
     repeated Endpoint endpoints = 4;
 }

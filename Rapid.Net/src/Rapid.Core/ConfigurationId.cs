@@ -68,20 +68,6 @@ public readonly struct ConfigurationId : IEquatable<ConfigurationId>, IComparabl
     }
 
     /// <summary>
-    /// Converts this ConfigurationId to a protobuf message for wire transmission.
-    /// </summary>
-    /// <returns>A ConfigurationIdMsg protobuf message.</returns>
-    public ConfigurationIdMsg ToProto() => new() { Version = Version, Hash = Hash };
-
-    /// <summary>
-    /// Creates a ConfigurationId from a protobuf message.
-    /// </summary>
-    /// <param name="msg">The protobuf message.</param>
-    /// <returns>A ConfigurationId.</returns>
-    public static ConfigurationId FromProto(ConfigurationIdMsg? msg) =>
-        msg is null ? Empty : new ConfigurationId(msg.Version, msg.Hash);
-
-    /// <summary>
     /// Converts the ConfigurationId to a 64-bit integer for wire transmission.
     /// The version is stored in the upper 32 bits and the hash in the lower 32 bits.
     /// </summary>

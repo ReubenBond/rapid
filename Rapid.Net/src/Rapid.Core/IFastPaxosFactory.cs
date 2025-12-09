@@ -21,7 +21,7 @@ internal interface IFastPaxosFactory
     /// <returns>A new FastPaxos instance.</returns>
     FastPaxos Create(
         Endpoint myAddr,
-        ConfigurationId configurationId,
+        long configurationId,
         int membershipSize,
         IBroadcaster broadcaster);
 }
@@ -38,7 +38,7 @@ internal sealed class FastPaxosFactory(
 {
     public FastPaxos Create(
         Endpoint myAddr,
-        ConfigurationId configurationId,
+        long configurationId,
         int membershipSize,
         IBroadcaster broadcaster)
     {

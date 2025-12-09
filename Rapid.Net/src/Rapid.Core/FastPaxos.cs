@@ -15,7 +15,7 @@ internal sealed partial class FastPaxos : IAsyncDisposable
     private readonly ILogger<FastPaxos> _logger;
     private readonly double _jitterRate;
     private readonly Endpoint _myAddr;
-    private readonly ConfigurationId _configurationId;
+    private readonly long _configurationId;
     private readonly long _membershipSize;
     private readonly IBroadcaster _broadcaster;
     private readonly Dictionary<List<Endpoint>, int> _votesPerProposal = new(ListEndpointComparer.Instance);
@@ -35,7 +35,7 @@ internal sealed partial class FastPaxos : IAsyncDisposable
     }
 
     [LoggerMessage(Level = LogLevel.Trace, Message = "Configuration ID mismatch for proposal: current_config:{CurrentConfig}")]
-    private partial void LogConfigurationMismatch(ConfigurationId CurrentConfig);
+    private partial void LogConfigurationMismatch(long CurrentConfig);
 
     [LoggerMessage(Level = LogLevel.Trace, Message = "Decided on a view change: {Proposal}")]
     private partial void LogDecidedViewChange(LoggableEndpoints Proposal);
@@ -47,7 +47,7 @@ internal sealed partial class FastPaxos : IAsyncDisposable
     private partial void LogSchedulingClassicRound(TimeSpan Delay);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "FastPaxos initialized: myAddr={MyAddr}, configId={ConfigId}, membershipSize={MembershipSize}")]
-    private partial void LogFastPaxosInitialized(LoggableEndpoint MyAddr, ConfigurationId ConfigId, long MembershipSize);
+    private partial void LogFastPaxosInitialized(LoggableEndpoint MyAddr, long ConfigId, long MembershipSize);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Propose: broadcasting fast round proposal={Proposal}, recoveryDelay={RecoveryDelay}")]
     private partial void LogPropose(LoggableEndpoints Proposal, TimeSpan RecoveryDelay);
@@ -62,7 +62,7 @@ internal sealed partial class FastPaxos : IAsyncDisposable
     private partial void LogClassicRoundSkipped();
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "HandleFastRoundProposal: received from {Sender}, endpoints={Endpoints}, configId={ConfigId}")]
-    private partial void LogHandleFastRoundProposalReceived(LoggableEndpoint Sender, LoggableEndpoints Endpoints, ConfigurationId ConfigId);
+    private partial void LogHandleFastRoundProposalReceived(LoggableEndpoint Sender, LoggableEndpoints Endpoints, long ConfigId);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "HandleFastRoundProposal: duplicate vote from {Sender}, ignoring")]
     private partial void LogDuplicateFastRoundVote(LoggableEndpoint Sender);
@@ -99,7 +99,7 @@ internal sealed partial class FastPaxos : IAsyncDisposable
 
     public FastPaxos(
             Endpoint myAddr,
-            ConfigurationId configurationId,
+            long configurationId,
             int membershipSize,
             IMessagingClient client,
             IBroadcaster broadcaster,
@@ -153,7 +153,7 @@ internal sealed partial class FastPaxos : IAsyncDisposable
 
         var consensusMessage = new FastRoundPhase2bMessage
         {
-            ConfigurationId = _configurationId.ToProto(),
+            ConfigurationId = _configurationId,
             Sender = _myAddr
         };
         consensusMessage.Endpoints.AddRange(proposal);
@@ -193,10 +193,9 @@ internal sealed partial class FastPaxos : IAsyncDisposable
     /// <param name="proposalMessage">the membership change proposal towards a configuration change.</param>
     private void HandleFastRoundProposal(FastRoundPhase2bMessage proposalMessage)
     {
-        var msgConfigId = ConfigurationId.FromProto(proposalMessage.ConfigurationId);
-        LogHandleFastRoundProposalReceived(new LoggableEndpoint(proposalMessage.Sender), new LoggableEndpoints(proposalMessage.Endpoints), msgConfigId);
+        LogHandleFastRoundProposalReceived(new LoggableEndpoint(proposalMessage.Sender), new LoggableEndpoints(proposalMessage.Endpoints), proposalMessage.ConfigurationId);
 
-        if (msgConfigId != _configurationId)
+        if (proposalMessage.ConfigurationId != _configurationId)
         {
             LogConfigurationMismatch(_configurationId);
             return;
