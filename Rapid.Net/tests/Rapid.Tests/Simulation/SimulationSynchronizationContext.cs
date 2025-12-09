@@ -1,23 +1,4 @@
 namespace Rapid.Tests.Simulation;
-
-/// <summary>
-/// A scheduled item representing a SynchronizationContext callback.
-/// </summary>
-internal sealed class ScheduledSyncContextItem : ScheduledItem
-{
-    private readonly SendOrPostCallback _callback;
-    private readonly object? _state;
-
-    public ScheduledSyncContextItem(SendOrPostCallback callback, object? state)
-    {
-        _callback = callback;
-        _state = state;
-    }
-
-    /// <inheritdoc />
-    protected internal override void Invoke() => _callback(_state);
-}
-
 /// <summary>
 /// A synchronization context that routes all continuations through a <see cref="SimulationTaskQueue"/>.
 /// </summary>
@@ -48,5 +29,10 @@ internal sealed class SimulationSynchronizationContext(SimulationTaskQueue taskQ
         var previous = Current;
         SetSynchronizationContext(this);
         return new SynchronizationContextScope(previous);
+    }
+
+    private sealed class ScheduledSyncContextItem(SendOrPostCallback callback, object? state) : ScheduledItem
+    {
+        protected internal override void Invoke() => callback(state);
     }
 }

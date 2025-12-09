@@ -1,5 +1,4 @@
 using Rapid.Tests.Simulation;
-using static Rapid.Tests.Simulation.SimulationTimer;
 
 namespace Rapid.Tests;
 

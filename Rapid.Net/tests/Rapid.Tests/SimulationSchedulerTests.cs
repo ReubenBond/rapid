@@ -18,7 +18,7 @@ public sealed class SimulationSchedulerTests
         task.Start(scheduler);
 
         Assert.False(executed);
-        Assert.Equal(1, taskQueue.GetReadyCount<ScheduledTaskItem>());
+        Assert.Single(scheduler.Tasks);
     }
 
     [Fact]
@@ -35,7 +35,7 @@ public sealed class SimulationSchedulerTests
 
         Assert.True(result);
         Assert.True(executed);
-        Assert.Equal(0, taskQueue.GetReadyCount<ScheduledTaskItem>());
+        Assert.Empty(scheduler.Tasks);
     }
 
     [Fact]
@@ -55,7 +55,7 @@ public sealed class SimulationSchedulerTests
 
         Assert.Equal(5, executed);
         Assert.Equal(5, count);
-        Assert.Equal(0, taskQueue.GetReadyCount<ScheduledTaskItem>());
+        Assert.Empty(scheduler.Tasks);
     }
 
     [Fact]
@@ -79,7 +79,7 @@ public sealed class SimulationSchedulerTests
 
         Assert.Equal(3, executed);
         Assert.Equal(3, count);
-        Assert.Equal(7, taskQueue.GetReadyCount<ScheduledTaskItem>());
+        Assert.Equal(7, scheduler.Tasks.Count);
     }
 
     [Fact]
@@ -96,7 +96,7 @@ public sealed class SimulationSchedulerTests
 
         taskQueue.Clear();
 
-        Assert.Equal(0, taskQueue.GetReadyCount<ScheduledTaskItem>());
+        Assert.Empty(scheduler.Tasks);
     }
 
     [Fact]
@@ -194,15 +194,15 @@ public sealed class SimulationSchedulerTests
         var taskQueue = new SimulationTaskQueue();
         var scheduler = new SimulationTaskScheduler(taskQueue);
 
-        Assert.Equal(0, taskQueue.GetReadyCount<ScheduledTaskItem>());
+        Assert.Empty(scheduler.Tasks);
 
         var task = new Task(() => { });
         task.Start(scheduler);
 
-        Assert.True(taskQueue.GetReadyCount<ScheduledTaskItem>() > 0);
+        Assert.True(scheduler.Tasks.Count > 0);
 
         taskQueue.RunOnce();
 
-        Assert.Equal(0, taskQueue.GetReadyCount<ScheduledTaskItem>());
+        Assert.Empty(scheduler.Tasks);
     }
 }

@@ -1,7 +1,6 @@
 using System.Globalization;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using static Rapid.Tests.Simulation.SimulationTimer;
 
 namespace Rapid.Tests.Simulation;
 
@@ -154,14 +153,7 @@ internal sealed partial class SimulationTimeProvider : TimeProvider
     /// </summary>
     public IReadOnlyList<TimerInfo> GetPendingTimers()
     {
-        var waitingTimers = _taskQueue.GetWaitingItems<ScheduledTimerItem>();
-        var result = new List<TimerInfo>(waitingTimers.Count);
-
-        foreach (var timerItem in waitingTimers)
-        {
-            result.Add(new TimerInfo(Start + timerItem.DueTime, timerItem.Timer.Period));
-        }
-
+        var result = SimulationTimer.GetPendingTimerInfos(_taskQueue, Start);
         return [.. result.OrderBy(t => t.WakeupTime)];
     }
 
@@ -288,7 +280,26 @@ internal sealed class SimulationTimer(SimulationTaskQueue taskQueue, TimerCallba
         return ValueTask.CompletedTask;
     }
 
-    internal sealed class ScheduledTimerItem(SimulationTimer timer) : ScheduledItem
+    /// <summary>
+    /// Gets information about all pending timers from the task queue.
+    /// </summary>
+    /// <param name="taskQueue">The task queue to query.</param>
+    /// <param name="start">The start time offset to convert due times to absolute times.</param>
+    /// <returns>A list of timer info for all pending timers.</returns>
+    internal static IReadOnlyList<SimulationTimeProvider.TimerInfo> GetPendingTimerInfos(SimulationTaskQueue taskQueue, DateTimeOffset start)
+    {
+        var waitingTimers = taskQueue.GetWaitingItems<ScheduledTimerItem>();
+        var result = new List<SimulationTimeProvider.TimerInfo>(waitingTimers.Count);
+
+        foreach (var timerItem in waitingTimers)
+        {
+            result.Add(new SimulationTimeProvider.TimerInfo(start + timerItem.DueTime, timerItem.Timer.Period));
+        }
+
+        return result;
+    }
+
+    private sealed class ScheduledTimerItem(SimulationTimer timer) : ScheduledItem
     {
         public SimulationTimer Timer => timer;
 

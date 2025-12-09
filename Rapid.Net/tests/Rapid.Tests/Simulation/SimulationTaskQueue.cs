@@ -99,6 +99,11 @@ internal sealed class SimulationTaskQueue
     private long _sequenceNumber;
 
     /// <summary>
+    /// Lock object used to protect all accesses to the queue's internal state.
+    /// </summary>
+    public object Lock { get; } = new object();
+
+    /// <summary>
     /// Gets the scheduled items in the queue, ordered by due time then sequence number.
     /// This is a read-only view that cannot be modified.
     /// </summary>
@@ -128,7 +133,16 @@ internal sealed class SimulationTaskQueue
     /// <summary>
     /// Gets whether there are any items in the queue.
     /// </summary>
-    public bool HasItems => _queue.Count > 0;
+    public bool HasItems
+    {
+        get
+        {
+            lock (Lock)
+            {
+                return _queue.Count > 0;
+            }
+        }
+    }
 
     /// <summary>
     /// Gets the due time of the next waiting (not yet ready) task, or null if no waiting tasks exist.
@@ -137,12 +151,15 @@ internal sealed class SimulationTaskQueue
     {
         get
         {
-            foreach (var item in _queue)
+            lock (Lock)
             {
-                if (item.DueTime > CurrentTime)
-                    return item.DueTime;
+                foreach (var item in _queue)
+                {
+                    if (item.DueTime > CurrentTime)
+                        return item.DueTime;
+                }
+                return null;
             }
-            return null;
         }
     }
     /// <summary>
@@ -153,7 +170,10 @@ internal sealed class SimulationTaskQueue
     public void Enqueue(ScheduledItem item)
     {
         ArgumentNullException.ThrowIfNull(item);
-        ScheduleCore(item, CurrentTime);
+        lock (Lock)
+        {
+            ScheduleCore(item, CurrentTime);
+        }
     }
 
     /// <summary>
@@ -166,7 +186,10 @@ internal sealed class SimulationTaskQueue
     {
         ArgumentNullException.ThrowIfNull(action);
         ArgumentOutOfRangeException.ThrowIfLessThan(delay, TimeSpan.Zero);
-        ScheduleCore(new ScheduledActionItem(action), CurrentTime + delay);
+        lock (Lock)
+        {
+            ScheduleCore(new ScheduledActionItem(action), CurrentTime + delay);
+        }
     }
 
     /// <summary>
@@ -178,7 +201,10 @@ internal sealed class SimulationTaskQueue
     {
         ArgumentNullException.ThrowIfNull(item);
         ArgumentOutOfRangeException.ThrowIfLessThan(delay, TimeSpan.Zero);
-        ScheduleCore(item, CurrentTime + delay);
+        lock (Lock)
+        {
+            ScheduleCore(item, CurrentTime + delay);
+        }
         return item;
     }
 
@@ -201,7 +227,13 @@ internal sealed class SimulationTaskQueue
     /// Removes an item from the queue. Called by ScheduledItem.Dispose().
     /// </summary>
     /// <param name="item">The item to remove.</param>
-    internal void RemoveItem(ScheduledItem item) => _queue.Remove(item);
+    internal void RemoveItem(ScheduledItem item)
+    {
+        lock (Lock)
+        {
+            _queue.Remove(item);
+        }
+    }
 
     /// <summary>
     /// Tries to dequeue and execute the next ready item.
@@ -209,14 +241,18 @@ internal sealed class SimulationTaskQueue
     /// <returns>True if an item was dequeued and executed, false if no items are ready.</returns>
     public bool RunOnce()
     {
-        if (_queue.Count == 0)
-            return false;
+        ScheduledItem? item;
+        lock (Lock)
+        {
+            if (_queue.Count == 0)
+                return false;
 
-        var item = _queue.Min!;
-        if (item.DueTime > CurrentTime)
-            return false; // No ready items
+            item = _queue.Min!;
+            if (item.DueTime > CurrentTime)
+                return false; // No ready items
 
-        _queue.Remove(item);
+            _queue.Remove(item);
+        }
 
         using (SynchronizationContext.Install())
         {
@@ -248,13 +284,22 @@ internal sealed class SimulationTaskQueue
     public void AdvanceTime(TimeSpan delta)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(delta, TimeSpan.Zero);
-        CurrentTime += delta;
+        lock (Lock)
+        {
+            CurrentTime += delta;
+        }
     }
 
     /// <summary>
     /// Clears all items from the queue.
     /// </summary>
-    public void Clear() => _queue.Clear();
+    public void Clear()
+    {
+        lock (Lock)
+        {
+            _queue.Clear();
+        }
+    }
 
     /// <summary>
     /// Comparer for ordering scheduled items by due time, then by sequence number.
