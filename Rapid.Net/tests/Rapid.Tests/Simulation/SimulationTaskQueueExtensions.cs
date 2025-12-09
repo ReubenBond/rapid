@@ -17,7 +17,6 @@ internal static class SimulationTaskQueueExtensions
         /// <returns>An enumerable of extracted results.</returns>
         public IReadOnlyList<TResult> GetItemsOfType<TItem, TResult>(Func<TItem, TResult?> extractor)
             where TItem : ScheduledItem
-            where TResult : class
         {
             var results = new List<TResult>();
 

@@ -148,14 +148,17 @@ internal sealed partial class SimulationTimeProvider : TimeProvider
 
     /// <summary>
     /// Gets information about all pending timers.
-    /// Note: This returns information based on the waiting queue, which may not
-    /// include timers that are already in the ready queue.
     /// </summary>
-    public IReadOnlyList<TimerInfo> GetPendingTimers()
+    internal IReadOnlyList<(DateTimeOffset DueTime, TimeSpan Period)> GetPendingTimers()
     {
-        var result = SimulationTimer.GetPendingTimerInfos(_taskQueue, Start);
-        return [.. result.OrderBy(t => t.WakeupTime)];
+        var result = SimulationTimer.GetTimers(_taskQueue, Start);
+        return [.. result.OrderBy(t => t.DueTime)];
     }
+
+    /// <summary>
+    /// Gets the count of pending timers.
+    /// </summary>
+    internal int PendingTimerCount => SimulationTimer.GetPendingTimerCount(_taskQueue);
 
     /// <summary>
     /// Returns a string representation this provider's idea of current time.
@@ -173,11 +176,6 @@ internal sealed partial class SimulationTimeProvider : TimeProvider
         _ = timer.Change(dueTime, period);
         return timer;
     }
-
-    /// <summary>
-    /// Information about a pending timer.
-    /// </summary>
-    internal sealed record TimerInfo(DateTimeOffset WakeupTime, TimeSpan Period);
 }
 
 /// <summary>
@@ -286,18 +284,15 @@ internal sealed class SimulationTimer(SimulationTaskQueue taskQueue, TimerCallba
     /// <param name="taskQueue">The task queue to query.</param>
     /// <param name="start">The start time offset to convert due times to absolute times.</param>
     /// <returns>A list of timer info for all pending timers.</returns>
-    internal static IReadOnlyList<SimulationTimeProvider.TimerInfo> GetPendingTimerInfos(SimulationTaskQueue taskQueue, DateTimeOffset start)
-    {
-        var waitingTimers = taskQueue.GetWaitingItems<ScheduledTimerItem>();
-        var result = new List<SimulationTimeProvider.TimerInfo>(waitingTimers.Count);
+    internal static IReadOnlyList<(DateTimeOffset DueTime, TimeSpan Period)> GetTimers(SimulationTaskQueue taskQueue, DateTimeOffset start)
+        => taskQueue.GetItemsOfType<ScheduledTimerItem, (DateTimeOffset, TimeSpan)>(timer => (start + timer.DueTime, timer.Timer.Period));
 
-        foreach (var timerItem in waitingTimers)
-        {
-            result.Add(new SimulationTimeProvider.TimerInfo(start + timerItem.DueTime, timerItem.Timer.Period));
-        }
-
-        return result;
-    }
+    /// <summary>
+    /// Gets the count of pending timers from the task queue.
+    /// </summary>
+    /// <param name="taskQueue">The task queue to query.</param>
+    /// <returns>The count of pending timers.</returns>
+    internal static int GetPendingTimerCount(SimulationTaskQueue taskQueue) => taskQueue.GetWaitingCount<ScheduledTimerItem>();
 
     private sealed class ScheduledTimerItem(SimulationTimer timer) : ScheduledItem
     {
