@@ -132,46 +132,21 @@ internal sealed class InMemoryMessagingClient : IMessagingClient
                 // Handle the request synchronously within the simulation context
                 // The task returned by HandleRequestAsync will be driven by the simulation
                 var responseTask = targetNode.HandleRequestAsync(request, cancellationToken);
-                
-                // If already completed, set result immediately
-                if (responseTask.IsCompletedSuccessfully)
-                {
-                    responseTcs.TrySetResult(responseTask.Result);
-                    return;
-                }
-                
-                if (responseTask.IsFaulted)
-                {
-                    responseTcs.TrySetException(responseTask.Exception!.InnerExceptions);
-                    return;
-                }
-                
-                if (responseTask.IsCanceled)
-                {
-                    responseTcs.TrySetCanceled(cancellationToken);
-                    return;
-                }
 
-                // For pending tasks, attach a continuation that completes the TCS
-                responseTask.ContinueWith(t =>
+                // If already completed, set result immediately.
+                if (responseTask.IsCompleted)
                 {
-                    if (t.IsCompletedSuccessfully)
-                    {
-                        _logger.LogTrace("Received response for {MessageType} from {Remote} to {Local}",
-                            request.ContentCase, remoteAddr, localAddr);
-                        responseTcs.TrySetResult(t.Result);
-                    }
-                    else if (t.IsFaulted)
-                    {
-                        _logger.LogDebug("Message {MessageType} from {Local} to {Remote} failed: {Error}",
-                            request.ContentCase, localAddr, remoteAddr, t.Exception?.InnerException?.Message);
-                        responseTcs.TrySetException(t.Exception!.InnerExceptions);
-                    }
-                    else if (t.IsCanceled)
-                    {
-                        responseTcs.TrySetCanceled(cancellationToken);
-                    }
-                }, TaskScheduler.Default);
+                    responseTcs.TrySetFromTask(responseTask);
+                }
+                else
+                {
+                    responseTask.ContinueWith(
+                        (task, state) => responseTcs.TrySetFromTask(task),
+                        state: null,
+                        CancellationToken.None,
+                        TaskContinuationOptions.ExecuteSynchronously,
+                        targetContext.TaskScheduler);
+                }
             }
             catch (Exception ex)
             {
@@ -195,7 +170,12 @@ internal sealed class InMemoryMessagingClient : IMessagingClient
             MessageTimeout + delay);
 
         // Cancel timeout when response is received
-        responseTcs.Task.ContinueWith(_ => timeoutItem.Dispose(), TaskScheduler.Default);
+        responseTcs.Task.ContinueWith(
+            (t, _) => timeoutItem.Dispose(),
+            state: null,
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            targetContext.TaskScheduler);
 
         // Schedule the delivery (with optional delay)
         if (delay > TimeSpan.Zero)
