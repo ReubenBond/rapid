@@ -5,14 +5,14 @@ namespace Rapid.Tests;
 /// <summary>
 /// Tests for the simulation test harness.
 /// </summary>
-public sealed class SimulationTestHarnessTests(ITestOutputHelper output) : IAsyncLifetime
+public sealed class SimulationTestHarnessTests : IAsyncLifetime
 {
     private SimulationHarness _harness = null!;
 
     public ValueTask InitializeAsync()
     {
         // Use a fixed seed for reproducibility
-        _harness = new SimulationHarness(seed: 12345, output);
+        _harness = new SimulationHarness(seed: 12345);
         return ValueTask.CompletedTask;
     }
 

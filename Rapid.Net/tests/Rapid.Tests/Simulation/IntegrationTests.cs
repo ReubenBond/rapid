@@ -8,22 +8,20 @@ namespace Rapid.Tests.SimulationTests;
 /// These tests verify end-to-end behavior and recovery scenarios.
 /// </summary>
 [SuppressMessage("Naming", "CA1707:Identifiers should not contain underscores", Justification = "Test naming convention")]
-public sealed class IntegrationTests(ITestOutputHelper output) : IAsyncLifetime
+public sealed class IntegrationTests : IAsyncLifetime
 {
     private SimulationHarness _harness = null!;
     private const int TestSeed = 90123;
 
     public ValueTask InitializeAsync()
     {
-        output.WriteLine($"[IntegrationTests] Initializing with seed {TestSeed}");
         // Harness always uses fake time for deterministic and fast test execution
-        _harness = new SimulationHarness(seed: TestSeed, output);
+        _harness = new SimulationHarness(seed: TestSeed);
         return ValueTask.CompletedTask;
     }
 
     public async ValueTask DisposeAsync()
     {
-        output.WriteLine("[IntegrationTests] Disposing harness");
         await _harness.DisposeAsync();
     }
 

@@ -8,7 +8,7 @@ namespace Rapid.Tests.SimulationTests;
 /// Verifies safety and liveness properties hold during various scenarios.
 /// </summary>
 [SuppressMessage("Naming", "CA1707:Identifiers should not contain underscores", Justification = "Test naming convention")]
-public sealed class InvariantVerificationTests(ITestOutputHelper output) : IAsyncLifetime
+public sealed class InvariantVerificationTests : IAsyncLifetime
 {
     private SimulationHarness _harness = null!;
     private InvariantChecker _checker = null!;
@@ -16,15 +16,13 @@ public sealed class InvariantVerificationTests(ITestOutputHelper output) : IAsyn
 
     public ValueTask InitializeAsync()
     {
-        output.WriteLine($"[InvariantVerificationTests] Initializing with seed {TestSeed}");
-        _harness = new SimulationHarness(seed: TestSeed, output);
+        _harness = new SimulationHarness(seed: TestSeed);
         _checker = new InvariantChecker(_harness);
         return ValueTask.CompletedTask;
     }
 
     public async ValueTask DisposeAsync()
     {
-        output.WriteLine("[InvariantVerificationTests] Disposing harness");
         await _harness.DisposeAsync();
     }
 

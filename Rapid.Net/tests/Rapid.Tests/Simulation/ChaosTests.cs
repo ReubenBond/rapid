@@ -8,7 +8,7 @@ namespace Rapid.Tests.SimulationTests;
 /// Verifies that the cluster maintains safety properties under random faults.
 /// </summary>
 [SuppressMessage("Naming", "CA1707:Identifiers should not contain underscores", Justification = "Test naming convention")]
-public sealed class ChaosTests(ITestOutputHelper output) : IAsyncLifetime
+public sealed class ChaosTests : IAsyncLifetime
 {
     private SimulationHarness _harness = null!;
     private ChaosInjector _chaos = null!;
@@ -17,8 +17,7 @@ public sealed class ChaosTests(ITestOutputHelper output) : IAsyncLifetime
 
     public ValueTask InitializeAsync()
     {
-        output.WriteLine($"[ChaosTests] Initializing with seed {TestSeed}");
-        _harness = new SimulationHarness(seed: TestSeed, output);
+        _harness = new SimulationHarness(seed: TestSeed);
         _chaos = new ChaosInjector(_harness);
         _checker = new InvariantChecker(_harness);
         return ValueTask.CompletedTask;
@@ -26,7 +25,6 @@ public sealed class ChaosTests(ITestOutputHelper output) : IAsyncLifetime
 
     public async ValueTask DisposeAsync()
     {
-        output.WriteLine("[ChaosTests] Disposing harness");
         await _harness.DisposeAsync();
     }
 
@@ -149,18 +147,19 @@ public sealed class ChaosTests(ITestOutputHelper output) : IAsyncLifetime
         // Output diagnostic information if invariants failed
         if (!result)
         {
-            output.WriteLine($"Invariant check failed! Violations:");
+            var output = TestContext.Current.TestOutputHelper;
+            output?.WriteLine($"Invariant check failed! Violations:");
             foreach (var violation in _checker.Violations)
             {
-                output.WriteLine($"  [{violation.Type}] {violation.Message} (LogicalTime={violation.LogicalTime})");
+                output?.WriteLine($"  [{violation.Type}] {violation.Message} (LogicalTime={violation.LogicalTime})");
             }
             
             // Output node membership info
-            output.WriteLine($"Node membership states:");
+            output?.WriteLine($"Node membership states:");
             foreach (var node in _harness.Nodes)
             {
                 var view = node.CurrentView;
-                output.WriteLine($"  {RapidUtils.Loggable(node.Address)}: IsInitialized={node.IsInitialized}, MembershipSize={node.MembershipSize}, ConfigId={view?.ConfigurationId}");
+                output?.WriteLine($"  {RapidUtils.Loggable(node.Address)}: IsInitialized={node.IsInitialized}, MembershipSize={node.MembershipSize}, ConfigId={view?.ConfigurationId}");
             }
         }
         

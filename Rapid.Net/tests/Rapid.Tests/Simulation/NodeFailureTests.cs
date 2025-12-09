@@ -8,21 +8,19 @@ namespace Rapid.Tests.SimulationTests;
 /// Covers single node failures, multiple node failures, seed node failures, and failures during operations.
 /// </summary>
 [SuppressMessage("Naming", "CA1707:Identifiers should not contain underscores", Justification = "Test naming convention")]
-public sealed class NodeFailureTests(ITestOutputHelper output) : IAsyncLifetime
+public sealed class NodeFailureTests : IAsyncLifetime
 {
     private SimulationHarness _harness = null!;
     private const int TestSeed = 23456;
 
     public ValueTask InitializeAsync()
     {
-        output.WriteLine($"[NodeFailureTests] Initializing with seed {TestSeed}");
-        _harness = new SimulationHarness(seed: TestSeed, output);
+        _harness = new SimulationHarness(seed: TestSeed);
         return ValueTask.CompletedTask;
     }
 
     public async ValueTask DisposeAsync()
     {
-        output.WriteLine("[NodeFailureTests] Disposing harness");
         await _harness.DisposeAsync();
     }
 

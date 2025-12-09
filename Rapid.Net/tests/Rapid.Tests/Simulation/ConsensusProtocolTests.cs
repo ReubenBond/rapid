@@ -8,21 +8,19 @@ namespace Rapid.Tests.SimulationTests;
 /// Covers Fast Paxos basic operations, failure cases, and configuration changes.
 /// </summary>
 [SuppressMessage("Naming", "CA1707:Identifiers should not contain underscores", Justification = "Test naming convention")]
-public sealed class ConsensusProtocolTests(ITestOutputHelper output) : IAsyncLifetime
+public sealed class ConsensusProtocolTests : IAsyncLifetime
 {
     private SimulationHarness _harness = null!;
     private const int TestSeed = 55555;
 
     public ValueTask InitializeAsync()
     {
-        output.WriteLine($"[ConsensusProtocolTests] Initializing with seed {TestSeed}");
-        _harness = new SimulationHarness(seed: TestSeed, output);
+        _harness = new SimulationHarness(seed: TestSeed);
         return ValueTask.CompletedTask;
     }
 
     public async ValueTask DisposeAsync()
     {
-        output.WriteLine("[ConsensusProtocolTests] Disposing harness");
         await _harness.DisposeAsync();
     }
 

@@ -24,6 +24,7 @@ internal enum DeliveryStatus
 internal sealed class SimulationNetwork
 {
     private readonly SimulationHarness _harness;
+    private readonly SimulationRandom _random;
     private readonly ConcurrentDictionary<string, HashSet<string>> _partitions = new();
     private readonly Lock _partitionLock = new();
     private ILogger<SimulationNetwork> _logger;
@@ -55,9 +56,10 @@ internal sealed class SimulationNetwork
     /// </summary>
     public TimeSpan DefaultMessageTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
-    internal SimulationNetwork(SimulationHarness harness)
+    internal SimulationNetwork(SimulationHarness harness, SimulationRandom random)
     {
         _harness = harness;
+        _random = random;
         _logger = NullLogger<SimulationNetwork>.Instance;
     }
 
@@ -174,7 +176,7 @@ internal sealed class SimulationNetwork
         }
 
         // Check for random message drop (transient)
-        if (MessageDropRate > 0 && _harness.Random.Chance(MessageDropRate))
+        if (MessageDropRate > 0 && _random.Chance(MessageDropRate))
         {
             _logger.LogTrace("Message from {Source} to {Target} dropped (random)", sourceAddress, targetAddress);
             return DeliveryStatus.Dropped;
@@ -202,7 +204,7 @@ internal sealed class SimulationNetwork
             return TimeSpan.Zero;
         }
 
-        var jitter = _harness.Random.NextTimeSpan(MaxJitter);
+        var jitter = _random.NextTimeSpan(MaxJitter);
         return BaseMessageDelay + jitter;
     }
 }

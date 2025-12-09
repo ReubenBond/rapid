@@ -5,14 +5,14 @@ namespace Rapid.Tests;
 /// <summary>
 /// Tests for the invariant checker.
 /// </summary>
-public sealed class InvariantCheckerTests(ITestOutputHelper output) : IAsyncLifetime
+public sealed class InvariantCheckerTests : IAsyncLifetime
 {
     private SimulationHarness _harness = null!;
     private InvariantChecker _checker = null!;
 
     public ValueTask InitializeAsync()
     {
-        _harness = new SimulationHarness(seed: 11111, output);
+        _harness = new SimulationHarness(seed: 11111);
         _checker = new InvariantChecker(_harness);
         return ValueTask.CompletedTask;
     }

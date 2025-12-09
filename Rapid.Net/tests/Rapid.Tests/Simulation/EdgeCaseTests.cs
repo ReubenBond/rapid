@@ -7,21 +7,19 @@ namespace Rapid.Tests.SimulationTests;
 /// Tests for edge cases and boundary conditions using the simulation harness.
 /// </summary>
 [SuppressMessage("Naming", "CA1707:Identifiers should not contain underscores", Justification = "Test naming convention")]
-public sealed class EdgeCaseTests(ITestOutputHelper output) : IAsyncLifetime
+public sealed class EdgeCaseTests : IAsyncLifetime
 {
     private SimulationHarness _harness = null!;
     private const int TestSeed = 67890;
 
     public ValueTask InitializeAsync()
     {
-        output.WriteLine($"[EdgeCaseTests] Initializing with seed {TestSeed}");
-        _harness = new SimulationHarness(seed: TestSeed, output);
+        _harness = new SimulationHarness(seed: TestSeed);
         return ValueTask.CompletedTask;
     }
 
     public async ValueTask DisposeAsync()
     {
-        output.WriteLine("[EdgeCaseTests] Disposing harness");
         await _harness.DisposeAsync();
     }
 

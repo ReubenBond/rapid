@@ -8,21 +8,19 @@ namespace Rapid.Tests.SimulationTests;
 /// Covers single node, two-node, and multi-node cluster formation.
 /// </summary>
 [SuppressMessage("Naming", "CA1707:Identifiers should not contain underscores", Justification = "Test naming convention")]
-public sealed class ClusterBasicTests(ITestOutputHelper output) : IAsyncLifetime
+public sealed class ClusterBasicTests : IAsyncLifetime
 {
     private SimulationHarness _harness = null!;
     private const int TestSeed = 12345;
 
     public ValueTask InitializeAsync()
     {
-        output.WriteLine($"[ClusterBasicTests] Initializing with seed {TestSeed}");
-        _harness = new SimulationHarness(seed: TestSeed, output);
+        _harness = new SimulationHarness(seed: TestSeed);
         return ValueTask.CompletedTask;
     }
 
     public async ValueTask DisposeAsync()
     {
-        output.WriteLine("[ClusterBasicTests] Disposing harness");
         await _harness.DisposeAsync();
     }
 
@@ -31,10 +29,8 @@ public sealed class ClusterBasicTests(ITestOutputHelper output) : IAsyncLifetime
     [Fact]
     public void SingleNodeClusterInitializes()
     {
-        output.WriteLine("Creating seed node...");
         var seedNode = _harness.CreateSeedNode();
 
-        output.WriteLine($"Seed node initialized: {seedNode.IsInitialized}, membership size: {seedNode.MembershipSize}");
         Assert.NotNull(seedNode);
         Assert.True(seedNode.IsInitialized);
         Assert.Equal(1, seedNode.MembershipSize);

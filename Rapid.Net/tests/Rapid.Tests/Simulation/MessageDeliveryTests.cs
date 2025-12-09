@@ -8,21 +8,19 @@ namespace Rapid.Tests.SimulationTests;
 /// Covers message delays, message loss, and message ordering.
 /// </summary>
 [SuppressMessage("Naming", "CA1707:Identifiers should not contain underscores", Justification = "Test naming convention")]
-public sealed class MessageDeliveryTests(ITestOutputHelper output) : IAsyncLifetime
+public sealed class MessageDeliveryTests : IAsyncLifetime
 {
     private SimulationHarness _harness = null!;
     private const int TestSeed = 45678;
 
     public ValueTask InitializeAsync()
     {
-        output.WriteLine($"[MessageDeliveryTests] Initializing with seed {TestSeed}");
-        _harness = new SimulationHarness(seed: TestSeed, output);
+        _harness = new SimulationHarness(seed: TestSeed);
         return ValueTask.CompletedTask;
     }
 
     public async ValueTask DisposeAsync()
     {
-        output.WriteLine("[MessageDeliveryTests] Disposing harness");
         await _harness.DisposeAsync();
     }
 

@@ -8,21 +8,19 @@ namespace Rapid.Tests.SimulationTests;
 /// Covers simple partitions, isolation scenarios, split-brain prevention, and partition/heal sequences.
 /// </summary>
 [SuppressMessage("Naming", "CA1707:Identifiers should not contain underscores", Justification = "Test naming convention")]
-public sealed class NetworkPartitionTests(ITestOutputHelper output) : IAsyncLifetime
+public sealed class NetworkPartitionTests : IAsyncLifetime
 {
     private SimulationHarness _harness = null!;
     private const int TestSeed = 34567;
 
     public ValueTask InitializeAsync()
     {
-        output.WriteLine($"[NetworkPartitionTests] Initializing with seed {TestSeed}");
-        _harness = new SimulationHarness(seed: TestSeed, output);
+        _harness = new SimulationHarness(seed: TestSeed);
         return ValueTask.CompletedTask;
     }
 
     public async ValueTask DisposeAsync()
     {
-        output.WriteLine("[NetworkPartitionTests] Disposing harness");
         await _harness.DisposeAsync();
     }
 
@@ -186,7 +184,7 @@ public sealed class NetworkPartitionTests(ITestOutputHelper output) : IAsyncLife
     [Fact]
     public async Task InvariantCheckerDetectsSplitBrainAttempt()
     {
-        await using var simulationHarness = new SimulationHarness(seed: TestSeed, output);
+        await using var simulationHarness = new SimulationHarness(seed: TestSeed);
         var checker = new InvariantChecker(simulationHarness);
 
         var seedNode = simulationHarness.CreateSeedNode();

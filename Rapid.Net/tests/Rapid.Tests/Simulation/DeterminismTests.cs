@@ -8,21 +8,19 @@ namespace Rapid.Tests.SimulationTests;
 /// Ensures that simulation runs are reproducible with the same seed.
 /// </summary>
 [SuppressMessage("Naming", "CA1707:Identifiers should not contain underscores", Justification = "Test naming convention")]
-public sealed class DeterminismTests(ITestOutputHelper output) : IAsyncLifetime
+public sealed class DeterminismTests : IAsyncLifetime
 {
     private SimulationHarness _harness = null!;
     private const int TestSeed = 89012;
 
     public ValueTask InitializeAsync()
     {
-        output.WriteLine($"[DeterminismTests] Initializing with seed {TestSeed}");
-        _harness = new SimulationHarness(seed: TestSeed, output);
+        _harness = new SimulationHarness(seed: TestSeed);
         return ValueTask.CompletedTask;
     }
 
     public async ValueTask DisposeAsync()
     {
-        output.WriteLine("[DeterminismTests] Disposing harness");
         await _harness.DisposeAsync();
     }
 
@@ -31,8 +29,8 @@ public sealed class DeterminismTests(ITestOutputHelper output) : IAsyncLifetime
     [Fact]
     public async Task SameSeedProducesSameRandomSequence()
     {
-        await using var harness1 = new SimulationHarness(seed: 11111, output);
-        await using var harness2 = new SimulationHarness(seed: 11111, output);
+        await using var harness1 = new SimulationHarness(seed: 11111);
+        await using var harness2 = new SimulationHarness(seed: 11111);
 
 #pragma warning disable CA5394 // Do not use insecure randomness
         var seq1 = Enumerable.Range(0, 100).Select(_ => harness1.Random.Next()).ToList();
@@ -47,8 +45,8 @@ public sealed class DeterminismTests(ITestOutputHelper output) : IAsyncLifetime
     [Fact]
     public async Task DifferentSeedsProduceDifferentSequences()
     {
-        await using var harness1 = new SimulationHarness(seed: 11111, output);
-        await using var harness2 = new SimulationHarness(seed: 22222, output);
+        await using var harness1 = new SimulationHarness(seed: 11111);
+        await using var harness2 = new SimulationHarness(seed: 22222);
 
 #pragma warning disable CA5394 // Do not use insecure randomness
         var seq1 = Enumerable.Range(0, 100).Select(_ => harness1.Random.Next()).ToList();

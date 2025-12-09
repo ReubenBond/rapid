@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Rapid.Tests.Simulation;
 
@@ -24,16 +23,17 @@ internal sealed class SimulationHarness : IAsyncDisposable
     private readonly Lock _eventLogLock = new();
     private readonly Lock _randomLock = new();
     private readonly ILogger<SimulationHarness>? _logger;
+    private readonly SimulationLoggerFactory _simulationLoggerFactory;
     private bool _disposed;
 
     /// <summary>
-    /// Creates a new simulation harness with the specified seed and test output helper.
-    /// The logger factory will be created automatically from the test output helper.
+    /// Creates a new simulation harness with the specified seed.
+    /// Logs are written to a unique file per simulation and attached to the test context.
     /// </summary>
     /// <param name="seed">The seed for deterministic random number generation.</param>
-    /// <param name="context">The xUnit test context.</param>
-    public SimulationHarness(int seed, ITestContext context)
+    public SimulationHarness(int seed)
     {
+        var context = TestContext.Current;
         TeardownCancellationToken = context.CancellationToken;
         Seed = seed;
 
@@ -41,22 +41,16 @@ internal sealed class SimulationHarness : IAsyncDisposable
         _scheduler = new SimulationTaskQueue();
         _taskScheduler = new SimulationTaskScheduler(_scheduler);
         _timeProvider = new SimulationTimeProvider(_scheduler, DateTimeOffset.UtcNow);
-        Network = new SimulationNetwork(this);
+        Network = new SimulationNetwork(this, Random);
 
-        var loggerFactory = context.TestOutputHelper switch
-        {
-            { } output => Microsoft.Extensions.Logging.LoggerFactory.Create(builder => builder
-                .AddXUnit(output, options =>
-                {
-                    options.TimeProvider = _timeProvider;
-                })
-                .SetMinimumLevel(LogLevel.Debug)),
-            null => NullLoggerFactory.Instance
-        };
-        LoggerFactory = loggerFactory;
-        _logger = loggerFactory.CreateLogger<SimulationHarness>();
-        _timeProvider.SetLogger(loggerFactory.CreateLogger<SimulationTimeProvider>());
-        Network.SetLogger(loggerFactory.CreateLogger<SimulationNetwork>());
+        // Create file-based logger factory for this simulation
+        var testName = context.Test?.TestDisplayName;
+        _simulationLoggerFactory = new SimulationLoggerFactory(testName, seed, _timeProvider);
+
+        LoggerFactory = _simulationLoggerFactory.Factory;
+        _logger = _simulationLoggerFactory.CreateLogger<SimulationHarness>();
+        _timeProvider.SetLogger(_simulationLoggerFactory.CreateLogger<SimulationTimeProvider>());
+        Network.SetLogger(_simulationLoggerFactory.CreateLogger<SimulationNetwork>());
 
         LogEvent(SimulationEventType.HarnessCreated, $"Seed: {seed}");
     }
@@ -463,11 +457,12 @@ internal sealed class SimulationHarness : IAsyncDisposable
                 return true;
             }
 
+            var nextScheduledDateTimeOffset = TimeProvider.GetUtcNow() + nextScheduledTime.Value;
             if (nextScheduledTime.Value > maxEndTime)
             {
                 LogEvent(SimulationEventType.MaxStepsReached,
                     $"Simulation appears stuck: exceeded max simulated time ({maxSimulatedTime ?? MaxSimulatedTimeAdvance}). " +
-                    $"Start: {startTime:O}, Current: {TimeProvider.GetUtcNow():O}, Next scheduled: {nextScheduledTime.Value:O}");
+                    $"Start: {startTime:O}, Current: {TimeProvider.GetUtcNow():O}, Next scheduled: {nextScheduledDateTimeOffset:O}");
                 return false;
             }
 
@@ -662,7 +657,9 @@ internal sealed class SimulationHarness : IAsyncDisposable
         _nodes.Clear();
         _nodeRegistry.Clear();
 
-        LoggerFactory.Dispose();
+        // Dispose the logger factory and attach log file to test context
+        _simulationLoggerFactory.Dispose();
+        _simulationLoggerFactory.AttachToTestContext(TestContext.Current);
 
         await Task.CompletedTask.ConfigureAwait(false);
     }
