@@ -18,7 +18,7 @@ public sealed class SimulationSchedulerTests
         task.Start(scheduler);
 
         Assert.False(executed);
-        Assert.Equal(1, taskQueue.ScheduledTaskCount);
+        Assert.Equal(1, taskQueue.GetReadyCount<ScheduledTaskItem>());
     }
 
     [Fact]

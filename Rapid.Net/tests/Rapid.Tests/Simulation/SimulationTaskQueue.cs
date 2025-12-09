@@ -6,28 +6,34 @@ namespace Rapid.Tests.Simulation;
 /// </summary>
 internal abstract class ScheduledItem : IDisposable, IComparable<ScheduledItem>
 {
-    private readonly SimulationTaskQueue _queue;
+    private SimulationTaskQueue? _queue;
     private bool _disposed;
-
-    protected ScheduledItem(
-        TimeSpan dueTime,
-        long sequenceNumber,
-        SimulationTaskQueue queue)
-    {
-        DueTime = dueTime;
-        SequenceNumber = sequenceNumber;
-        _queue = queue;
-    }
 
     /// <summary>
     /// The time offset from start when this item is due.
+    /// Set internally by <see cref="SimulationTaskQueue"/> when the item is scheduled.
     /// </summary>
-    public TimeSpan DueTime { get; }
+    public TimeSpan DueTime { get; private set; }
 
     /// <summary>
     /// The sequence number for ordering items with the same due time.
+    /// Set internally by <see cref="SimulationTaskQueue"/> when the item is scheduled.
     /// </summary>
-    public long SequenceNumber { get; }
+    public long SequenceNumber { get; private set; }
+
+    /// <summary>
+    /// Called by <see cref="SimulationTaskQueue"/> when the item is added to the queue.
+    /// Sets the queue reference, due time, and sequence number.
+    /// </summary>
+    /// <param name="queue">The queue this item belongs to.</param>
+    /// <param name="dueTime">The time when this item is due.</param>
+    /// <param name="sequenceNumber">The sequence number for ordering.</param>
+    internal void OnScheduled(SimulationTaskQueue queue, TimeSpan dueTime, long sequenceNumber)
+    {
+        _queue = queue;
+        DueTime = dueTime;
+        SequenceNumber = sequenceNumber;
+    }
 
     /// <summary>
     /// Executes the scheduled item's action.
@@ -43,7 +49,7 @@ internal abstract class ScheduledItem : IDisposable, IComparable<ScheduledItem>
             return;
 
         _disposed = true;
-        _queue.RemoveItem(this);
+        _queue?.RemoveItem(this);
     }
 
     /// <summary>
@@ -132,59 +138,58 @@ internal sealed class SimulationTaskQueue
     }
 
     /// <summary>
-    /// Gets the number of timers waiting in the queue (not yet due).
+    /// Gets the number of waiting items of a specific type in the queue (not yet due).
     /// </summary>
-    public int WaitingTimerCount
+    /// <typeparam name="T">The type of scheduled item to count.</typeparam>
+    /// <returns>The count of waiting items of the specified type.</returns>
+    public int GetWaitingCount<T>() where T : ScheduledItem
     {
-        get
+        lock (_lock)
         {
-            lock (_lock)
+            var count = 0;
+            foreach (var item in _queue)
             {
-                var count = 0;
-                foreach (var item in _queue)
+                if (item.DueTime > CurrentTime && item is T)
                 {
-                    if (item.DueTime > CurrentTime && item is ScheduledTimerItem)
-                    {
-                        count++;
-                    }
+                    count++;
                 }
-                return count;
             }
+            return count;
         }
     }
 
     /// <summary>
     /// Enqueues a scheduled item to be executed immediately (at current time).
+    /// The item's DueTime, SequenceNumber, and queue reference are set by this method.
     /// </summary>
-    /// <param name="itemFactory">A factory that creates the scheduled item given the due time and sequence number.</param>
-    public void Enqueue(Func<TimeSpan, long, SimulationTaskQueue, ScheduledItem> itemFactory)
+    /// <param name="item">The scheduled item to enqueue.</param>
+    public void Enqueue(ScheduledItem item)
     {
-        ArgumentNullException.ThrowIfNull(itemFactory);
+        ArgumentNullException.ThrowIfNull(item);
 
         lock (_lock)
         {
-            var seq = _sequenceNumber++;
-            var item = itemFactory(CurrentTime, seq, this);
+            item.OnScheduled(this, CurrentTime, _sequenceNumber++);
             _queue.Add(item);
         }
     }
 
     /// <summary>
     /// Schedules an item to be executed at a specific time.
+    /// The item's DueTime, SequenceNumber, and queue reference are set by this method.
     /// Returns the scheduled item which can be disposed to cancel it.
     /// </summary>
-    /// <param name="itemFactory">A factory that creates the scheduled item given the due time and sequence number.</param>
+    /// <param name="item">The scheduled item to schedule.</param>
     /// <param name="dueTime">The time offset when the item should be executed.</param>
-    /// <returns>The scheduled item that can be disposed to cancel the timer.</returns>
-    public TItem Schedule<TItem>(Func<TimeSpan, long, SimulationTaskQueue, TItem> itemFactory, TimeSpan dueTime)
+    /// <returns>The scheduled item that can be disposed to cancel it.</returns>
+    public TItem Schedule<TItem>(TItem item, TimeSpan dueTime)
         where TItem : ScheduledItem
     {
-        ArgumentNullException.ThrowIfNull(itemFactory);
+        ArgumentNullException.ThrowIfNull(item);
 
         lock (_lock)
         {
-            var seq = _sequenceNumber++;
-            var item = itemFactory(dueTime, seq, this);
+            item.OnScheduled(this, dueTime, _sequenceNumber++);
             _queue.Add(item);
             return item;
         }
@@ -203,49 +208,56 @@ internal sealed class SimulationTaskQueue
     }
 
     /// <summary>
-    /// Gets all scheduled Task objects from the queue.
-    /// Used by SimulationTaskScheduler for debugger support (GetScheduledTasks).
+    /// Gets all items of a specific type from the queue, passing each to an extractor function.
     /// </summary>
-    /// <returns>An enumerable of all scheduled tasks.</returns>
-    public IEnumerable<Task> GetScheduledTasks()
+    /// <typeparam name="TItem">The type of scheduled item to find.</typeparam>
+    /// <typeparam name="TResult">The type of result to extract from each item.</typeparam>
+    /// <param name="extractor">A function to extract the result from each matching item.</param>
+    /// <returns>An enumerable of extracted results.</returns>
+    public IEnumerable<TResult> GetItemsOfType<TItem, TResult>(Func<TItem, TResult?> extractor)
+        where TItem : ScheduledItem
+        where TResult : class
     {
         lock (_lock)
         {
-            var tasks = new List<Task>();
+            var results = new List<TResult>();
 
             foreach (var item in _queue)
             {
-                if (item is ScheduledTaskItem { Task: not null } taskItem)
+                if (item is TItem typedItem)
                 {
-                    tasks.Add(taskItem.Task);
+                    var result = extractor(typedItem);
+                    if (result is not null)
+                    {
+                        results.Add(result);
+                    }
                 }
             }
 
-            return tasks;
+            return results;
         }
     }
 
     /// <summary>
-    /// Gets the count of scheduled Task objects that are ready (due time &lt;= current time).
+    /// Gets the count of ready items of a specific type (due time &lt;= current time).
     /// </summary>
-    public int ScheduledTaskCount
+    /// <typeparam name="T">The type of scheduled item to count.</typeparam>
+    /// <returns>The count of ready items of the specified type.</returns>
+    public int GetReadyCount<T>() where T : ScheduledItem
     {
-        get
+        lock (_lock)
         {
-            lock (_lock)
+            var count = 0;
+            foreach (var item in _queue)
             {
-                var count = 0;
-                foreach (var item in _queue)
+                if (item.DueTime > CurrentTime)
+                    break; // Queue is sorted by due time, no more ready items
+                if (item is T)
                 {
-                    if (item.DueTime > CurrentTime)
-                        break; // Queue is sorted by due time, no more ready items
-                    if (item is ScheduledTaskItem)
-                    {
-                        count++;
-                    }
+                    count++;
                 }
-                return count;
             }
+            return count;
         }
     }
 
@@ -271,7 +283,7 @@ internal sealed class SimulationTaskQueue
 
         using (SynchronizationContext.Install())
         {
-            item.Callback();
+            item.Invoke();
         }
 
         return true;

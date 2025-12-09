@@ -5,6 +5,28 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace Rapid.Tests.Simulation;
 
 /// <summary>
+/// A scheduled item representing a timer callback.
+/// </summary>
+internal sealed class ScheduledTimerItem : ScheduledItem
+{
+    private readonly Action _callback;
+
+    public ScheduledTimerItem(Action callback, SimulationTimer timer)
+    {
+        _callback = callback;
+        Timer = timer;
+    }
+
+    /// <summary>
+    /// Gets the timer associated with this scheduled item.
+    /// </summary>
+    public SimulationTimer Timer { get; }
+
+    /// <inheritdoc />
+    protected internal override void Invoke() => _callback();
+}
+
+/// <summary>
 /// A time provider for simulation testing that integrates with <see cref="SimulationTaskQueue"/>
 /// for deterministic timer execution.
 /// 
@@ -158,9 +180,9 @@ internal sealed partial class SimulationTimeProvider : TimeProvider
 
         foreach (var item in waiting)
         {
-            if (item is ScheduledTimerItem { Context: SimulationTimer timer } timerItem)
+            if (item is ScheduledTimerItem timerItem)
             {
-                result.Add(new TimerInfo(Start + timerItem.DueTime, timer.Period));
+                result.Add(new TimerInfo(Start + timerItem.DueTime, timerItem.Timer.Period));
             }
         }
 
@@ -259,10 +281,9 @@ internal sealed class SimulationTimer(SimulationTaskQueue taskQueue, TimerCallba
     {
         var scheduledDueTime = taskQueue.CurrentTime + delay;
 
-        _scheduledTimer = taskQueue.ScheduleTimer(
-            TimerFired,
-            scheduledDueTime,
-            context: this);
+        _scheduledTimer = taskQueue.Schedule(
+            new ScheduledTimerItem(TimerFired, this),
+            scheduledDueTime);
     }
 
     private void TimerFired()
