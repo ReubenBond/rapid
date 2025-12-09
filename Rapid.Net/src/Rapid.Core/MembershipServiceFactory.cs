@@ -50,6 +50,7 @@ internal sealed class MembershipServiceFactory(
 
     public MembershipService CreateForJoin(
         Endpoint localEndpoint,
+        long configurationId,
         IEnumerable<NodeId> nodeIds,
         IEnumerable<Endpoint> endpoints,
         Dictionary<Endpoint, Metadata> metadataMap,
@@ -60,7 +61,7 @@ internal sealed class MembershipServiceFactory(
         var endpointList = endpoints.ToList();
 
         var opts = protocolOptions.Value;
-        var membershipView = new MembershipViewBuilder(opts.RingCount, nodeIdList, endpointList).Build();
+        var membershipView = new MembershipViewBuilder(opts.RingCount, nodeIdList, endpointList).BuildWithConfigurationId(new ConfigurationId(configurationId));
         var cutDetector = new MultiNodeCutDetector(opts.RingCount, opts.HighWaterMark, opts.LowWaterMark);
         var broadcaster = broadcasterFactory.Create();
 

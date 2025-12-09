@@ -263,10 +263,21 @@ internal sealed class MembershipViewBuilder
     /// <exception cref="InvalidOperationException">Thrown if the builder has already been sealed.</exception>
     public MembershipView Build(ConfigurationId previousConfigurationId)
     {
+        return BuildWithConfigurationId(previousConfigurationId.Next());
+    }
+
+    /// <summary>
+    /// Builds and returns the immutable MembershipView with the exact configuration ID provided.
+    /// Use this overload when joining an existing cluster with a known configuration ID.
+    /// After this method is called, the builder becomes sealed and cannot be used again.
+    /// </summary>
+    /// <param name="configurationId">The exact configuration ID to use.</param>
+    /// <returns>An immutable MembershipView instance.</returns>
+    /// <exception cref="InvalidOperationException">Thrown if the builder has already been sealed.</exception>
+    internal MembershipView BuildWithConfigurationId(ConfigurationId configurationId)
+    {
         ThrowIfSealed();
         _isSealed = true;
-
-        var configurationId = previousConfigurationId.Next(_identifiersSeen, _rings[0]);
 
         // Create immutable ring copies
         var ringsBuilder = ImmutableArray.CreateBuilder<ImmutableArray<Endpoint>>(_ringCount);

@@ -159,6 +159,7 @@ internal sealed partial class RapidClusterService(
 
         MembershipService = membershipServiceFactory.CreateForJoin(
             _options.ListenAddress,
+            successfulResponse.ConfigurationId,
             successfulResponse.Identifiers,
             successfulResponse.Endpoints,
             metadataMap,

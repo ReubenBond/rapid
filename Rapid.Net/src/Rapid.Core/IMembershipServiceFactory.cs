@@ -27,6 +27,7 @@ internal interface IMembershipServiceFactory
     /// Creates a MembershipService instance for joining an existing cluster.
     /// </summary>
     /// <param name="localEndpoint">The local endpoint for this node.</param>
+    /// <param name="configurationId">The configuration ID from the cluster's JoinResponse.</param>
     /// <param name="nodeIds">The list of node identifiers in the cluster.</param>
     /// <param name="endpoints">The list of endpoints in the cluster.</param>
     /// <param name="metadataMap">Metadata for all nodes in the cluster.</param>
@@ -34,6 +35,7 @@ internal interface IMembershipServiceFactory
     /// <returns>A new MembershipService instance.</returns>
     MembershipService CreateForJoin(
         Endpoint localEndpoint,
+        long configurationId,
         IEnumerable<NodeId> nodeIds,
         IEnumerable<Endpoint> endpoints,
         Dictionary<Endpoint, Metadata> metadataMap,

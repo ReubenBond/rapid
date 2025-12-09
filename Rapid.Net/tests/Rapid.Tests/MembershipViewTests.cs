@@ -247,25 +247,28 @@ public class MembershipViewTests
         var builder2 = view1.ToBuilder();
         var n1 = Utils.HostFromParts("127.0.0.1", 1);
         builder2.RingAdd(n1, Utils.NodeIdFromUuid(Guid.NewGuid()));
-        var view2 = builder2.Build();
+        var view2 = builder2.Build(view1.ConfigurationId);
 
         var configAfterAdd = view2.ConfigurationId;
         Assert.NotEqual(initialConfig, configAfterAdd);
+        Assert.Equal(initialConfig.Version + 1, configAfterAdd.Version);
 
         var builder3 = view2.ToBuilder();
         var n2 = Utils.HostFromParts("127.0.0.1", 2);
         builder3.RingAdd(n2, Utils.NodeIdFromUuid(Guid.NewGuid()));
-        var view3 = builder3.Build();
+        var view3 = builder3.Build(view2.ConfigurationId);
 
         var configAfterSecondAdd = view3.ConfigurationId;
         Assert.NotEqual(configAfterAdd, configAfterSecondAdd);
+        Assert.Equal(configAfterAdd.Version + 1, configAfterSecondAdd.Version);
 
         var builder4 = view3.ToBuilder();
         builder4.RingDelete(n1);
-        var view4 = builder4.Build();
+        var view4 = builder4.Build(view3.ConfigurationId);
 
         var configAfterDelete = view4.ConfigurationId;
         Assert.NotEqual(configAfterSecondAdd, configAfterDelete);
+        Assert.Equal(configAfterSecondAdd.Version + 1, configAfterDelete.Version);
     }
 
     /// <summary>
@@ -543,7 +546,8 @@ public class MembershipViewTests
     }
 
     /// <summary>
-    /// Ensure that N different configuration IDs are generated when N nodes are added to the rings
+    /// Ensure that N different configuration IDs are generated when N nodes are added to the rings.
+    /// With version-based ConfigurationId, each build should increment the version.
     /// </summary>
     [Fact]
     public void NodeConfigurationChange()
@@ -551,6 +555,7 @@ public class MembershipViewTests
         var builder = new MembershipViewBuilder(K);
         const int numNodes = 1000;
         var set = new HashSet<long>(numNodes);
+        var previousConfigId = ConfigurationId.Empty;
 
         for (var i = 0; i < numNodes; i++)
         {
@@ -558,17 +563,19 @@ public class MembershipViewTests
             var nameBasedGuid = Utils.NodeIdFromUuid(
                 GuidUtility.Create(GuidUtility.DnsNamespace, n.ToString()));
             builder.RingAdd(n, nameBasedGuid);
-            var view = builder.Build();
+            var view = builder.Build(previousConfigId);
             set.Add(view.ConfigurationId);
+            previousConfigId = view.ConfigurationId;
             builder = view.ToBuilder();
         }
 
-        Assert.Equal(numNodes, set.Count); // should be 1000 different configurations
+        Assert.Equal(numNodes, set.Count); // should be 1000 different configurations (versions 1-1000)
     }
 
     /// <summary>
-    /// Add endpoints to two membership view objects in different orders. 
-    /// All except the last generated configuration identifier should be different.
+    /// Add endpoints to two membership view objects in different orders.
+    /// With version-based ConfigurationId, both sequences produce incrementing versions
+    /// and the final version should be the same (both reach version N after N additions).
     /// </summary>
     [Fact]
     public void NodeConfigurationsAcrossMViews()
@@ -578,6 +585,8 @@ public class MembershipViewTests
         const int numNodes = 1000;
         var list1 = new List<long>(numNodes);
         var list2 = new List<long>(numNodes);
+        var previousConfigId1 = ConfigurationId.Empty;
+        var previousConfigId2 = ConfigurationId.Empty;
 
         for (var i = 0; i < numNodes; i++)
         {
@@ -585,8 +594,9 @@ public class MembershipViewTests
             var nameBasedGuid = Utils.NodeIdFromUuid(
                 GuidUtility.Create(GuidUtility.DnsNamespace, n.ToString()));
             builder1.RingAdd(n, nameBasedGuid);
-            var view1 = builder1.Build();
+            var view1 = builder1.Build(previousConfigId1);
             list1.Add(view1.ConfigurationId);
+            previousConfigId1 = view1.ConfigurationId;
             builder1 = view1.ToBuilder();
         }
 
@@ -596,20 +606,22 @@ public class MembershipViewTests
             var nameBasedGuid = Utils.NodeIdFromUuid(
                 GuidUtility.Create(GuidUtility.DnsNamespace, n.ToString()));
             builder2.RingAdd(n, nameBasedGuid);
-            var view2 = builder2.Build();
+            var view2 = builder2.Build(previousConfigId2);
             list2.Add(view2.ConfigurationId);
+            previousConfigId2 = view2.ConfigurationId;
             builder2 = view2.ToBuilder();
         }
 
         Assert.Equal(numNodes, list1.Count);
         Assert.Equal(numNodes, list2.Count);
 
-        // Only the last added elements in the sequence of configurations should have the same value
-        for (var i = 0; i < numNodes - 1; i++)
+        // With version-based ConfigurationId, both sequences produce the same versions (1, 2, 3, ..., N)
+        // regardless of the order in which nodes are added
+        for (var i = 0; i < numNodes; i++)
         {
-            Assert.NotEqual(list1[i], list2[i]);
+            Assert.Equal(list1[i], list2[i]);
+            Assert.Equal(i + 1, list1[i]); // Version should be i+1 (1-indexed)
         }
-        Assert.Equal(list1[numNodes - 1], list2[numNodes - 1]);
     }
 
     /// <summary>
@@ -634,11 +646,12 @@ public class MembershipViewTests
         var builder2 = view.ToBuilder();
         var n2 = Utils.HostFromParts("127.0.0.1", 2);
         builder2.RingAdd(n2, Utils.NodeIdFromUuid(Guid.NewGuid()));
-        var view2 = builder2.Build();
+        var view2 = builder2.Build(view.ConfigurationId);
 
         // The original view should still show the old state
         Assert.Single(view.Members);
         Assert.NotEqual(view.ConfigurationId, view2.ConfigurationId);
+        Assert.Equal(view.ConfigurationId.Version + 1, view2.ConfigurationId.Version);
 
         // The new view should have the updated state
         Assert.Equal(2, view2.Members.Length);

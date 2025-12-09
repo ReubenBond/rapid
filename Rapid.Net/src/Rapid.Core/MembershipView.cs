@@ -326,8 +326,7 @@ public sealed class MembershipViewConfiguration
     public ImmutableArray<Endpoint> Endpoints { get; }
 
     /// <summary>
-    /// Gets the configuration ID for the list of endpoints and identifiers with version 0.
+    /// Gets the configuration ID for this configuration (version 0).
     /// </summary>
-    /// <returns>A configuration identifier.</returns>
-    public ConfigurationId GetConfigurationId() => ConfigurationId.Create(0, NodeIds, Endpoints);
+    public ConfigurationId ConfigurationId => new(0);
 }
