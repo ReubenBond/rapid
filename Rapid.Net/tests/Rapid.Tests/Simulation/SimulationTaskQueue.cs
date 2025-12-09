@@ -30,6 +30,11 @@ internal abstract class ScheduledItem : IDisposable, IComparable<ScheduledItem>
     /// <param name="sequenceNumber">The sequence number for ordering.</param>
     internal void OnScheduled(SimulationTaskQueue queue, TimeSpan dueTime, long sequenceNumber)
     {
+        if (_queue is not null)
+        {
+            throw new InvalidOperationException("Item has already been scheduled.");
+        }
+
         _queue = queue;
         DueTime = dueTime;
         SequenceNumber = sequenceNumber;
@@ -65,6 +70,16 @@ internal abstract class ScheduledItem : IDisposable, IComparable<ScheduledItem>
             return dueTimeComparison;
         return SequenceNumber.CompareTo(other.SequenceNumber);
     }
+}
+
+/// <summary>
+/// A simple scheduled item that wraps an Action callback.
+/// Used for general-purpose delayed execution.
+/// </summary>
+internal sealed class ScheduledActionItem(Action callback) : ScheduledItem
+{
+    /// <inheritdoc />
+    protected internal override void Invoke() => callback();
 }
 
 /// <summary>
@@ -136,28 +151,6 @@ internal sealed class SimulationTaskQueue
             }
         }
     }
-
-    /// <summary>
-    /// Gets the number of waiting items of a specific type in the queue (not yet due).
-    /// </summary>
-    /// <typeparam name="T">The type of scheduled item to count.</typeparam>
-    /// <returns>The count of waiting items of the specified type.</returns>
-    public int GetWaitingCount<T>() where T : ScheduledItem
-    {
-        lock (_lock)
-        {
-            var count = 0;
-            foreach (var item in _queue)
-            {
-                if (item.DueTime > CurrentTime && item is T)
-                {
-                    count++;
-                }
-            }
-            return count;
-        }
-    }
-
     /// <summary>
     /// Enqueues a scheduled item to be executed immediately (at current time).
     /// The item's DueTime, SequenceNumber, and queue reference are set by this method.
@@ -169,8 +162,24 @@ internal sealed class SimulationTaskQueue
 
         lock (_lock)
         {
-            item.OnScheduled(this, CurrentTime, _sequenceNumber++);
-            _queue.Add(item);
+            Schedule(item, CurrentTime);
+        }
+    }
+
+    /// <summary>
+    /// Enqueues an action to be executed after a delay from the current time.
+    /// Convenience method that creates a <see cref="ScheduledActionItem"/>.
+    /// </summary>
+    /// <param name="action">The action to execute.</param>
+    /// <param name="delay">The delay from the current time.</param>
+    public void EnqueueAfter(Action action, TimeSpan delay)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+        ArgumentOutOfRangeException.ThrowIfLessThan(delay, TimeSpan.Zero);
+
+        lock (_lock)
+        {
+            Schedule(new ScheduledActionItem(action), CurrentTime + delay);
         }
     }
 
@@ -179,11 +188,11 @@ internal sealed class SimulationTaskQueue
     /// The item's DueTime, SequenceNumber, and queue reference are set by this method.
     /// Returns the scheduled item which can be disposed to cancel it.
     /// </summary>
+    /// <typeparam name="TItem">The type of scheduled item.</typeparam>
     /// <param name="item">The scheduled item to schedule.</param>
     /// <param name="dueTime">The time offset when the item should be executed.</param>
     /// <returns>The scheduled item that can be disposed to cancel it.</returns>
-    public TItem Schedule<TItem>(TItem item, TimeSpan dueTime)
-        where TItem : ScheduledItem
+    public TItem Schedule<TItem>(TItem item, TimeSpan dueTime) where TItem : ScheduledItem
     {
         ArgumentNullException.ThrowIfNull(item);
 
@@ -191,8 +200,9 @@ internal sealed class SimulationTaskQueue
         {
             item.OnScheduled(this, dueTime, _sequenceNumber++);
             _queue.Add(item);
-            return item;
         }
+
+        return item;
     }
 
     /// <summary>
@@ -208,13 +218,78 @@ internal sealed class SimulationTaskQueue
     }
 
     /// <summary>
+    /// Tries to dequeue and execute the next ready item.
+    /// </summary>
+    /// <returns>True if an item was dequeued and executed, false if no items are ready.</returns>
+    public bool TryExecuteNext()
+    {
+        ScheduledItem item;
+
+        lock (_lock)
+        {
+            if (_queue.Count == 0)
+                return false;
+
+            item = _queue.Min!;
+            if (item.DueTime > CurrentTime)
+                return false; // No ready items
+
+            _queue.Remove(item);
+        }
+
+        using (SynchronizationContext.Install())
+        {
+            item.Invoke();
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Executes all ready items in the queue.
+    /// Note: Items added during execution are also executed (use ExecuteAllCurrently for bounded execution).
+    /// </summary>
+    /// <returns>The number of items executed.</returns>
+    public int ExecuteAll()
+    {
+        var count = 0;
+        while (TryExecuteNext())
+        {
+            count++;
+        }
+
+        return count;
+    }
+
+    /// <summary>
+    /// Advances the current time by the specified amount.
+    /// </summary>
+    /// <param name="delta">The amount to advance.</param>
+    public void AdvanceTime(TimeSpan delta)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(delta, TimeSpan.Zero);
+        CurrentTime += delta;
+    }
+
+    /// <summary>
+    /// Clears all items from the queue.
+    /// </summary>
+    public void Clear()
+    {
+        lock (_lock)
+        {
+            _queue.Clear();
+        }
+    }
+
+    /// <summary>
     /// Gets all items of a specific type from the queue, passing each to an extractor function.
     /// </summary>
     /// <typeparam name="TItem">The type of scheduled item to find.</typeparam>
     /// <typeparam name="TResult">The type of result to extract from each item.</typeparam>
     /// <param name="extractor">A function to extract the result from each matching item.</param>
     /// <returns>An enumerable of extracted results.</returns>
-    public IEnumerable<TResult> GetItemsOfType<TItem, TResult>(Func<TItem, TResult?> extractor)
+    public IReadOnlyList<TResult> GetItemsOfType<TItem, TResult>(Func<TItem, TResult?> extractor)
         where TItem : ScheduledItem
         where TResult : class
     {
@@ -262,119 +337,46 @@ internal sealed class SimulationTaskQueue
     }
 
     /// <summary>
-    /// Tries to dequeue and execute the next ready item.
+    /// Gets the number of waiting items of a specific type in the queue (not yet due).
     /// </summary>
-    /// <returns>True if an item was dequeued and executed, false if no items are ready.</returns>
-    public bool TryExecuteNext()
+    /// <typeparam name="T">The type of scheduled item to count.</typeparam>
+    /// <returns>The count of waiting items of the specified type.</returns>
+    public int GetWaitingCount<T>() where T : ScheduledItem
     {
-        ScheduledItem item;
-
         lock (_lock)
         {
-            if (_queue.Count == 0)
-                return false;
-
-            item = _queue.Min!;
-            if (item.DueTime > CurrentTime)
-                return false; // No ready items
-
-            _queue.Remove(item);
-        }
-
-        using (SynchronizationContext.Install())
-        {
-            item.Invoke();
-        }
-
-        return true;
-    }
-
-    /// <summary>
-    /// Executes all ready items in the queue.
-    /// Note: Items added during execution are also executed (use ExecuteAllCurrently for bounded execution).
-    /// </summary>
-    /// <returns>The number of items executed.</returns>
-    public int ExecuteAll()
-    {
-        var count = 0;
-        while (TryExecuteNext())
-        {
-            count++;
-        }
-        return count;
-    }
-
-    /// <summary>
-    /// Executes all currently ready items, but not items added during execution.
-    /// This prevents infinite loops when callbacks enqueue more items.
-    /// </summary>
-    /// <returns>The number of items executed.</returns>
-    public int ExecuteAllCurrently()
-    {
-        int readyCount;
-        lock (_lock)
-        {
-            readyCount = 0;
+            var count = 0;
             foreach (var item in _queue)
             {
-                if (item.DueTime > CurrentTime)
-                    break;
-                readyCount++;
+                if (item.DueTime > CurrentTime && item is T)
+                {
+                    count++;
+                }
             }
+            return count;
         }
-
-        var count = 0;
-        for (var i = 0; i < readyCount; i++)
-        {
-            if (!TryExecuteNext())
-            {
-                break;
-            }
-            count++;
-        }
-        return count;
     }
 
     /// <summary>
-    /// Advances the current time by the specified amount.
+    /// Gets all waiting items of a specific type from the queue (not yet due).
     /// </summary>
-    /// <param name="delta">The amount to advance.</param>
-    public void AdvanceTime(TimeSpan delta)
-    {
-        ArgumentOutOfRangeException.ThrowIfLessThan(delta, TimeSpan.Zero);
-        CurrentTime += delta;
-    }
-
-    /// <summary>
-    /// Clears all items from the queue.
-    /// </summary>
-    public void Clear()
+    /// <typeparam name="T">The type of scheduled item to find.</typeparam>
+    /// <returns>A list of waiting items of the specified type.</returns>
+    public IReadOnlyList<T> GetWaitingItems<T>() where T : ScheduledItem
     {
         lock (_lock)
         {
-            _queue.Clear();
-        }
-    }
-
-    /// <summary>
-    /// Gets a snapshot of all scheduled items (for debugging/testing).
-    /// </summary>
-    public (IReadOnlyList<ScheduledItem> Ready, IReadOnlyList<ScheduledItem> Waiting) GetSnapshot()
-    {
-        lock (_lock)
-        {
-            var ready = new List<ScheduledItem>();
-            var waiting = new List<ScheduledItem>();
+            var results = new List<T>();
 
             foreach (var item in _queue)
             {
-                if (item.DueTime <= CurrentTime)
-                    ready.Add(item);
-                else
-                    waiting.Add(item);
+                if (item.DueTime > CurrentTime && item is T typedItem)
+                {
+                    results.Add(typedItem);
+                }
             }
 
-            return (ready, waiting);
+            return results;
         }
     }
 

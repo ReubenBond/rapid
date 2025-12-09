@@ -232,8 +232,8 @@ public class SimulationTimeProviderTests
         using var timer = timeProvider.CreateTimer(_ => callCount++, null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
 
         Assert.Equal(0, callCount);
-        Assert.True(taskQueue.WaitingTimerCount > 0);
-        Assert.Equal(1, taskQueue.WaitingTimerCount);
+        Assert.True(taskQueue.GetWaitingCount<ScheduledTimerItem>() > 0);
+        Assert.Equal(1, taskQueue.GetWaitingCount<ScheduledTimerItem>());
     }
 
     [Fact]
@@ -435,7 +435,7 @@ public class SimulationTimeProviderTests
 
         // Execute only the currently ready items (not items added during execution)
         // This prevents infinite loops when callbacks enqueue more items
-        taskQueue.ExecuteAllCurrently();
+        taskQueue.ExecuteAll();
 
         // Should not hang and call count should be limited
         Assert.True(callCount >= 1, "Timer should have fired at least once");
@@ -679,38 +679,68 @@ public class SimulationTimeProviderTests
     }
 
     [Fact]
-    public async Task DelayMultipleDelaysCompleteInCorrectOrder()
+    public void DelayMultipleDelaysRegisteredInCorrectOrder()
     {
         var taskQueue = new SimulationTaskQueue();
         var timeProvider = new SimulationTimeProvider(taskQueue);
+        var ct = TestContext.Current.CancellationToken;
+
+        // Install sync context so continuations are captured by the simulation
+        using var _ = taskQueue.SynchronizationContext.Install();
+
+        // Create delays - they immediately register timers with the provider
+        var delay1 = Task.Delay(TimeSpan.FromSeconds(3), timeProvider, ct);
+        var delay2 = Task.Delay(TimeSpan.FromSeconds(1), timeProvider, ct);
+        var delay3 = Task.Delay(TimeSpan.FromSeconds(2), timeProvider, ct);
+
+        // Verify timers are registered with correct due times
+        var pendingTimers = timeProvider.GetPendingTimers();
+        Assert.Equal(3, pendingTimers.Count);
+
+        // Timers should be ordered by wake time (1s, 2s, 3s)
+        Assert.Equal(timeProvider.Start + TimeSpan.FromSeconds(1), pendingTimers[0].WakeupTime);
+        Assert.Equal(timeProvider.Start + TimeSpan.FromSeconds(2), pendingTimers[1].WakeupTime);
+        Assert.Equal(timeProvider.Start + TimeSpan.FromSeconds(3), pendingTimers[2].WakeupTime);
+
+        // Advance time and verify delays complete in order
+        timeProvider.Advance(TimeSpan.FromSeconds(1));
+        taskQueue.ExecuteAll();
+        Assert.True(delay2.IsCompleted);
+        Assert.False(delay3.IsCompleted);
+        Assert.False(delay1.IsCompleted);
+
+        timeProvider.Advance(TimeSpan.FromSeconds(1));
+        taskQueue.ExecuteAll();
+        Assert.True(delay3.IsCompleted);
+        Assert.False(delay1.IsCompleted);
+
+        timeProvider.Advance(TimeSpan.FromSeconds(1));
+        taskQueue.ExecuteAll();
+        Assert.True(delay1.IsCompleted);
+    }
+
+    [Fact]
+    public void DelayMultipleDelaysContinuationsRunInCorrectOrder()
+    {
+        var taskQueue = new SimulationTaskQueue();
+        var timeProvider = new SimulationTimeProvider(taskQueue);
+        var scheduler = new SimulationTaskScheduler(taskQueue);
         var completionOrder = new List<int>();
+        var ct = TestContext.Current.CancellationToken;
 
-        var delay1 = Task.Run(async () =>
-        {
-            await Task.Delay(TimeSpan.FromSeconds(3), timeProvider);
-            completionOrder.Add(1);
-        }, TestContext.Current.CancellationToken);
+        // Install sync context so continuations are captured by the simulation
+        using var _ = taskQueue.SynchronizationContext.Install();
 
-        var delay2 = Task.Run(async () =>
-        {
-            await Task.Delay(TimeSpan.FromSeconds(1), timeProvider);
-            completionOrder.Add(2);
-        }, TestContext.Current.CancellationToken);
+        // Create delays with continuations that record completion order
+        var delay1 = Task.Delay(TimeSpan.FromSeconds(3), timeProvider, ct).ContinueWith(_ => completionOrder.Add(1), ct, TaskContinuationOptions.None, scheduler);
+        var delay2 = Task.Delay(TimeSpan.FromSeconds(1), timeProvider, ct).ContinueWith(_ => completionOrder.Add(2), ct, TaskContinuationOptions.None, scheduler);
+        var delay3 = Task.Delay(TimeSpan.FromSeconds(2), timeProvider, ct).ContinueWith(_ => completionOrder.Add(3), ct, TaskContinuationOptions.None, scheduler);
 
-        var delay3 = Task.Run(async () =>
-        {
-            await Task.Delay(TimeSpan.FromSeconds(2), timeProvider);
-            completionOrder.Add(3);
-        }, TestContext.Current.CancellationToken);
-
-        // Give tasks time to start
-        await Task.Delay(50, TestContext.Current.CancellationToken);
-
+        // Advance time past all delays and execute
         timeProvider.Advance(TimeSpan.FromSeconds(5));
         taskQueue.ExecuteAll();
 
-        await Task.WhenAll(delay1, delay2, delay3);
-
+        // Continuations should run in order of their delay durations: 1s (2), 2s (3), 3s (1)
         Assert.Equal([2, 3, 1], completionOrder);
     }
 
@@ -760,7 +790,7 @@ public class SimulationTimeProviderTests
         var taskQueue = new SimulationTaskQueue();
         var timeProvider = new SimulationTimeProvider(taskQueue);
 
-        Assert.Equal(0, taskQueue.WaitingTimerCount);
+        Assert.Equal(0, taskQueue.GetWaitingCount<ScheduledTimerItem>());
     }
 
     [Fact]
@@ -771,7 +801,7 @@ public class SimulationTimeProviderTests
 
         using var timer = timeProvider.CreateTimer(_ => { }, null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
 
-        Assert.True(taskQueue.WaitingTimerCount > 0);
+        Assert.True(taskQueue.GetWaitingCount<ScheduledTimerItem>() > 0);
     }
 
     [Fact]
@@ -784,7 +814,7 @@ public class SimulationTimeProviderTests
 
         timeProvider.Advance(TimeSpan.FromSeconds(1));
 
-        Assert.Equal(0, taskQueue.WaitingTimerCount);
+        Assert.Equal(0, taskQueue.GetWaitingCount<ScheduledTimerItem>());
     }
 
     [Fact]
@@ -793,19 +823,19 @@ public class SimulationTimeProviderTests
         var taskQueue = new SimulationTaskQueue();
         var timeProvider = new SimulationTimeProvider(taskQueue);
 
-        Assert.Equal(0, taskQueue.WaitingTimerCount);
+        Assert.Equal(0, taskQueue.GetWaitingCount<ScheduledTimerItem>());
 
         using var timer1 = timeProvider.CreateTimer(_ => { }, null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
-        Assert.Equal(1, taskQueue.WaitingTimerCount);
+        Assert.Equal(1, taskQueue.GetWaitingCount<ScheduledTimerItem>());
 
         using var timer2 = timeProvider.CreateTimer(_ => { }, null, TimeSpan.FromSeconds(2), TimeSpan.Zero);
-        Assert.Equal(2, taskQueue.WaitingTimerCount);
+        Assert.Equal(2, taskQueue.GetWaitingCount<ScheduledTimerItem>());
 
         timeProvider.Advance(TimeSpan.FromSeconds(1));
-        Assert.Equal(1, taskQueue.WaitingTimerCount);
+        Assert.Equal(1, taskQueue.GetWaitingCount<ScheduledTimerItem>());
 
         timeProvider.Advance(TimeSpan.FromSeconds(1));
-        Assert.Equal(0, taskQueue.WaitingTimerCount);
+        Assert.Equal(0, taskQueue.GetWaitingCount<ScheduledTimerItem>());
     }
 
     [Fact]
@@ -816,15 +846,15 @@ public class SimulationTimeProviderTests
 
         using var timer = timeProvider.CreateTimer(_ => { }, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
 
-        Assert.Equal(1, taskQueue.WaitingTimerCount);
+        Assert.Equal(1, taskQueue.GetWaitingCount<ScheduledTimerItem>());
 
         timeProvider.Advance(TimeSpan.FromSeconds(1));
         taskQueue.ExecuteAll(); // Execute to trigger rescheduling of periodic timer
-        Assert.Equal(1, taskQueue.WaitingTimerCount); // Periodic timer stays registered
+        Assert.Equal(1, taskQueue.GetWaitingCount<ScheduledTimerItem>()); // Periodic timer stays registered
 
         timeProvider.Advance(TimeSpan.FromSeconds(1));
         taskQueue.ExecuteAll();
-        Assert.Equal(1, taskQueue.WaitingTimerCount);
+        Assert.Equal(1, taskQueue.GetWaitingCount<ScheduledTimerItem>());
     }
 
     #endregion
@@ -838,10 +868,10 @@ public class SimulationTimeProviderTests
         var timeProvider = new SimulationTimeProvider(taskQueue);
 
         var timer = timeProvider.CreateTimer(_ => { }, null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
-        Assert.Equal(1, taskQueue.WaitingTimerCount);
+        Assert.Equal(1, taskQueue.GetWaitingCount<ScheduledTimerItem>());
 
         timer.Dispose();
-        Assert.Equal(0, taskQueue.WaitingTimerCount);
+        Assert.Equal(0, taskQueue.GetWaitingCount<ScheduledTimerItem>());
     }
 
     [Fact]
@@ -851,10 +881,10 @@ public class SimulationTimeProviderTests
         var timeProvider = new SimulationTimeProvider(taskQueue);
 
         var timer = timeProvider.CreateTimer(_ => { }, null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
-        Assert.Equal(1, taskQueue.WaitingTimerCount);
+        Assert.Equal(1, taskQueue.GetWaitingCount<ScheduledTimerItem>());
 
         await timer.DisposeAsync();
-        Assert.Equal(0, taskQueue.WaitingTimerCount);
+        Assert.Equal(0, taskQueue.GetWaitingCount<ScheduledTimerItem>());
     }
 
     [Fact]
@@ -937,14 +967,14 @@ public class SimulationTimeProviderTests
 
         await Task.WhenAll(tasks);
 
-        Assert.Equal(100, taskQueue.WaitingTimerCount);
+        Assert.Equal(100, taskQueue.GetWaitingCount<ScheduledTimerItem>());
 
         foreach (var timer in timers)
         {
             timer.Dispose();
         }
 
-        Assert.Equal(0, taskQueue.WaitingTimerCount);
+        Assert.Equal(0, taskQueue.GetWaitingCount<ScheduledTimerItem>());
     }
 
     #endregion

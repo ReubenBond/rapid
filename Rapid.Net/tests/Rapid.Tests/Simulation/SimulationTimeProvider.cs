@@ -175,15 +175,12 @@ internal sealed partial class SimulationTimeProvider : TimeProvider
     /// </summary>
     public IReadOnlyList<TimerInfo> GetPendingTimers()
     {
-        var (_, waiting) = _taskQueue.GetSnapshot();
-        var result = new List<TimerInfo>();
+        var waitingTimers = _taskQueue.GetWaitingItems<ScheduledTimerItem>();
+        var result = new List<TimerInfo>(waitingTimers.Count);
 
-        foreach (var item in waiting)
+        foreach (var timerItem in waitingTimers)
         {
-            if (item is ScheduledTimerItem timerItem)
-            {
-                result.Add(new TimerInfo(Start + timerItem.DueTime, timerItem.Timer.Period));
-            }
+            result.Add(new TimerInfo(Start + timerItem.DueTime, timerItem.Timer.Period));
         }
 
         return [.. result.OrderBy(t => t.WakeupTime)];
