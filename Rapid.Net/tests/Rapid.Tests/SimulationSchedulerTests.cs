@@ -31,7 +31,7 @@ public sealed class SimulationSchedulerTests
         var task = new Task(() => executed = true);
         task.Start(scheduler);
 
-        var result = taskQueue.TryExecuteNext();
+        var result = taskQueue.RunOnce();
 
         Assert.True(result);
         Assert.True(executed);
@@ -51,7 +51,7 @@ public sealed class SimulationSchedulerTests
             task.Start(scheduler);
         }
 
-        var executed = taskQueue.ExecuteAll();
+        var executed = taskQueue.RunUntilIdle();
 
         Assert.Equal(5, executed);
         Assert.Equal(5, count);
@@ -72,7 +72,7 @@ public sealed class SimulationSchedulerTests
         }
 
         var executed = 0;
-        for (var i = 0; i < 3 && taskQueue.TryExecuteNext(); i++)
+        for (var i = 0; i < 3 && taskQueue.RunOnce(); i++)
         {
             executed++;
         }
@@ -113,7 +113,7 @@ public sealed class SimulationSchedulerTests
             task.Start(scheduler);
         }
 
-        taskQueue.ExecuteAll();
+        taskQueue.RunUntilIdle();
 
         Assert.Equal([0, 1, 2, 3, 4], order);
     }
@@ -128,7 +128,7 @@ public sealed class SimulationSchedulerTests
         syncContext.Post(_ => executed = true, null);
 
         Assert.False(executed);
-        taskQueue.TryExecuteNext();
+        taskQueue.RunOnce();
         Assert.True(executed);
     }
 
@@ -172,7 +172,7 @@ public sealed class SimulationSchedulerTests
         var task2 = new Task(() => order.Add("second"));
         task2.Start(scheduler);
 
-        taskQueue.ExecuteAll();
+        taskQueue.RunUntilIdle();
 
         // First task should execute before second (queued at earlier time)
         Assert.Equal(["first", "second"], order);
@@ -183,7 +183,7 @@ public sealed class SimulationSchedulerTests
     {
         var taskQueue = new SimulationTaskQueue();
 
-        var result = taskQueue.TryExecuteNext();
+        var result = taskQueue.RunOnce();
 
         Assert.False(result);
     }
@@ -201,7 +201,7 @@ public sealed class SimulationSchedulerTests
 
         Assert.True(taskQueue.GetReadyCount<ScheduledTaskItem>() > 0);
 
-        taskQueue.TryExecuteNext();
+        taskQueue.RunOnce();
 
         Assert.Equal(0, taskQueue.GetReadyCount<ScheduledTaskItem>());
     }

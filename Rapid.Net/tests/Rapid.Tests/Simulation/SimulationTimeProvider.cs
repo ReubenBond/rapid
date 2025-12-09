@@ -1,30 +1,9 @@
 using System.Globalization;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using static Rapid.Tests.Simulation.SimulationTimer;
 
 namespace Rapid.Tests.Simulation;
-
-/// <summary>
-/// A scheduled item representing a timer callback.
-/// </summary>
-internal sealed class ScheduledTimerItem : ScheduledItem
-{
-    private readonly Action _callback;
-
-    public ScheduledTimerItem(Action callback, SimulationTimer timer)
-    {
-        _callback = callback;
-        Timer = timer;
-    }
-
-    /// <summary>
-    /// Gets the timer associated with this scheduled item.
-    /// </summary>
-    public SimulationTimer Timer { get; }
-
-    /// <inheritdoc />
-    protected internal override void Invoke() => _callback();
-}
 
 /// <summary>
 /// A time provider for simulation testing that integrates with <see cref="SimulationTaskQueue"/>
@@ -276,11 +255,9 @@ internal sealed class SimulationTimer(SimulationTaskQueue taskQueue, TimerCallba
 
     private void ScheduleNextFiring(SimulationTaskQueue taskQueue, TimeSpan delay)
     {
-        var scheduledDueTime = taskQueue.CurrentTime + delay;
-
-        _scheduledTimer = taskQueue.Schedule(
-            new ScheduledTimerItem(TimerFired, this),
-            scheduledDueTime);
+        _scheduledTimer = taskQueue.EnqueueAfter(
+            new ScheduledTimerItem(this),
+            delay);
     }
 
     private void TimerFired()
@@ -296,25 +273,25 @@ internal sealed class SimulationTimer(SimulationTaskQueue taskQueue, TimerCallba
         }
     }
 
-    ~SimulationTimer() => Dispose(false);
-
     public void Dispose()
     {
-        Dispose(true);
+        _scheduledTimer?.Dispose();
+        _scheduledTimer = null;
+        _taskQueue = null;
         GC.SuppressFinalize(this);
     }
 
     public ValueTask DisposeAsync()
     {
-        Dispose(true);
+        Dispose();
         GC.SuppressFinalize(this);
         return ValueTask.CompletedTask;
     }
 
-    private void Dispose(bool _)
+    internal sealed class ScheduledTimerItem(SimulationTimer timer) : ScheduledItem
     {
-        _scheduledTimer?.Dispose();
-        _scheduledTimer = null;
-        _taskQueue = null;
+        public SimulationTimer Timer => timer;
+
+        protected internal override void Invoke() => timer.TimerFired();
     }
 }

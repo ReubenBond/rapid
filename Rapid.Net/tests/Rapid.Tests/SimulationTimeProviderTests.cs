@@ -1,4 +1,5 @@
 using Rapid.Tests.Simulation;
+using static Rapid.Tests.Simulation.SimulationTimer;
 
 namespace Rapid.Tests;
 
@@ -247,7 +248,7 @@ public class SimulationTimeProviderTests
 
         // Timer with TimeSpan.Zero schedules callback to task queue
         Assert.Equal(0, callCount);
-        taskQueue.TryExecuteNext();
+        taskQueue.RunOnce();
         Assert.Equal(1, callCount);
     }
 
@@ -263,11 +264,11 @@ public class SimulationTimeProviderTests
         Assert.Equal(0, callCount);
 
         timeProvider.Advance(TimeSpan.FromMilliseconds(999));
-        taskQueue.ExecuteAll();
+        taskQueue.RunUntilIdle();
         Assert.Equal(0, callCount);
 
         timeProvider.Advance(TimeSpan.FromMilliseconds(1));
-        taskQueue.ExecuteAll();
+        taskQueue.RunUntilIdle();
         Assert.Equal(1, callCount);
     }
 
@@ -280,7 +281,7 @@ public class SimulationTimeProviderTests
         var expectedState = new object();
 
         using var timer = timeProvider.CreateTimer(state => receivedState = state, expectedState, TimeSpan.Zero, TimeSpan.Zero);
-        taskQueue.TryExecuteNext();
+        taskQueue.RunOnce();
 
         Assert.Same(expectedState, receivedState);
     }
@@ -295,15 +296,15 @@ public class SimulationTimeProviderTests
         using var timer = timeProvider.CreateTimer(_ => callCount++, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
 
         timeProvider.Advance(TimeSpan.FromSeconds(1));
-        taskQueue.ExecuteAll();
+        taskQueue.RunUntilIdle();
         Assert.Equal(1, callCount);
 
         timeProvider.Advance(TimeSpan.FromSeconds(1));
-        taskQueue.ExecuteAll();
+        taskQueue.RunUntilIdle();
         Assert.Equal(2, callCount);
 
         timeProvider.Advance(TimeSpan.FromSeconds(1));
-        taskQueue.ExecuteAll();
+        taskQueue.RunUntilIdle();
         Assert.Equal(3, callCount);
     }
 
@@ -317,15 +318,15 @@ public class SimulationTimeProviderTests
         using var timer = timeProvider.CreateTimer(_ => callCount++, null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
 
         timeProvider.Advance(TimeSpan.FromSeconds(1));
-        taskQueue.ExecuteAll();
+        taskQueue.RunUntilIdle();
         Assert.Equal(1, callCount);
 
         timeProvider.Advance(TimeSpan.FromSeconds(1));
-        taskQueue.ExecuteAll();
+        taskQueue.RunUntilIdle();
         Assert.Equal(1, callCount); // Should still be 1
 
         timeProvider.Advance(TimeSpan.FromSeconds(10));
-        taskQueue.ExecuteAll();
+        taskQueue.RunUntilIdle();
         Assert.Equal(1, callCount); // Should still be 1
     }
 
@@ -340,7 +341,7 @@ public class SimulationTimeProviderTests
         timer.Dispose();
 
         timeProvider.Advance(TimeSpan.FromSeconds(10));
-        taskQueue.ExecuteAll();
+        taskQueue.RunUntilIdle();
         Assert.Equal(0, callCount);
     }
 
@@ -357,7 +358,7 @@ public class SimulationTimeProviderTests
         timer.Change(TimeSpan.FromMilliseconds(100), TimeSpan.Zero);
 
         timeProvider.Advance(TimeSpan.FromMilliseconds(100));
-        taskQueue.ExecuteAll();
+        taskQueue.RunUntilIdle();
         Assert.Equal(1, callCount);
     }
 
@@ -374,7 +375,7 @@ public class SimulationTimeProviderTests
         timer.Change(Timeout.InfiniteTimeSpan, TimeSpan.Zero);
 
         timeProvider.Advance(TimeSpan.FromSeconds(100));
-        taskQueue.ExecuteAll();
+        taskQueue.RunUntilIdle();
         Assert.Equal(0, callCount);
     }
 
@@ -394,7 +395,7 @@ public class SimulationTimeProviderTests
         using var timer3 = timeProvider.CreateTimer(_ => firedOrder.Add(3), null, TimeSpan.FromSeconds(2), TimeSpan.Zero);
 
         timeProvider.Advance(TimeSpan.FromSeconds(5));
-        taskQueue.ExecuteAll();
+        taskQueue.RunUntilIdle();
 
         Assert.Equal([2, 3, 1], firedOrder);
     }
@@ -411,7 +412,7 @@ public class SimulationTimeProviderTests
         using var timer3 = timeProvider.CreateTimer(_ => firedOrder.Add(3), null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
 
         timeProvider.Advance(TimeSpan.FromSeconds(1));
-        taskQueue.ExecuteAll();
+        taskQueue.RunUntilIdle();
 
         Assert.Equal([1, 2, 3], firedOrder);
     }
@@ -435,7 +436,7 @@ public class SimulationTimeProviderTests
 
         // Execute only the currently ready items (not items added during execution)
         // This prevents infinite loops when callbacks enqueue more items
-        taskQueue.ExecuteAll();
+        taskQueue.RunUntilIdle();
 
         // Should not hang and call count should be limited
         Assert.True(callCount >= 1, "Timer should have fired at least once");
@@ -453,7 +454,7 @@ public class SimulationTimeProviderTests
 
         timeProvider.Advance(TimeSpan.FromSeconds(3));
         // This should throw due to timer1's callback - exceptions propagate from timer callbacks
-        var ex = Assert.Throws<InvalidOperationException>(() => taskQueue.ExecuteAll());
+        var ex = Assert.Throws<InvalidOperationException>(() => taskQueue.RunUntilIdle());
         Assert.Equal("Test exception", ex.Message);
     }
 
@@ -471,7 +472,7 @@ public class SimulationTimeProviderTests
         using var timer = timeProvider.CreateTimer(_ => callCount++, null, TimeSpan.FromSeconds(5), TimeSpan.Zero);
 
         var result = timeProvider.AdvanceToNextTimer();
-        taskQueue.ExecuteAll();
+        taskQueue.RunUntilIdle();
 
         Assert.True(result);
         Assert.Equal(1, callCount);
@@ -500,15 +501,15 @@ public class SimulationTimeProviderTests
         using var timer3 = timeProvider.CreateTimer(_ => firedTimers.Add(3), null, TimeSpan.FromSeconds(3), TimeSpan.Zero);
 
         timeProvider.AdvanceToNextTimer();
-        taskQueue.ExecuteAll();
+        taskQueue.RunUntilIdle();
         Assert.Equal([1], firedTimers);
 
         timeProvider.AdvanceToNextTimer();
-        taskQueue.ExecuteAll();
+        taskQueue.RunUntilIdle();
         Assert.Equal([1, 2], firedTimers);
 
         timeProvider.AdvanceToNextTimer();
-        taskQueue.ExecuteAll();
+        taskQueue.RunUntilIdle();
         Assert.Equal([1, 2, 3], firedTimers);
     }
 
@@ -561,7 +562,7 @@ public class SimulationTimeProviderTests
 
         // After timer fires, next time should be period away
         timeProvider.Advance(TimeSpan.FromSeconds(1));
-        taskQueue.ExecuteAll();
+        taskQueue.RunUntilIdle();
         Assert.Equal(1, callCount);
         Assert.Equal(TimeSpan.FromSeconds(10), timeProvider.TimeUntilNextTimer);
     }
@@ -638,7 +639,7 @@ public class SimulationTimeProviderTests
         Assert.False(delay.IsCompleted);
 
         timeProvider.Advance(TimeSpan.FromMilliseconds(1));
-        taskQueue.ExecuteAll();
+        taskQueue.RunUntilIdle();
         await delay;
 
         Assert.True(delay.IsCompleted);
@@ -671,7 +672,7 @@ public class SimulationTimeProviderTests
         var task = Task.Delay(TimeSpan.FromMilliseconds(10000), timeProvider, cts.Token);
 
         timeProvider.Advance(TimeSpan.FromMilliseconds(10000));
-        taskQueue.ExecuteAll();
+        taskQueue.RunUntilIdle();
 
         await task;
 
@@ -704,18 +705,18 @@ public class SimulationTimeProviderTests
 
         // Advance time and verify delays complete in order
         timeProvider.Advance(TimeSpan.FromSeconds(1));
-        taskQueue.ExecuteAll();
+        taskQueue.RunUntilIdle();
         Assert.True(delay2.IsCompleted);
         Assert.False(delay3.IsCompleted);
         Assert.False(delay1.IsCompleted);
 
         timeProvider.Advance(TimeSpan.FromSeconds(1));
-        taskQueue.ExecuteAll();
+        taskQueue.RunUntilIdle();
         Assert.True(delay3.IsCompleted);
         Assert.False(delay1.IsCompleted);
 
         timeProvider.Advance(TimeSpan.FromSeconds(1));
-        taskQueue.ExecuteAll();
+        taskQueue.RunUntilIdle();
         Assert.True(delay1.IsCompleted);
     }
 
@@ -738,7 +739,7 @@ public class SimulationTimeProviderTests
 
         // Advance time past all delays and execute
         timeProvider.Advance(TimeSpan.FromSeconds(5));
-        taskQueue.ExecuteAll();
+        taskQueue.RunUntilIdle();
 
         // Continuations should run in order of their delay durations: 1s (2), 2s (3), 3s (1)
         Assert.Equal([2, 3, 1], completionOrder);
@@ -849,11 +850,11 @@ public class SimulationTimeProviderTests
         Assert.Equal(1, taskQueue.GetWaitingCount<ScheduledTimerItem>());
 
         timeProvider.Advance(TimeSpan.FromSeconds(1));
-        taskQueue.ExecuteAll(); // Execute to trigger rescheduling of periodic timer
+        taskQueue.RunUntilIdle(); // Execute to trigger rescheduling of periodic timer
         Assert.Equal(1, taskQueue.GetWaitingCount<ScheduledTimerItem>()); // Periodic timer stays registered
 
         timeProvider.Advance(TimeSpan.FromSeconds(1));
-        taskQueue.ExecuteAll();
+        taskQueue.RunUntilIdle();
         Assert.Equal(1, taskQueue.GetWaitingCount<ScheduledTimerItem>());
     }
 
@@ -933,7 +934,7 @@ public class SimulationTimeProviderTests
                 for (int j = 0; j < 100; j++)
                 {
                     timeProvider.Advance(TimeSpan.FromMilliseconds(1));
-                    taskQueue.ExecuteAll();
+                    taskQueue.RunUntilIdle();
                 }
             }, TestContext.Current.CancellationToken));
         }

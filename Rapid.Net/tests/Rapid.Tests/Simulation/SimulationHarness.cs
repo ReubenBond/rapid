@@ -370,7 +370,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
                 return true;
             }
 
-            if (_taskQueue.TryExecuteNext())
+            if (_taskQueue.RunOnce())
             {
                 LogicalTime++;
                 timeAdvanceCount = 0; // Reset time advance counter when real work happens
@@ -441,7 +441,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
 
         for (var i = 0; i < maxIterations; i++)
         {
-            if (_taskQueue.TryExecuteNext())
+            if (_taskQueue.RunOnce())
             {
                 LogicalTime++;
                 timeAdvanceCount = 0; // Reset time advance counter when real work happens

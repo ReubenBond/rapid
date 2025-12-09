@@ -189,7 +189,7 @@ public sealed class SimulationHarnessTests(ITestOutputHelper output) : IAsyncLif
 
         Assert.True(_harness.TaskQueue.HasItems);
 
-        _harness.TaskQueue.ExecuteAll();
+        _harness.TaskQueue.RunUntilIdle();
 
         Assert.False(_harness.TaskQueue.HasItems);
     }

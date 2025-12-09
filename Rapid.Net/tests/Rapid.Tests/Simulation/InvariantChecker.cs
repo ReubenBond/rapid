@@ -164,7 +164,7 @@ internal sealed class InvariantChecker(SimulationHarness harness)
         // Try to make progress
         for (var i = 0; i < maxSteps; i++)
         {
-            if (_harness.TaskQueue.TryExecuteNext())
+            if (_harness.TaskQueue.RunOnce())
             {
                 return true; // Made progress
             }
