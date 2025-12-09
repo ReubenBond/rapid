@@ -1,3 +1,4 @@
+using Rapid;
 using Rapid.Pb;
 
 namespace Rapid.Tests;
@@ -513,6 +514,245 @@ public class PaxosTests
         };
 
         Assert.Equal(long.MaxValue, msg.ConfigurationId);
+    }
+
+    #endregion
+
+    #region ChooseValue Tests (Coordinator Rule for Classic Paxos)
+
+    /// <summary>
+    /// Helper to create a Phase1bMessage with specific vrnd and vval
+    /// </summary>
+    private static Phase1bMessage CreatePhase1bMessage(int vrndRound, int vrndNodeIndex, params Endpoint[] vval)
+    {
+        var msg = new Phase1bMessage
+        {
+            Sender = Utils.HostFromParts("127.0.0.1", 1234),
+            ConfigurationId = 100,
+            Rnd = new Rank { Round = 2, NodeIndex = 1 },
+            Vrnd = new Rank { Round = vrndRound, NodeIndex = vrndNodeIndex }
+        };
+        msg.Vval.AddRange(vval);
+        return msg;
+    }
+
+    [Fact]
+    public void ChooseValue_ReturnsEmpty_WhenAllMessagesHaveEmptyVval()
+    {
+        var messages = new List<Phase1bMessage>
+        {
+            CreatePhase1bMessage(0, 0),  // empty vval
+            CreatePhase1bMessage(0, 0),  // empty vval
+            CreatePhase1bMessage(0, 0)   // empty vval
+        };
+
+        var result = Paxos.ChooseValue(messages, n: 5);
+
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public void ChooseValue_ReturnsSingleValue_WhenAllVvalsIdentical()
+    {
+        var node1 = Utils.HostFromParts("10.0.0.1", 5001);
+        var messages = new List<Phase1bMessage>
+        {
+            CreatePhase1bMessage(1, 1, node1),
+            CreatePhase1bMessage(1, 1, node1),
+            CreatePhase1bMessage(1, 1, node1)
+        };
+
+        var result = Paxos.ChooseValue(messages, n: 5);
+
+        Assert.Single(result);
+        Assert.Equal(node1, result[0]);
+    }
+
+    [Fact]
+    public void ChooseValue_UsesMaxVrnd_WhenMixedVrnds()
+    {
+        var node1 = Utils.HostFromParts("10.0.0.1", 5001);
+        var node2 = Utils.HostFromParts("10.0.0.2", 5002);
+
+        var messages = new List<Phase1bMessage>
+        {
+            CreatePhase1bMessage(0, 0, node2),  // lower vrnd - should be ignored
+            CreatePhase1bMessage(1, 1, node1),  // higher vrnd - should be chosen
+            CreatePhase1bMessage(1, 1, node1)   // higher vrnd - should be chosen
+        };
+
+        var result = Paxos.ChooseValue(messages, n: 5);
+
+        Assert.Single(result);
+        Assert.Equal(node1, result[0]);
+    }
+
+    [Fact]
+    public void ChooseValue_PicksValueWithMoreThanNOver4Votes_WhenConflicting()
+    {
+        var node1 = Utils.HostFromParts("10.0.0.1", 5001);
+        var node2 = Utils.HostFromParts("10.0.0.2", 5002);
+
+        // N=5, so N/4 = 1. We need > 1 votes (i.e., 2 or more) for a value
+        var messages = new List<Phase1bMessage>
+        {
+            CreatePhase1bMessage(1, 1, node1),
+            CreatePhase1bMessage(1, 1, node1),  // 2 votes for node1 - exceeds N/4
+            CreatePhase1bMessage(1, 1, node2)   // 1 vote for node2
+        };
+
+        var result = Paxos.ChooseValue(messages, n: 5);
+
+        Assert.Single(result);
+        Assert.Equal(node1, result[0]);
+    }
+
+    [Fact]
+    public void ChooseValue_FallsBackToAnyNonEmptyVval_WhenNoMajority()
+    {
+        var node1 = Utils.HostFromParts("10.0.0.1", 5001);
+        var node2 = Utils.HostFromParts("10.0.0.2", 5002);
+        var node3 = Utils.HostFromParts("10.0.0.3", 5003);
+
+        // N=20, so N/4 = 5. We need > 5 votes for a value to win
+        // Each value has only 1 vote, so no majority - should fall back to any non-empty
+        var messages = new List<Phase1bMessage>
+        {
+            CreatePhase1bMessage(1, 1, node1),
+            CreatePhase1bMessage(1, 1, node2),
+            CreatePhase1bMessage(1, 1, node3)
+        };
+
+        var result = Paxos.ChooseValue(messages, n: 20);
+
+        // Should return one of the values (first non-empty vval from any message)
+        Assert.Single(result);
+        Assert.True(result[0].Equals(node1) || result[0].Equals(node2) || result[0].Equals(node3));
+    }
+
+    [Fact]
+    public void ChooseValue_FallsBackToNonEmptyVval_WhenMaxVrndMessagesHaveEmptyVvals()
+    {
+        var node1 = Utils.HostFromParts("10.0.0.1", 5001);
+
+        // Higher vrnd messages have empty vval, lower vrnd has value
+        var messages = new List<Phase1bMessage>
+        {
+            CreatePhase1bMessage(0, 0, node1),  // lower vrnd with value
+            CreatePhase1bMessage(1, 1),          // higher vrnd, empty vval
+            CreatePhase1bMessage(1, 1)           // higher vrnd, empty vval
+        };
+
+        var result = Paxos.ChooseValue(messages, n: 5);
+
+        // Should fall back to the first non-empty vval
+        Assert.Single(result);
+        Assert.Equal(node1, result[0]);
+    }
+
+    [Fact]
+    public void ChooseValue_ThresholdN4_ForLargeCluster()
+    {
+        var node1 = Utils.HostFromParts("10.0.0.1", 5001);
+        var node2 = Utils.HostFromParts("10.0.0.2", 5002);
+
+        // N=20, N/4 = 5. Need > 5 (i.e., 6) votes to exceed threshold
+        var messages = new List<Phase1bMessage>();
+
+        // Add 5 votes for node2 - NOT enough (need > N/4)
+        for (var i = 0; i < 5; i++)
+        {
+            messages.Add(CreatePhase1bMessage(1, 1, node2));
+        }
+
+        // Add 1 vote for node1
+        messages.Add(CreatePhase1bMessage(1, 1, node1));
+
+        var result = Paxos.ChooseValue(messages, n: 20);
+
+        // No value exceeds N/4, should fall back to first non-empty
+        Assert.Single(result);
+        // Falls back to first message's value
+        Assert.Equal(node2, result[0]);
+    }
+
+    [Fact]
+    public void ChooseValue_ThresholdN4_ExceedsWhenEnoughVotes()
+    {
+        var node1 = Utils.HostFromParts("10.0.0.1", 5001);
+        var node2 = Utils.HostFromParts("10.0.0.2", 5002);
+
+        // N=20, N/4 = 5. Need > 5 (i.e., 6) votes to exceed threshold
+        var messages = new List<Phase1bMessage>();
+
+        // Add 6 votes for node2 - enough to exceed N/4
+        for (var i = 0; i < 6; i++)
+        {
+            messages.Add(CreatePhase1bMessage(1, 1, node2));
+        }
+
+        // Add 4 votes for node1
+        for (var i = 0; i < 4; i++)
+        {
+            messages.Add(CreatePhase1bMessage(1, 1, node1));
+        }
+
+        var result = Paxos.ChooseValue(messages, n: 20);
+
+        // node2 has 6 votes which exceeds N/4=5
+        Assert.Single(result);
+        Assert.Equal(node2, result[0]);
+    }
+
+    [Fact]
+    public void ChooseValue_MultipleEndpointsInProposal()
+    {
+        var node1 = Utils.HostFromParts("10.0.0.1", 5001);
+        var node2 = Utils.HostFromParts("10.0.0.2", 5002);
+
+        var messages = new List<Phase1bMessage>
+        {
+            CreatePhase1bMessage(1, 1, node1, node2),  // proposal with 2 endpoints
+            CreatePhase1bMessage(1, 1, node1, node2),
+            CreatePhase1bMessage(1, 1, node1, node2)
+        };
+
+        var result = Paxos.ChooseValue(messages, n: 5);
+
+        Assert.Equal(2, result.Count);
+        Assert.Equal(node1, result[0]);
+        Assert.Equal(node2, result[1]);
+    }
+
+    [Fact]
+    public void ChooseValue_EmptyMessageList_ReturnsEmpty()
+    {
+        var messages = new List<Phase1bMessage>();
+
+        var result = Paxos.ChooseValue(messages, n: 5);
+
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public void ChooseValue_VrndNodeIndexBreaksTies()
+    {
+        var node1 = Utils.HostFromParts("10.0.0.1", 5001);
+        var node2 = Utils.HostFromParts("10.0.0.2", 5002);
+
+        // Same round, different node index - higher node index wins
+        var messages = new List<Phase1bMessage>
+        {
+            CreatePhase1bMessage(1, 1, node2),   // vrnd (1,1) - lower
+            CreatePhase1bMessage(1, 2, node1),   // vrnd (1,2) - higher
+            CreatePhase1bMessage(1, 2, node1)    // vrnd (1,2) - higher
+        };
+
+        var result = Paxos.ChooseValue(messages, n: 5);
+
+        // Should choose node1 because vrnd (1,2) > (1,1)
+        Assert.Single(result);
+        Assert.Equal(node1, result[0]);
     }
 
     #endregion

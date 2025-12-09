@@ -283,20 +283,26 @@ internal sealed partial class Paxos
             // selectProposalUsingCoordinator rule may execute multiple times with each additional phase1bMessage
             // being received, but we can enter the following if statement only once when a valid cval is identified.
             var chosenValue = ChooseValue(_phase1bMessages, _membershipSize);
-            _cval = chosenValue;
 
-            LogPhase1bChosenValue(new LoggableEndpoints(_cval));
-
-            var phase2a = new Phase2aMessage
+            // Only proceed if we haven't already chosen a value AND the chosen value is non-empty
+            // This matches the Java implementation guard: cval.isEmpty() && !chosenProposal.isEmpty()
+            if (_cval.Count == 0 && chosenValue.Count > 0)
             {
-                ConfigurationId = _configurationId,
-                Sender = _myAddr,
-                Rnd = _crnd
-            };
-            phase2a.Vval.AddRange(_cval);
+                _cval = chosenValue;
 
-            var request = RapidUtils.ToRapidRequest(phase2a);
-            _broadcaster.Broadcast(request, cancellationToken);
+                LogPhase1bChosenValue(new LoggableEndpoints(_cval));
+
+                var phase2a = new Phase2aMessage
+                {
+                    ConfigurationId = _configurationId,
+                    Sender = _myAddr,
+                    Rnd = _crnd
+                };
+                phase2a.Vval.AddRange(_cval);
+
+                var request = RapidUtils.ToRapidRequest(phase2a);
+                _broadcaster.Broadcast(request, cancellationToken);
+            }
         }
     }
 
@@ -393,59 +399,67 @@ internal sealed partial class Paxos
     /// <param name="phase1bMessages">A list of phase1b messages from acceptors.</param>
     /// <param name="n">The membership size</param>
     /// <returns>a proposal to apply</returns>
-    private static List<Endpoint> ChooseValue(List<Phase1bMessage> phase1bMessages, int n)
+    internal static List<Endpoint> ChooseValue(List<Phase1bMessage> phase1bMessages, int n)
     {
-        // Let k be the largest value of vr(a) for all a in Q.
-        // V (collectedVvals) be the set of all vv(a) for all a in Q s.t vr(a) == k
-        var valuesByVrnd = phase1bMessages
-            .Where(m => m.Vval.Count > 0)
-            .GroupBy(m => m.Vrnd, RankComparer.Instance)
-            .OrderByDescending(g => g.Key, RankComparer.Instance)
-            .ToList();
+        // Find the maximum vrnd among all messages
+        var maxVrnd = phase1bMessages
+            .Select(m => m.Vrnd)
+            .Max(RankComparer.Instance);
 
-        if (valuesByVrnd.Count == 0)
+        if (maxVrnd == null)
         {
             return [];
         }
 
-        var maxVrnd = valuesByVrnd.First().Key;
-        var valuesWithMaxVrnd = valuesByVrnd.First().Select(m => m.Vval.ToList()).ToList();
+        // Let k be the largest value of vr(a) for all a in Q.
+        // V (collectedVvals) be the set of all vv(a) for all a in Q s.t vr(a) == k
+        var collectedVvals = phase1bMessages
+            .Where(m => RankComparer.Instance.Compare(m.Vrnd, maxVrnd) == 0)
+            .Where(m => m.Vval.Count > 0)
+            .Select(m => m.Vval.ToList())
+            .ToList();
 
-        // If V has a single element, then choose v.
-        var firstValue = valuesWithMaxVrnd[0];
-        if (valuesWithMaxVrnd.All(v => v.SequenceEqual(firstValue)))
+        // If V has a single unique element (all values identical), then choose v.
+        if (collectedVvals.Count > 0)
         {
-            return firstValue;
+            var firstValue = collectedVvals[0];
+            var allIdentical = collectedVvals.All(v => v.SequenceEqual(firstValue));
+            if (allIdentical)
+            {
+                return firstValue;
+            }
         }
 
         // if i-quorum Q of acceptors respond, and there is a k-quorum R such that vrnd = k and vval = v,
         // for all a in intersection(R, Q) -> then choose "v". When choosing E = N/4 and F = N/2, then
         // R intersection Q is N/4 -- meaning if there are more than N/4 identical votes.
-        var valueCounts = new Dictionary<List<Endpoint>, int>(ListEndpointComparer.Instance);
-        foreach (var value in valuesWithMaxVrnd)
+        if (collectedVvals.Count > 1)
         {
-            ref var entry = ref CollectionsMarshal.GetValueRefOrAddDefault(valueCounts, value, out var exists);
-            ++entry;
-        }
-
-        var maxCount = valueCounts.Values.Max();
-        var f = (int)Math.Floor((n - 1) / 4.0);
-
-        if (maxCount >= (n - f) / 2)
-        {
-            return valueCounts.First(kv => kv.Value == maxCount).Key;
+            // Multiple values were proposed, check if any has more than N/4 votes
+            var valueCounts = new Dictionary<List<Endpoint>, int>(ListEndpointComparer.Instance);
+            foreach (var value in collectedVvals)
+            {
+                ref var count = ref CollectionsMarshal.GetValueRefOrAddDefault(valueCounts, value, out _);
+                if (count + 1 > n / 4)
+                {
+                    return value;
+                }
+                count = count + 1;
+            }
         }
 
         // At this point, no value has been selected yet and it is safe for the coordinator to pick any proposed value.
-        // If none of the 'vvals' contain valid values (are all empty lists), then this method returns an empty
-        // list. This can happen because a quorum of acceptors that did not vote in prior rounds may have responded
+        // Fall back to picking the first non-empty vval from any message (matching Java behavior).
+        // This can happen because a quorum of acceptors that did not vote in prior rounds may have responded
         // to the coordinator first. This is safe to do here for two reasons:
         //      1) The coordinator will only proceed with phase 2 if it has a valid vote.
         //      2) It is likely that the coordinator (itself being an acceptor) is the only one with a valid vval,
         //         and has not heard a Phase1bMessage from itself yet. Once that arrives, phase1b will be triggered
         //         again.
-        //
-        return [];
+        return phase1bMessages
+            .Where(m => m.Vval.Count > 0)
+            .Select(m => m.Vval.ToList())
+            .FirstOrDefault() ?? [];
     }
 }
 

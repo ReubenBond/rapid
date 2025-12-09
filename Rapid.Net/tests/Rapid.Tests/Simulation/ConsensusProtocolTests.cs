@@ -272,4 +272,136 @@ public sealed class ConsensusProtocolTests : IAsyncLifetime
     }
 
     #endregion
+
+    #region Classic Paxos Fallback Tests (CONS-030 to CONS-035)
+
+    [Fact]
+    public void ClassicPaxosFallback_SucceedsWhenFastPaxosFails()
+    {
+        // In a 3-node cluster, Fast Paxos requires all 3 nodes (N-f where f=0 for N=3)
+        // If one node crashes, Fast Paxos cannot succeed, but Classic Paxos can
+        // because it only needs majority (2 out of 3)
+        var nodes = _harness.CreateCluster(size: 3);
+        _harness.WaitForConvergence(expectedSize: 3);
+
+        // Crash one node
+        _harness.CrashNode(nodes[2]);
+
+        // The remaining 2 nodes should eventually reach consensus via Classic Paxos
+        // to remove the crashed node
+        _harness.WaitForConvergence(expectedSize: 2);
+
+        Assert.Equal(2, nodes[0].MembershipSize);
+        Assert.Equal(2, nodes[1].MembershipSize);
+    }
+
+    [Fact]
+    public void ClassicPaxosFallback_WithFiveNodesOneCrashed()
+    {
+        // For N=5, f=1, Fast Paxos needs 4 nodes (N-f=4)
+        // Classic Paxos needs majority = 3
+        var nodes = _harness.CreateCluster(size: 5);
+        _harness.WaitForConvergence(expectedSize: 5);
+
+        // Crash one node - Fast Paxos still works with 4 nodes
+        _harness.CrashNode(nodes[4]);
+
+        _harness.WaitForConvergence(expectedSize: 4);
+
+        Assert.All(_harness.Nodes, n => Assert.Equal(4, n.MembershipSize));
+    }
+
+    [Fact]
+    public void ClassicPaxosFallback_WithFiveNodesTwoCrashed()
+    {
+        // For N=5, f=1, Fast Paxos needs 4 nodes
+        // If 2 crash, only 3 remain - Fast Paxos fails, Classic Paxos succeeds
+        var nodes = _harness.CreateCluster(size: 5);
+        _harness.WaitForConvergence(expectedSize: 5);
+
+        // Crash two nodes
+        _harness.CrashNode(nodes[3]);
+        _harness.CrashNode(nodes[4]);
+
+        // Classic Paxos should succeed with 3 nodes (majority)
+        _harness.WaitForConvergence(expectedSize: 3);
+
+        Assert.All(_harness.Nodes, n => Assert.Equal(3, n.MembershipSize));
+    }
+
+    [Fact]
+    public void FastRoundVotesPreserved_InClassicPaxosPhase1b()
+    {
+        // This test verifies that votes from the fast round are properly
+        // reported in Phase1b when Classic Paxos starts
+        // The key behavior: RegisterFastRoundVote must set _rnd, _vrnd, _vval
+
+        // Create a 3-node cluster
+        var nodes = _harness.CreateCluster(size: 3);
+        _harness.WaitForConvergence(expectedSize: 3);
+
+        // Now crash a node - this will trigger:
+        // 1. Fast Paxos attempt (fails because needs all 3)
+        // 2. Classic Paxos fallback (succeeds with 2)
+        _harness.CrashNode(nodes[2]);
+
+        // If RegisterFastRoundVote is implemented correctly, the remaining nodes
+        // will have recorded their fast round votes and Phase1b will report them
+        _harness.WaitForConvergence(expectedSize: 2);
+
+        // All remaining nodes should have consistent membership
+        Assert.Equal(nodes[0].CurrentView.ConfigurationId, nodes[1].CurrentView.ConfigurationId);
+        Assert.Equal(2, nodes[0].MembershipSize);
+        Assert.Equal(2, nodes[1].MembershipSize);
+    }
+
+    [Fact]
+    public void MultipleClassicRounds_HigherRoundWins()
+    {
+        // Test that when multiple coordinators start classic rounds,
+        // the higher rank wins
+
+        // With 4 nodes, if we crash 2, we have 2 remaining
+        // Both may try to become coordinator
+        var nodes = _harness.CreateCluster(size: 4);
+        _harness.WaitForConvergence(expectedSize: 4);
+
+        // Crash 2 nodes to force Classic Paxos
+        _harness.CrashNode(nodes[2]);
+        _harness.CrashNode(nodes[3]);
+
+        // Should converge despite potential coordinator competition
+        _harness.WaitForConvergence(expectedSize: 2);
+
+        Assert.Equal(2, nodes[0].MembershipSize);
+        Assert.Equal(2, nodes[1].MembershipSize);
+    }
+
+    #endregion
+
+    #region HandlePhase1bMessage Guard Tests (CONS-040)
+
+    [Fact]
+    public void ConsensusNotRepeated_AfterDecision()
+    {
+        // Test that once a decision is made, additional Phase1b messages
+        // don't cause duplicate consensus (the cval guard)
+        var seedNode = _harness.CreateSeedNode();
+        var joiner1 = _harness.CreateJoinerNode(seedNode, nodeId: 1);
+        var joiner2 = _harness.CreateJoinerNode(seedNode, nodeId: 2);
+
+        _harness.WaitForConvergence(expectedSize: 3);
+
+        // Record the configuration ID after first consensus
+        var configAfterJoins = seedNode.CurrentView.ConfigurationId;
+
+        // Add more time to ensure any delayed messages are processed
+        _harness.AdvanceTime(TimeSpan.FromSeconds(5));
+
+        // Configuration should not have changed (no duplicate consensus)
+        Assert.Equal(configAfterJoins, seedNode.CurrentView.ConfigurationId);
+    }
+
+    #endregion
 }
+

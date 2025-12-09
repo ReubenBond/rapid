@@ -396,11 +396,12 @@ internal sealed class SimulationHarness : IAsyncDisposable
             }
 
             // Check if we've been advancing time without making progress
+            var nextScheduledDateTimeOffset = TimeProvider.GetUtcNow() + nextScheduledTime.Value;
             if (nextScheduledTime.Value > maxEndTime)
             {
                 LogEvent(SimulationEventType.MaxStepsReached,
                     $"Simulation appears stuck: exceeded max simulated time ({MaxSimulatedTimeAdvance}). " +
-                    $"Start: {startTime:O}, Current: {TimeProvider.GetUtcNow():O}, Next scheduled: {nextScheduledTime.Value:O}");
+                    $"Start: {startTime:O}, Current: {TimeProvider.GetUtcNow():O}, Next scheduled: {nextScheduledDateTimeOffset:O}");
                 return false;
             }
 
