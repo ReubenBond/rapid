@@ -537,6 +537,13 @@ internal sealed class SimulationHarness : IAsyncDisposable
 
         for (var i = 0; i < maxIterations; i++)
         {
+            // Check for teardown cancellation
+            if (TeardownCancellationToken.IsCancellationRequested)
+            {
+                LogEvent(SimulationEventType.MaxStepsReached, "Teardown cancellation requested - exiting simulation loop");
+                return false;
+            }
+
             if (condition())
             {
                 LogEvent(SimulationEventType.ConditionMet, $"Condition met after {i} iterations");
@@ -666,6 +673,13 @@ internal sealed class SimulationHarness : IAsyncDisposable
 
         for (var i = 0; i < maxIterations; i++)
         {
+            // Check for teardown cancellation
+            if (TeardownCancellationToken.IsCancellationRequested)
+            {
+                LogEvent(SimulationEventType.MaxStepsReached, "Teardown cancellation requested - exiting simulation loop");
+                return false;
+            }
+
             if (RunOneTaskRoundRobin())
             {
                 LogicalTime++;

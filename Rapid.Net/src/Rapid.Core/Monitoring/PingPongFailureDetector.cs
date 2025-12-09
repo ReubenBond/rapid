@@ -62,24 +62,20 @@ public sealed partial class PingPongFailureDetector(
 
     private async Task ProbeAsync()
     {
-        ObjectDisposedException.ThrowIf(_disposed == 1, this);
-        while (!_cts.Token.IsCancellationRequested)
+        while (!_cts.Token.IsCancellationRequested && _disposed == 0)
         {
-            try
-            {
-                await Task.Delay(TimeSpan.FromSeconds(1), _sharedResources.TimeProvider, _cts.Token).ConfigureAwait(true);
-                await ProbeOnceAsync().ConfigureAwait(true);
-            }
-            catch (OperationCanceledException)
-            {
-                break;
-            }
+            await Task.Delay(TimeSpan.FromSeconds(1), _sharedResources.TimeProvider, _cts.Token).ConfigureAwait(true);
+            await ProbeOnceAsync().ConfigureAwait(true);
         }
     }
 
     private async Task ProbeOnceAsync()
     {
-        ObjectDisposedException.ThrowIf(_disposed == 1, this);
+        // Check disposed state without throwing - just return if disposed
+        if (_disposed == 1)
+        {
+            return;
+        }
 #pragma warning disable CA1031
         try
         {
@@ -109,7 +105,16 @@ public sealed partial class PingPongFailureDetector(
             return; // Already disposed
         }
 
-        Dispose();
+        // Cancel the token before disposing to stop the probe loop gracefully
+        try
+        {
+            _cts.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // CTS was already disposed, which is fine
+        }
+
         _probeTask?.Ignore();
         _cts.Dispose();
     }

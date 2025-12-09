@@ -704,7 +704,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     /// Leaves the cluster by telling all the observers to proactively trigger failure.
     /// This operation is blocking, as we need to wait to send the alert messages before shutting down the rest
     /// </summary>
-    public async Task LeaveAsync()
+    public async Task LeaveAsync(CancellationToken cancellationToken = default)
     {
         var leaveMessage = new LeaveMessage { Sender = _myAddr };
         var leave = RapidUtils.ToRapidRequest(leaveMessage);
@@ -715,21 +715,31 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
             LogLeavingWithObservers(new LoggableEndpoint(_myAddr), observers.Length, new LoggableEndpoints(observers));
 
             var tasks = observers.Select(endpoint =>
-                _messagingClient.SendMessageBestEffortAsync(endpoint, leave, CancellationToken.None));
+                _messagingClient.SendMessageBestEffortAsync(endpoint, leave, cancellationToken));
 
             try
             {
-                await Task.WhenAll(tasks).WaitAsync(_options.LeaveMessageTimeout, _sharedResources.TimeProvider).ConfigureAwait(true);
+                await Task.WhenAll(tasks).WaitAsync(_options.LeaveMessageTimeout, _sharedResources.TimeProvider, cancellationToken).ConfigureAwait(true);
             }
             catch (TimeoutException)
             {
                 LogTimeoutWhileLeaving();
+            }
+            catch (OperationCanceledException)
+            {
+                // Cancellation requested - propagate it
+                throw;
             }
             catch (Exception ex)
             {
                 LogExceptionWhileLeaving(ex);
                 throw;
             }
+        }
+        catch (OperationCanceledException)
+        {
+            // Cancellation requested - propagate it
+            throw;
         }
         catch (Exception)
         {

@@ -31,7 +31,8 @@ public interface IRapidCluster
     /// <summary>
     /// Gracefully leaves the cluster.
     /// </summary>
-    Task LeaveGracefullyAsync();
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
+    Task LeaveGracefullyAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Gets the accessor for membership view information.
@@ -53,11 +54,11 @@ internal sealed class RapidCluster(RapidClusterService clusterService, IMembersh
 
     public void RegisterSubscription(ClusterEvents eventType, Action<ClusterStatusChange> callback) => clusterService.MembershipService?.RegisterSubscription(eventType, callback);
 
-    public async Task LeaveGracefullyAsync()
+    public async Task LeaveGracefullyAsync(CancellationToken cancellationToken = default)
     {
         if (clusterService.MembershipService != null)
         {
-            await clusterService.MembershipService.LeaveAsync().ConfigureAwait(true);
+            await clusterService.MembershipService.LeaveAsync(cancellationToken).ConfigureAwait(true);
         }
     }
 
