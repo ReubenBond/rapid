@@ -158,9 +158,9 @@ internal sealed partial class SimulationTimeProvider : TimeProvider
 
         foreach (var item in waiting)
         {
-            if (item is ScheduledTimerItem timerItem)
+            if (item is ScheduledTimerItem { Context: SimulationTimer timer } timerItem)
             {
-                result.Add(new TimerInfo(Start + timerItem.DueTime, timerItem.Period));
+                result.Add(new TimerInfo(Start + timerItem.DueTime, timer.Period));
             }
         }
 
@@ -201,7 +201,12 @@ internal sealed class SimulationTimer(SimulationTaskQueue taskQueue, TimerCallba
     private readonly TimerCallback? _callback = callback;
     private readonly object? _state = state;
     private SimulationTaskQueue? _taskQueue = taskQueue;
-    private IDisposable? _scheduledTimer;
+    private ScheduledTimerItem? _scheduledTimer;
+
+    /// <summary>
+    /// Gets the current period for this timer.
+    /// </summary>
+    public TimeSpan Period { get; private set; }
 
     public bool Change(TimeSpan dueTime, TimeSpan period)
     {
@@ -232,6 +237,7 @@ internal sealed class SimulationTimer(SimulationTaskQueue taskQueue, TimerCallba
         if (dueTimeMs < 0)
         {
             // Infinite due time means the timer is disabled
+            Period = TimeSpan.Zero;
             return true;
         }
 
@@ -241,18 +247,35 @@ internal sealed class SimulationTimer(SimulationTaskQueue taskQueue, TimerCallba
             period = TimeSpan.Zero;
         }
 
-        // Schedule the new timer
-        var currentTime = taskQueue.CurrentTime;
-        var scheduledDueTime = currentTime + dueTime;
-        var callback = _callback!;
-        var state = _state;
+        Period = period;
 
-        _scheduledTimer = taskQueue.ScheduleTimer(
-            () => callback(state),
-            scheduledDueTime,
-            period);
+        // Schedule the new timer
+        ScheduleNextFiring(taskQueue, dueTime);
 
         return true;
+    }
+
+    private void ScheduleNextFiring(SimulationTaskQueue taskQueue, TimeSpan delay)
+    {
+        var scheduledDueTime = taskQueue.CurrentTime + delay;
+
+        _scheduledTimer = taskQueue.ScheduleTimer(
+            TimerFired,
+            scheduledDueTime,
+            context: this);
+    }
+
+    private void TimerFired()
+    {
+        // Invoke the user callback
+        _callback!(_state);
+
+        // Reschedule if this is a periodic timer
+        var taskQueue = _taskQueue;
+        if (taskQueue is not null && Period > TimeSpan.Zero)
+        {
+            ScheduleNextFiring(taskQueue, Period);
+        }
     }
 
     ~SimulationTimer() => Dispose(false);
