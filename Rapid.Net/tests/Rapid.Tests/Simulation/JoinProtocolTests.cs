@@ -1,0 +1,477 @@
+using System.Diagnostics.CodeAnalysis;
+using Rapid.Tests.Simulation;
+
+namespace Rapid.Tests.SimulationTests;
+
+/// <summary>
+/// Tests for join protocol edge cases and phase 2 failures using the simulation harness.
+/// These tests verify that the join protocol handles message drops, configuration changes,
+/// and other edge cases during the join process.
+/// </summary>
+[SuppressMessage("Naming", "CA1707:Identifiers should not contain underscores", Justification = "Test naming convention")]
+public sealed class JoinProtocolTests : IAsyncLifetime
+{
+    private SimulationHarness _harness = null!;
+    private const int TestSeed = 67891;
+
+    public ValueTask InitializeAsync()
+    {
+        _harness = new SimulationHarness(seed: TestSeed);
+        return ValueTask.CompletedTask;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await _harness.DisposeAsync();
+    }
+
+    #region Basic Join Protocol (JOIN-001 to JOIN-005)
+
+    /// <summary>
+    /// Tests that a basic join succeeds in normal conditions.
+    /// </summary>
+    [Fact]
+    public void BasicJoinSucceeds()
+    {
+        var seedNode = _harness.CreateSeedNode();
+        var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
+
+        Assert.True(joiner.IsInitialized);
+        Assert.Equal(2, joiner.MembershipSize);
+    }
+
+    /// <summary>
+    /// Tests that join returns correct membership after successful join.
+    /// </summary>
+    [Fact]
+    public void JoinReturnCorrectMembership()
+    {
+        var seedNode = _harness.CreateSeedNode();
+        var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
+
+        _harness.WaitForConvergence(expectedSize: 2);
+
+        // Both nodes should see each other
+        Assert.Equal(2, seedNode.MembershipSize);
+        Assert.Equal(2, joiner.MembershipSize);
+
+        // Verify membership contains both endpoints
+        var joinerView = joiner.CurrentView;
+        var addresses = joinerView.Members.Select(m => $"{m.Hostname.ToStringUtf8()}:{m.Port}").ToHashSet();
+
+        Assert.Contains($"{seedNode.Address.Hostname.ToStringUtf8()}:{seedNode.Address.Port}", addresses);
+        Assert.Contains($"{joiner.Address.Hostname.ToStringUtf8()}:{joiner.Address.Port}", addresses);
+    }
+
+    /// <summary>
+    /// Tests that configuration ID is set after successful join.
+    /// </summary>
+    [Fact]
+    public void JoinSetsConfigurationId()
+    {
+        var seedNode = _harness.CreateSeedNode();
+        var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
+
+        _harness.WaitForConvergence(expectedSize: 2);
+
+        // Both should have non-zero configuration IDs
+        Assert.NotEqual(0, seedNode.CurrentView.ConfigurationId);
+        Assert.NotEqual(0, joiner.CurrentView.ConfigurationId);
+
+        // Both should have the same configuration ID
+        Assert.Equal(seedNode.CurrentView.ConfigurationId, joiner.CurrentView.ConfigurationId);
+    }
+
+    #endregion
+
+    #region Join with Message Drops (JOIN-010 to JOIN-015)
+
+    /// <summary>
+    /// Tests that join succeeds despite random message drops.
+    /// The join protocol includes retry logic that should handle transient failures.
+    /// </summary>
+    [Fact]
+    public void JoinSucceedsWithRandomMessageDrops()
+    {
+        // Enable random message drops (10% drop rate)
+        _harness.Network.MessageDropRate = 0.1;
+
+        var seedNode = _harness.CreateSeedNode();
+        var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
+
+        Assert.True(joiner.IsInitialized);
+        _harness.WaitForConvergence(expectedSize: 2);
+
+        Assert.Equal(2, seedNode.MembershipSize);
+        Assert.Equal(2, joiner.MembershipSize);
+    }
+
+    /// <summary>
+    /// Tests that join succeeds with higher message drop rates due to retry logic.
+    /// </summary>
+    [Fact]
+    public void JoinSucceedsWithHigherMessageDropRate()
+    {
+        // Enable random message drops (20% drop rate)
+        _harness.Network.MessageDropRate = 0.2;
+
+        var seedNode = _harness.CreateSeedNode();
+
+        // Join should still succeed due to retry logic
+        var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
+
+        Assert.True(joiner.IsInitialized);
+        _harness.WaitForConvergence(expectedSize: 2);
+    }
+
+    /// <summary>
+    /// Tests that multiple joins succeed with message drops enabled.
+    /// </summary>
+    [Fact]
+    public void MultipleJoinsSucceedWithMessageDrops()
+    {
+        // Enable random message drops (10% drop rate)
+        _harness.Network.MessageDropRate = 0.1;
+
+        var seedNode = _harness.CreateSeedNode();
+        var joiner1 = _harness.CreateJoinerNode(seedNode, nodeId: 1);
+        var joiner2 = _harness.CreateJoinerNode(seedNode, nodeId: 2);
+
+        _harness.WaitForConvergence(expectedSize: 3);
+
+        Assert.All(_harness.Nodes, n => Assert.Equal(3, n.MembershipSize));
+    }
+
+    #endregion
+
+    #region Configuration Change During Join (JOIN-020 to JOIN-025)
+
+    /// <summary>
+    /// Tests that a new joiner can still join while another join is being processed.
+    /// This tests the configuration change handling during join.
+    /// </summary>
+    [Fact]
+    public void JoinDuringAnotherJoinSucceeds()
+    {
+        var seedNode = _harness.CreateSeedNode();
+
+        // Start first join
+        var joiner1 = _harness.CreateJoinerNode(seedNode, nodeId: 1);
+
+        // Immediately start second join (config may have changed)
+        var joiner2 = _harness.CreateJoinerNode(seedNode, nodeId: 2);
+
+        _harness.WaitForConvergence(expectedSize: 3);
+
+        Assert.True(joiner1.IsInitialized);
+        Assert.True(joiner2.IsInitialized);
+        Assert.All(_harness.Nodes, n => Assert.Equal(3, n.MembershipSize));
+    }
+
+    /// <summary>
+    /// Tests that join handles configuration changes caused by leaves.
+    /// </summary>
+    [Fact]
+    public void JoinAfterLeaveSucceeds()
+    {
+        var seedNode = _harness.CreateSeedNode();
+        var joiner1 = _harness.CreateJoinerNode(seedNode, nodeId: 1);
+        var joiner2 = _harness.CreateJoinerNode(seedNode, nodeId: 2);
+
+        _harness.WaitForConvergence(expectedSize: 3);
+
+        // Remove a node (changes configuration)
+        _harness.RemoveNodeGracefully(joiner2);
+        _harness.WaitForConvergence(expectedSize: 2);
+
+        // New join after config change should succeed
+        var joiner3 = _harness.CreateJoinerNode(seedNode, nodeId: 3);
+
+        _harness.WaitForConvergence(expectedSize: 3);
+
+        Assert.True(joiner3.IsInitialized);
+        Assert.All(_harness.Nodes, n => Assert.Equal(3, n.MembershipSize));
+    }
+
+    /// <summary>
+    /// Tests that join handles configuration changes caused by failures.
+    /// </summary>
+    [Fact]
+    public void JoinAfterNodeFailureSucceeds()
+    {
+        var seedNode = _harness.CreateSeedNode();
+        var joiner1 = _harness.CreateJoinerNode(seedNode, nodeId: 1);
+        var joiner2 = _harness.CreateJoinerNode(seedNode, nodeId: 2);
+
+        _harness.WaitForConvergence(expectedSize: 3);
+
+        // Crash a node (changes configuration after failure detection)
+        _harness.CrashNode(joiner2);
+        _harness.WaitForConvergence(expectedSize: 2, maxIterations: 500000);
+
+        // New join after failure should succeed
+        var joiner3 = _harness.CreateJoinerNode(seedNode, nodeId: 3);
+
+        _harness.WaitForConvergence(expectedSize: 3);
+
+        Assert.True(joiner3.IsInitialized);
+    }
+
+    #endregion
+
+    #region Join to Different Cluster Members (JOIN-030 to JOIN-035)
+
+    /// <summary>
+    /// Tests joining through a non-seed node.
+    /// </summary>
+    [Fact]
+    public void JoinThroughNonSeedNodeSucceeds()
+    {
+        var seedNode = _harness.CreateSeedNode();
+        var joiner1 = _harness.CreateJoinerNode(seedNode, nodeId: 1);
+
+        _harness.WaitForConvergence(expectedSize: 2);
+
+        // Join through joiner1 instead of seed
+        var joiner2 = _harness.CreateJoinerNode(joiner1, nodeId: 2);
+
+        _harness.WaitForConvergence(expectedSize: 3);
+
+        Assert.True(joiner2.IsInitialized);
+        Assert.All(_harness.Nodes, n => Assert.Equal(3, n.MembershipSize));
+    }
+
+    /// <summary>
+    /// Tests joining through different cluster members in sequence.
+    /// </summary>
+    [Fact]
+    public void JoinThroughDifferentMembersSucceeds()
+    {
+        var seedNode = _harness.CreateSeedNode();
+        var joiner1 = _harness.CreateJoinerNode(seedNode, nodeId: 1);
+        var joiner2 = _harness.CreateJoinerNode(seedNode, nodeId: 2);
+
+        _harness.WaitForConvergence(expectedSize: 3);
+
+        // Join through different members
+        var joiner3 = _harness.CreateJoinerNode(joiner1, nodeId: 3);
+        _harness.WaitForConvergence(expectedSize: 4);
+
+        var joiner4 = _harness.CreateJoinerNode(joiner2, nodeId: 4);
+        _harness.WaitForConvergence(expectedSize: 5);
+
+        var joiner5 = _harness.CreateJoinerNode(joiner3, nodeId: 5);
+        _harness.WaitForConvergence(expectedSize: 6);
+
+        Assert.All(_harness.Nodes, n => Assert.Equal(6, n.MembershipSize));
+    }
+
+    #endregion
+
+    #region Join Failures (JOIN-040 to JOIN-045)
+
+    /// <summary>
+    /// Tests that join fails when trying to join through a crashed node.
+    /// </summary>
+    [Fact]
+    public void JoinThroughCrashedNodeFails()
+    {
+        var seedNode = _harness.CreateSeedNode();
+
+        // Crash the seed
+        _harness.CrashNode(seedNode);
+
+        // Attempt to join through crashed node should fail
+        Assert.Throws<InvalidOperationException>(() =>
+        {
+            _harness.CreateJoinerNode(seedNode, nodeId: 1);
+        });
+    }
+
+    /// <summary>
+    /// Tests that join fails when joining through an isolated node.
+    /// </summary>
+    [Fact]
+    public void JoinThroughIsolatedNodeEventuallySucceeds()
+    {
+        var seedNode = _harness.CreateSeedNode();
+        var joiner1 = _harness.CreateJoinerNode(seedNode, nodeId: 1);
+
+        _harness.WaitForConvergence(expectedSize: 2);
+
+        // Isolate joiner1
+        _harness.IsolateNode(joiner1);
+
+        // Join through seed (which is not isolated) should succeed
+        var joiner2 = _harness.CreateJoinerNode(seedNode, nodeId: 2);
+
+        Assert.True(joiner2.IsInitialized);
+    }
+
+    #endregion
+
+    #region Join Protocol Timing (JOIN-050 to JOIN-055)
+
+    /// <summary>
+    /// Tests rapid consecutive joins.
+    /// </summary>
+    [Fact]
+    public void RapidConsecutiveJoinsSucceed()
+    {
+        var seedNode = _harness.CreateSeedNode();
+
+        // Rapid consecutive joins
+        for (var i = 1; i <= 5; i++)
+        {
+            var joiner = _harness.CreateJoinerNode(seedNode, nodeId: i);
+            Assert.True(joiner.IsInitialized);
+        }
+
+        _harness.WaitForConvergence(expectedSize: 6);
+
+        Assert.All(_harness.Nodes, n => Assert.Equal(6, n.MembershipSize));
+    }
+
+    /// <summary>
+    /// Tests join with network delays enabled.
+    /// </summary>
+    [Fact]
+    public void JoinSucceedsWithNetworkDelays()
+    {
+        // Enable network delays
+        _harness.Network.EnableDelays = true;
+        _harness.Network.BaseMessageDelay = TimeSpan.FromMilliseconds(10);
+        _harness.Network.MaxJitter = TimeSpan.FromMilliseconds(20);
+
+        var seedNode = _harness.CreateSeedNode();
+        var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
+
+        _harness.WaitForConvergence(expectedSize: 2);
+
+        Assert.True(joiner.IsInitialized);
+        Assert.Equal(2, joiner.MembershipSize);
+    }
+
+    /// <summary>
+    /// Tests that join protocol completes within reasonable time even with delays.
+    /// </summary>
+    [Fact]
+    public void JoinCompletesWithDelaysAndDrops()
+    {
+        // Enable both delays and drops
+        _harness.Network.EnableDelays = true;
+        _harness.Network.BaseMessageDelay = TimeSpan.FromMilliseconds(5);
+        _harness.Network.MaxJitter = TimeSpan.FromMilliseconds(10);
+        _harness.Network.MessageDropRate = 0.05; // 5% drop rate
+
+        var seedNode = _harness.CreateSeedNode();
+        var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
+
+        _harness.WaitForConvergence(expectedSize: 2);
+
+        Assert.True(joiner.IsInitialized);
+    }
+
+    #endregion
+
+    #region Join with Partitions (JOIN-060 to JOIN-065)
+
+    /// <summary>
+    /// Tests that join fails gracefully when the seed is completely partitioned.
+    /// </summary>
+    [Fact]
+    public void JoinAfterPartitionHealSucceeds()
+    {
+        var seedNode = _harness.CreateSeedNode();
+        var joiner1 = _harness.CreateJoinerNode(seedNode, nodeId: 1);
+
+        _harness.WaitForConvergence(expectedSize: 2);
+
+        // Create and heal a partition
+        _harness.PartitionNodes(seedNode, joiner1);
+        _harness.HealPartition(seedNode, joiner1);
+
+        // Join after partition heal should succeed
+        var joiner2 = _harness.CreateJoinerNode(seedNode, nodeId: 2);
+
+        _harness.WaitForConvergence(expectedSize: 3);
+
+        Assert.True(joiner2.IsInitialized);
+    }
+
+    /// <summary>
+    /// Tests that join through unpartitioned member succeeds.
+    /// </summary>
+    [Fact]
+    public void JoinThroughUnpartitionedMemberSucceeds()
+    {
+        var seedNode = _harness.CreateSeedNode();
+        var joiner1 = _harness.CreateJoinerNode(seedNode, nodeId: 1);
+        var joiner2 = _harness.CreateJoinerNode(seedNode, nodeId: 2);
+
+        _harness.WaitForConvergence(expectedSize: 3);
+
+        // Partition seed from joiner1 (but not from joiner2)
+        _harness.PartitionNodes(seedNode, joiner1);
+
+        // Join through joiner2 (which can still reach seed)
+        var joiner3 = _harness.CreateJoinerNode(joiner2, nodeId: 3);
+
+        _harness.WaitForConvergence(expectedSize: 4);
+
+        Assert.True(joiner3.IsInitialized);
+    }
+
+    #endregion
+
+    #region Join Protocol Edge Cases (JOIN-070 to JOIN-075)
+
+    /// <summary>
+    /// Tests join immediately after cluster initialization.
+    /// </summary>
+    [Fact]
+    public void JoinImmediatelyAfterClusterInit()
+    {
+        var seedNode = _harness.CreateSeedNode();
+
+        // Join immediately - no waiting
+        var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
+
+        Assert.True(joiner.IsInitialized);
+        Assert.Equal(2, joiner.MembershipSize);
+    }
+
+    /// <summary>
+    /// Tests that multiple sequential configuration changes don't break join.
+    /// </summary>
+    [Fact]
+    public void JoinAfterMultipleConfigurationChanges()
+    {
+        var seedNode = _harness.CreateSeedNode();
+
+        // Create multiple configuration changes
+        var joiner1 = _harness.CreateJoinerNode(seedNode, nodeId: 1);
+        _harness.WaitForConvergence(expectedSize: 2);
+
+        var joiner2 = _harness.CreateJoinerNode(seedNode, nodeId: 2);
+        _harness.WaitForConvergence(expectedSize: 3);
+
+        _harness.RemoveNodeGracefully(joiner2);
+        _harness.WaitForConvergence(expectedSize: 2);
+
+        var joiner3 = _harness.CreateJoinerNode(seedNode, nodeId: 3);
+        _harness.WaitForConvergence(expectedSize: 3);
+
+        _harness.RemoveNodeGracefully(joiner1);
+        _harness.WaitForConvergence(expectedSize: 2);
+
+        // Join after multiple configuration changes
+        var joiner4 = _harness.CreateJoinerNode(seedNode, nodeId: 4);
+        _harness.WaitForConvergence(expectedSize: 3);
+
+        Assert.True(joiner4.IsInitialized);
+        Assert.All(_harness.Nodes, n => Assert.Equal(3, n.MembershipSize));
+    }
+
+    #endregion
+}

@@ -26,9 +26,4 @@ public interface IEdgeFailureDetector : IDisposable
     /// Starts monitoring the subject node for failures.
     /// </summary>
     void Start();
-
-    /// <summary>
-    /// Stops monitoring the subject node.
-    /// </summary>
-    void StopMonitoring();
 }

@@ -32,13 +32,15 @@ public sealed partial class PingPongFailureDetector(
 {
     private readonly Endpoint _subject = subject;
     private readonly Endpoint _observer = observer;
-    private readonly IMessagingClient _client = client;
 #pragma warning disable CA2213 // SharedResources is owned by DI container, not disposed by this class
+    private readonly IMessagingClient _client = client;
     private readonly SharedResources _sharedResources = sharedResources;
 #pragma warning restore CA2213
     private readonly Action _notifier = notifier;
     private readonly ILogger<PingPongFailureDetector> _logger = logger ?? NullLogger<PingPongFailureDetector>.Instance;
     private readonly CancellationTokenSource _cts = new();
+    private int _disposed;
+    private Task? _probeTask;
 
     private readonly struct LoggableEndpoint(Endpoint endpoint)
     {
@@ -52,12 +54,15 @@ public sealed partial class PingPongFailureDetector(
     [LoggerMessage(Level = LogLevel.Warning, Message = "Probe exception for {Subject}")]
     private partial void LogProbeException(Exception ex, LoggableEndpoint Subject);
 
-    private Task? _probeTask;
-
-    public void Start() => _probeTask = ProbeAsync();
+    public void Start()
+    {
+        ObjectDisposedException.ThrowIf(_disposed == 1, this);
+        _probeTask = ProbeAsync();
+    }
 
     private async Task ProbeAsync()
     {
+        ObjectDisposedException.ThrowIf(_disposed == 1, this);
         while (!_cts.Token.IsCancellationRequested)
         {
             try
@@ -74,6 +79,7 @@ public sealed partial class PingPongFailureDetector(
 
     private async Task ProbeOnceAsync()
     {
+        ObjectDisposedException.ThrowIf(_disposed == 1, this);
 #pragma warning disable CA1031
         try
         {
@@ -84,24 +90,27 @@ public sealed partial class PingPongFailureDetector(
             {
                 LogProbeFailed(new LoggableEndpoint(_subject));
                 _notifier();
-                StopMonitoring();
+                Dispose();
             }
         }
         catch (Exception ex)
         {
             LogProbeException(ex, new LoggableEndpoint(_subject));
             _notifier();
-            StopMonitoring();
+            Dispose();
         }
 #pragma warning restore CA1031
     }
 
-    public void StopMonitoring() => _cts.Cancel();
-
     public void Dispose()
     {
-        StopMonitoring();
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return; // Already disposed
+        }
+
+        Dispose();
+        _probeTask?.Ignore();
         _cts.Dispose();
-        _client.Dispose();
     }
 }

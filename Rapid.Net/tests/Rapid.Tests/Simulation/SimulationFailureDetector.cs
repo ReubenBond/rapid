@@ -102,14 +102,14 @@ internal sealed partial class SimulationFailureDetector(
             {
                 LogProbeFailed(new LoggableEndpoint(subject));
                 InvokeNotifier();
-                StopMonitoring();
+                Dispose();
             }
         }
         catch (Exception ex)
         {
             LogProbeException(ex, new LoggableEndpoint(subject));
             InvokeNotifier();
-            StopMonitoring();
+            Dispose();
         }
 #pragma warning restore CA1031
     }
@@ -130,8 +130,13 @@ internal sealed partial class SimulationFailureDetector(
 #pragma warning restore CA1031
     }
 
-    public void StopMonitoring()
+    public void Dispose()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
+
         try
         {
             _cts.Cancel();
@@ -140,16 +145,7 @@ internal sealed partial class SimulationFailureDetector(
         {
             // Already disposed, ignore
         }
-    }
 
-    public void Dispose()
-    {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0)
-        {
-            return;
-        }
-
-        StopMonitoring();
         _probeTask?.Ignore();
         _cts.Dispose();
     }

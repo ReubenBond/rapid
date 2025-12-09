@@ -209,6 +209,9 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     [LoggerMessage(Level = LogLevel.Debug, Message = "FastPaxos decided continuation skipped due to shutdown")]
     private partial void LogFastPaxosDecidedSkippedShutdown();
 
+    [LoggerMessage(Level = LogLevel.Error, Message = "Callback exception for event {Event} with configId={ConfigId}")]
+    private partial void LogCallbackException(Exception ex, ClusterEvents Event, long ConfigId);
+
     private readonly struct LoggableRingNumbers(IEnumerable<int> ringNumbers)
     {
         private readonly IEnumerable<int> _ringNumbers = ringNumbers;
@@ -289,13 +292,10 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
         var nodeStatusChanges = GetInitialViewChange();
         var clusterStatusChange = new ClusterStatusChange(configurationId, [.. currentMembership], nodeStatusChanges);
 
-        foreach (var cb in _subscriptions[ClusterEvents.ViewChange])
-        {
-            cb(clusterStatusChange);
-        }
-
         // Publish the initial view to the accessor
         _viewAccessor.PublishView(_membershipView);
+
+        InvokeCallbacks(ClusterEvents.ViewChange, clusterStatusChange);
 
         LogMembershipServiceInitialized(new LoggableEndpoint(myAddr), new CurrentConfigId(_membershipView), new MembershipSize(_membershipView));
     }
@@ -490,10 +490,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
                     var currentMembership = _membershipView.GetRing(0);
                     var clusterStatusChange = new ClusterStatusChange(currentConfigurationId, [.. currentMembership], nodeStatusChanges);
 
-                    foreach (var cb in _subscriptions[ClusterEvents.ViewChangeProposal])
-                    {
-                        cb(clusterStatusChange);
-                    }
+                    InvokeCallbacks(ClusterEvents.ViewChangeProposal, clusterStatusChange);
 
                     _fastPaxosInstance.Propose(proposals, cancellationToken);
                 }
@@ -654,10 +651,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
 
             LogPublishingViewChange(new CurrentConfigId(_membershipView), new MembershipSize(_membershipView));
 
-            foreach (var cb in _subscriptions[ClusterEvents.ViewChange])
-            {
-                cb(clusterStatusChange);
-            }
+            InvokeCallbacks(ClusterEvents.ViewChange, clusterStatusChange);
         }
 
         await previousPaxosInstance.DisposeAsync();
@@ -846,6 +840,31 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     }
 
     /// <summary>
+    /// Safely invokes all callbacks registered for the specified event.
+    /// Callback exceptions are caught and logged to prevent subscriber errors from disrupting cluster state transitions.
+    /// </summary>
+    /// <param name="evt">The cluster event type to invoke callbacks for.</param>
+    /// <param name="statusChange">The cluster status change to pass to callbacks.</param>
+    private void InvokeCallbacks(ClusterEvents evt, ClusterStatusChange statusChange)
+    {
+        foreach (var cb in _subscriptions[evt])
+        {
+            try
+            {
+                cb(statusChange);
+            }
+#pragma warning disable CA1031 // Intentionally catching all exceptions from user callbacks
+            catch (Exception ex)
+#pragma warning restore CA1031
+            {
+                // Callback exceptions are intentionally swallowed to prevent
+                // subscriber errors from disrupting cluster state transitions.
+                LogCallbackException(ex, evt, statusChange.ConfigurationId);
+            }
+        }
+    }
+
+    /// <summary>
     /// Creates and schedules failure detector instances based on the fdFactory instance.
     /// </summary>
     private void CreateFailureDetectorsForCurrentConfiguration()
@@ -933,6 +952,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
 
             await DecideViewChange(await decision);
         }, CancellationToken.None, TaskContinuationOptions.None, _sharedResources.TaskScheduler);
+        continuationTask.Unwrap().Ignore();
     }
 
     /// <summary>
