@@ -131,21 +131,23 @@ internal sealed class InvariantChecker(SimulationHarness harness)
     /// <summary>
     /// Checks that configuration IDs are monotonically increasing.
     /// A node should never go back to a lower configuration ID.
+    /// Note: Configuration IDs are computed from membership hashes and can be any long value (including negative).
     /// </summary>
     public bool CheckConfigurationIdMonotonicity()
     {
         // This check requires tracking historical configuration IDs
-        // For now, just verify that all configuration IDs are non-negative
+        // Configuration IDs are computed from membership hashes and can be any long value,
+        // including negative values. The only invalid state is if we have no view at all.
         foreach (var node in _harness.Nodes)
         {
             if (!node.IsInitialized) continue;
 
-            var configId = node.CurrentView?.ConfigurationId ?? -1;
-            if (configId < 0)
+            var view = node.CurrentView;
+            if (view == null)
             {
                 RecordViolation(
                     InvariantType.ConfigurationIdMonotonicity,
-                    $"Invalid configuration ID: {configId}");
+                    $"Node {RapidUtils.Loggable(node.Address)} has no membership view");
                 return false;
             }
         }

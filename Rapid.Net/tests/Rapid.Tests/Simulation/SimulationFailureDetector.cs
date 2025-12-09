@@ -80,6 +80,15 @@ internal sealed partial class SimulationFailureDetector(
         }
     }
 
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Calling notifier for subject {Subject}")]
+    private partial void LogCallingNotifier(LoggableEndpoint Subject);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Notifier completed for subject {Subject}")]
+    private partial void LogNotifierCompleted(LoggableEndpoint Subject);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Notifier threw exception for subject {Subject}")]
+    private partial void LogNotifierException(Exception ex, LoggableEndpoint Subject);
+
     private async Task ProbeOnceAsync()
     {
 #pragma warning disable CA1031
@@ -91,15 +100,31 @@ internal sealed partial class SimulationFailureDetector(
             if (response.ProbeResponse == null)
             {
                 LogProbeFailed(new LoggableEndpoint(subject));
-                notifier();
+                InvokeNotifier();
                 StopMonitoring();
             }
         }
         catch (Exception ex)
         {
             LogProbeException(ex, new LoggableEndpoint(subject));
-            notifier();
+            InvokeNotifier();
             StopMonitoring();
+        }
+#pragma warning restore CA1031
+    }
+
+    private void InvokeNotifier()
+    {
+#pragma warning disable CA1031
+        try
+        {
+            LogCallingNotifier(new LoggableEndpoint(subject));
+            notifier();
+            LogNotifierCompleted(new LoggableEndpoint(subject));
+        }
+        catch (Exception ex)
+        {
+            LogNotifierException(ex, new LoggableEndpoint(subject));
         }
 #pragma warning restore CA1031
     }

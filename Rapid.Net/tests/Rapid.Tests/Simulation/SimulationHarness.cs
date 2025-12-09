@@ -260,14 +260,46 @@ internal sealed class SimulationHarness : IAsyncDisposable
 
     /// <summary>
     /// Gracefully removes a node from the cluster.
+    /// The leaving node must participate in the consensus round that removes it,
+    /// so we keep it alive until consensus completes and all remaining nodes converge.
     /// </summary>
     public void RemoveNodeGracefully(SimulationNode node)
     {
         ArgumentNullException.ThrowIfNull(node);
+        LogEvent(SimulationEventType.NodeLeaving, $"Node beginning graceful leave");
+        
+        var remainingNodes = _nodes.Where(n => n != node).ToList();
+        var targetSize = remainingNodes.Count;
+        
+        // Drive the leave operation to completion (sends LeaveMessages to observers)
         DriveToCompletion(() => node.LeaveAsync());
+        
+        // The leaving node must remain active to participate in consensus.
+        // Run the simulation until all remaining nodes converge to the new size.
+        // This allows:
+        // 1. HandleLeaveMessage -> EdgeFailureNotification -> EnqueueAlertMessage
+        // 2. AlertBatcher broadcasts the DOWN alert to all nodes (including leaving node)
+        // 3. HandleBatchedAlertMessage -> cut detection -> consensus proposal
+        // 4. FastPaxos/Paxos consensus completes (leaving node votes too)
+        // 5. DecideViewChange updates membership on all nodes
+        var converged = RunUntil(
+            () => remainingNodes.All(n => n.MembershipSize == targetSize),
+            maxIterations: 100000);
+        
+        if (!converged)
+        {
+            // Log current state for debugging
+            var sizes = string.Join(", ", remainingNodes.Select(n => n.MembershipSize));
+            _logger?.LogWarning(
+                "RemoveNodeGracefully: remaining nodes did not converge to size {TargetSize}. Current sizes: [{Sizes}]",
+                targetSize, sizes);
+        }
+        
+        // Now that consensus is complete, shut down and dispose the leaving node
         node.Shutdown();
         node.Dispose();
         _nodes.Remove(node);
+        
         LogEvent(SimulationEventType.NodeLeft, $"Node left gracefully");
     }
 

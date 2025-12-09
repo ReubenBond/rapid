@@ -138,7 +138,7 @@ public sealed class ClusterBasicTests(ITestOutputHelper output) : IAsyncLifetime
         Assert.Equal(seedNode.CurrentView.ConfigurationId, joiner.CurrentView.ConfigurationId);
     }
 
-    [Fact(Skip = "Requires simulation to properly drive consensus after graceful leave - see infrastructure issue")]
+    [Fact]
     public void JoinerCanLeaveThreeNodeCluster()
     {
         // Use 3-node cluster so remaining 2 nodes can reach quorum for consensus
@@ -158,7 +158,7 @@ public sealed class ClusterBasicTests(ITestOutputHelper output) : IAsyncLifetime
         Assert.Equal(2, joiner1.MembershipSize);
     }
 
-    [Fact(Skip = "Requires simulation to properly drive consensus after graceful leave - see infrastructure issue")]
+    [Fact]
     public void SeedCanLeaveThreeNodeCluster()
     {
         // Use 3-node cluster so remaining 2 nodes can reach quorum for consensus

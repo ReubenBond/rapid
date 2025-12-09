@@ -28,7 +28,7 @@ public sealed class NodeFailureTests(ITestOutputHelper output) : IAsyncLifetime
 
     #region Single Node Failure (FAIL-001 to FAIL-004)
 
-    [Fact(Skip = "Requires simulation failure detection to propagate and reach consensus - see infrastructure issue")]
+    [Fact]
     public void NodeCrashRemovesFromCluster()
     {
         // Use 3-node cluster so quorum can be reached after one node crashes
@@ -95,7 +95,7 @@ public sealed class NodeFailureTests(ITestOutputHelper output) : IAsyncLifetime
 
     #region Multiple Node Failures (FAIL-010 to FAIL-013)
 
-    [Fact(Skip = "Requires simulation failure detection to propagate and reach consensus - see infrastructure issue")]
+    [Fact]
     public void TwoNodeFailuresInFiveNodeCluster()
     {
         var nodes = _harness.CreateCluster(size: 5);
@@ -186,7 +186,7 @@ public sealed class NodeFailureTests(ITestOutputHelper output) : IAsyncLifetime
         });
     }
 
-    [Fact(Skip = "Requires simulation failure detection to propagate and reach consensus - see infrastructure issue")]
+    [Fact]
     public void AlternativeSeedAllowsJoin()
     {
         // Need a 3-node cluster so that after crashing one node,
