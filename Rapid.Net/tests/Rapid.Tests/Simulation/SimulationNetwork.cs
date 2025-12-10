@@ -49,13 +49,6 @@ internal sealed class SimulationNetwork
     /// </summary>
     public bool EnableDelays { get; set; }
 
-    /// <summary>
-    /// Gets or sets the default timeout for message delivery.
-    /// This is applied to all nodes created after setting this value.
-    /// Default is 30 seconds.
-    /// </summary>
-    public TimeSpan DefaultMessageTimeout { get; set; } = TimeSpan.FromSeconds(30);
-
     internal SimulationNetwork(SimulationHarness harness, SimulationRandom random)
     {
         _harness = harness;

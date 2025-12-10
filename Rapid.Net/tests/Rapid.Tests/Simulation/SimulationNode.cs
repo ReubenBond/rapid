@@ -88,13 +88,11 @@ internal sealed class SimulationNode : IDisposable
             ?? NullLogger<SharedResources>.Instance;
         _sharedResources = new SharedResources(sharedResourcesLogger, context.TimeProvider, context.TaskScheduler, Random, Random.NextGuid);
 
-        // Create in-memory messaging client with a shorter timeout for simulations
-        MessagingClient = new InMemoryMessagingClient(harness, this, address)
-        {
-            // Use a 5 second timeout for simulations - this is long enough for consensus
-            // but short enough that tests don't hang when nodes are crashed
-            MessageTimeout = TimeSpan.FromSeconds(5)
-        };
+        // Create in-memory messaging client using GrpcTimeout from protocol options.
+        // For tests with suspended nodes requiring Classic Paxos fallback,
+        // a longer timeout (e.g., 30 seconds) may be needed to allow
+        // for the random jitter delay before Classic Paxos starts.
+        MessagingClient = new InMemoryMessagingClient(harness, this, address, options);
 
         // Create view accessor
         _viewAccessor = new MembershipViewAccessor();

@@ -20,22 +20,25 @@ internal sealed class InMemoryMessagingClient : IMessagingClient
     private readonly SimulationHarness _harness;
     private readonly SimulationNode _sourceNode;
     private readonly Endpoint _localEndpoint;
+    private readonly TimeSpan _messageTimeout;
     private readonly ILogger<InMemoryMessagingClient> _logger;
     private readonly ConcurrentDictionary<int, Task> _pendingTasks = new();
     private int _taskIdCounter;
     private bool _disposed;
 
     /// <summary>
-    /// Default timeout for message delivery. This prevents indefinite hangs when
-    /// consensus cannot be reached (e.g., due to network partitions or node failures).
+    /// Creates an in-memory messaging client for simulation testing.
     /// </summary>
-    public TimeSpan MessageTimeout { get; set; } = TimeSpan.FromSeconds(30);
-
-    public InMemoryMessagingClient(SimulationHarness harness, SimulationNode sourceNode, Endpoint localEndpoint)
+    /// <param name="harness">The simulation harness.</param>
+    /// <param name="sourceNode">The source node for this client.</param>
+    /// <param name="localEndpoint">The local endpoint address.</param>
+    /// <param name="options">Protocol options containing GrpcTimeout for message delivery timeout.</param>
+    public InMemoryMessagingClient(SimulationHarness harness, SimulationNode sourceNode, Endpoint localEndpoint, RapidProtocolOptions options)
     {
         _harness = harness;
         _sourceNode = sourceNode;
         _localEndpoint = localEndpoint;
+        _messageTimeout = options.GrpcTimeout;
         _logger = harness.LoggerFactory?.CreateLogger<InMemoryMessagingClient>()
             ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<InMemoryMessagingClient>.Instance;
     }
@@ -108,9 +111,14 @@ internal sealed class InMemoryMessagingClient : IMessagingClient
         string remoteAddr)
 #pragma warning restore CA1068
     {
-        // Get the target node's context
+        // Get the target node's context for message delivery
         var targetContext = _harness.GetNodeContext(targetNode);
         var targetQueue = targetContext.TaskQueue;
+
+        // Get the source node's context for timeout scheduling
+        // This ensures timeouts fire even if the target node is suspended
+        var sourceContext = _harness.GetNodeContext(_sourceNode);
+        var sourceQueue = sourceContext.TaskQueue;
 
         // Apply network delay if configured
         var delay = _harness.Network.GetMessageDelay();
@@ -156,18 +164,20 @@ internal sealed class InMemoryMessagingClient : IMessagingClient
             }
         }
 
-        // Schedule timeout on the target node's queue
-        var timeoutItem = targetQueue.EnqueueAfter(
+        // Schedule timeout on the SOURCE node's queue, not the target's.
+        // This ensures timeouts fire even if the target node is suspended,
+        // which is critical for proper simulation of node failures and suspensions.
+        var timeoutItem = sourceQueue.EnqueueAfter(
             new ScheduledActionItem(() =>
             {
                 if (!responseTcs.Task.IsCompleted)
                 {
                     _logger.LogWarning("Message {MessageType} from {Local} to {Remote} timed out after {Timeout}",
-                        request.ContentCase, localAddr, remoteAddr, MessageTimeout);
-                    responseTcs.TrySetException(new TimeoutException($"Message to {remoteAddr} timed out after {MessageTimeout}"));
+                        request.ContentCase, localAddr, remoteAddr, _messageTimeout);
+                    responseTcs.TrySetException(new TimeoutException($"Message to {remoteAddr} timed out after {_messageTimeout}"));
                 }
             }),
-            MessageTimeout + delay);
+            _messageTimeout + delay);
 
         // Cancel timeout when response is received
         responseTcs.Task.ContinueWith(
@@ -175,7 +185,7 @@ internal sealed class InMemoryMessagingClient : IMessagingClient
             state: null,
             CancellationToken.None,
             TaskContinuationOptions.ExecuteSynchronously,
-            targetContext.TaskScheduler);
+            sourceContext.TaskScheduler);
 
         // Schedule the delivery (with optional delay)
         if (delay > TimeSpan.Zero)
