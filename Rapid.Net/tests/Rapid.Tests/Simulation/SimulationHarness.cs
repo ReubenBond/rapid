@@ -657,6 +657,17 @@ internal sealed class SimulationHarness : IAsyncDisposable
         RunUntil(() => Nodes.All(n => n.MembershipSize == expectedSize), maxIterations);
 
     /// <summary>
+    /// Runs until the specified nodes have the expected membership size.
+    /// Use this overload when some nodes (e.g., isolated/partitioned nodes) should be excluded from the check.
+    /// </summary>
+    public bool RunUntilConverged(IEnumerable<SimulationNode> nodes, int expectedSize, int maxIterations = 100000)
+    {
+        ArgumentNullException.ThrowIfNull(nodes);
+        var nodeList = nodes.ToList();
+        return RunUntil(() => nodeList.All(n => n.MembershipSize == expectedSize), maxIterations);
+    }
+
+    /// <summary>
     /// Runs the simulation until it becomes idle.
     /// </summary>
     public bool RunUntilIdle(TimeSpan? maxSimulatedTime = null, int maxIterations = 100000) => RunUntilIdleCore(maxSimulatedTime, maxIterations);
@@ -782,6 +793,21 @@ internal sealed class SimulationHarness : IAsyncDisposable
         {
             throw new TimeoutException($"Nodes did not converge to size {expectedSize}. " +
                 $"Current sizes: [{string.Join(", ", _nodes.Select(n => n.MembershipSize))}]");
+        }
+    }
+
+    /// <summary>
+    /// Waits for the specified nodes to converge to the same membership size.
+    /// Use this overload when some nodes (e.g., isolated/partitioned nodes) should be excluded from the check.
+    /// </summary>
+    public void WaitForConvergence(IEnumerable<SimulationNode> nodes, int expectedSize, int maxIterations = 100000)
+    {
+        ArgumentNullException.ThrowIfNull(nodes);
+        var nodeList = nodes.ToList();
+        if (!RunUntilConverged(nodeList, expectedSize, maxIterations))
+        {
+            throw new TimeoutException($"Nodes did not converge to size {expectedSize}. " +
+                $"Current sizes: [{string.Join(", ", nodeList.Select(n => n.MembershipSize))}]");
         }
     }
 

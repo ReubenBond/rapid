@@ -289,7 +289,8 @@ public sealed class NodeRejoinTests : IAsyncLifetime
         _harness.IsolateNode(joiner3);
 
         // Wait for failure detection to kick out the isolated node
-        _harness.WaitForConvergence(expectedSize: 3, maxIterations: 500000);
+        // Only check the non-isolated nodes - the isolated node won't see the updated view
+        _harness.WaitForConvergence([seedNode, joiner1, joiner2], expectedSize: 3, maxIterations: 500000);
 
         // Crash the isolated node (simulating it being removed)
         _harness.CrashNode(joiner3);
