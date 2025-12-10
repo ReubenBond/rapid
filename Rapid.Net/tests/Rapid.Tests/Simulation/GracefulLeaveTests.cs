@@ -14,7 +14,7 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
 {
     private SimulationHarness _harness = null!;
     private const int TestSeed = 67890;
-    private readonly List<BroadcastEnumerable<ClusterEventNotification>.PollableEnumerator> _consumers = [];
+    private readonly List<AsyncEnumerablePoller<ClusterEventNotification>> _consumers = [];
 
     public ValueTask InitializeAsync()
     {
@@ -22,23 +22,23 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         return ValueTask.CompletedTask;
     }
 
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         foreach (var consumer in _consumers)
         {
-            consumer.Dispose();
+            await consumer.DisposeAsync().ConfigureAwait(false);
         }
         _consumers.Clear();
 
-        return _harness.DisposeAsync();
+        await _harness.DisposeAsync().ConfigureAwait(false);
     }
 
     /// <summary>
     /// Creates an event consumer for the node and registers it for cleanup during disposal.
     /// </summary>
-    private BroadcastEnumerable<ClusterEventNotification>.PollableEnumerator CreateEventConsumer(SimulationNode node)
+    private AsyncEnumerablePoller<ClusterEventNotification> CreateEventConsumer(SimulationNode node)
     {
-        var consumer = node.GetPollableEventEnumerator();
+        var consumer = new AsyncEnumerablePoller<ClusterEventNotification>(node.EventStream);
         _consumers.Add(consumer);
         return consumer;
     }
@@ -46,34 +46,13 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
     /// <summary>
     /// Drains all available events from the consumer and counts ViewChange events.
     /// </summary>
-    private static int CountViewChangeEvents(BroadcastEnumerable<ClusterEventNotification>.PollableEnumerator consumer)
-    {
-        var count = 0;
-        while (consumer.TryGetNext(out var notification))
-        {
-            if (notification.Event == ClusterEvents.ViewChange)
-            {
-                count++;
-            }
-        }
-        return count;
-    }
+    private static int CountViewChangeEvents(AsyncEnumerablePoller<ClusterEventNotification> consumer) => consumer.ConsumeCompleted().Where(n => n.Event == ClusterEvents.ViewChange).Count();
 
     /// <summary>
     /// Drains all available events from the consumer and collects membership sizes from ViewChange events.
     /// </summary>
-    private static List<int> CollectViewChangeMembershipSizes(BroadcastEnumerable<ClusterEventNotification>.PollableEnumerator consumer)
-    {
-        var sizes = new List<int>();
-        while (consumer.TryGetNext(out var notification))
-        {
-            if (notification.Event == ClusterEvents.ViewChange)
-            {
-                sizes.Add(notification.Change.Membership.Count);
-            }
-        }
-        return sizes;
-    }
+    private static List<int> CollectViewChangeMembershipSizes(AsyncEnumerablePoller<ClusterEventNotification> consumer)
+        => [.. consumer.ConsumeCompleted().Where(n => n.Event == ClusterEvents.ViewChange).Select(n => n.Change.Membership.Count)];
 
     #region Basic Graceful Leave (LEAVE-001 to LEAVE-005)
 

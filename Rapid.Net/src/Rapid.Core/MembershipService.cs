@@ -667,16 +667,6 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     public IAsyncEnumerable<ClusterEventNotification> EventStream => _eventBroadcaster;
 
     /// <summary>
-    /// Gets a pollable enumerator for synchronously consuming events in simulation tests.
-    /// This method is internal and should only be used by simulation testing infrastructure.
-    /// </summary>
-    /// <param name="cancellationToken">Optional cancellation token.</param>
-    /// <returns>A pollable enumerator that only advances when the next item is immediately available.</returns>
-    internal BroadcastEnumerable<ClusterEventNotification>.PollableEnumerator GetPollableEventEnumerator(
-        CancellationToken cancellationToken = default)
-        => _eventBroadcaster.GetPollableEnumerator(cancellationToken);
-
-    /// <summary>
     /// Gets the list of endpoints currently in the membership view.
     /// </summary>
     /// <returns>list of endpoints in the membership view</returns>

@@ -9,8 +9,8 @@ namespace Rapid.Tests.Simulation;
 /// indefinitely waiting for a stream that never completes on its own.
 /// </para>
 /// <para>
-/// This class provides a polling-based approach: <see cref="Poll"/> checks if an item
-/// is synchronously available without blocking, allowing tests to drain all currently-buffered
+/// This class provides a polling-based approach: <see cref="ConsumeCompleted"/> takes all synchronously
+/// available items, allowing tests to drain all currently-buffered
 /// items after simulation steps complete.
 /// </para>
 /// </summary>
@@ -34,7 +34,7 @@ public sealed class AsyncEnumerablePoller<T> : IAsyncDisposable
 {
     private readonly CancellationTokenSource _cts = new();
     private readonly IAsyncEnumerator<T> _enumerator;
-    private ValueTask<bool>? _pendingMoveNext;
+    private Task<bool>? _pendingMoveNext;
     private bool _stopped;
 
     /// <summary>
@@ -48,46 +48,44 @@ public sealed class AsyncEnumerablePoller<T> : IAsyncDisposable
         _enumerator = stream.GetAsyncEnumerator(_cts.Token);
     }
 
-    /// <summary>
-    /// Polls for the next item. Returns <c>default</c> if no item is ready yet or the stream has ended.
-    /// <para>
-    /// This method is non-blocking - it checks if a pending <c>MoveNextAsync</c> has completed
-    /// synchronously and returns the current item if available.
-    /// </para>
-    /// </summary>
-    /// <returns>The next item if one is immediately available; otherwise <c>default</c>.</returns>
-    public T? Poll()
+    public IEnumerable<T> ConsumeCompleted()
     {
-        if (_stopped) return default;
+        while (TryConsume(out var item))
+        {
+            yield return item!;
+        }
+    }
+
+    private bool TryConsume(out T? value)
+    {
+        if (_stopped)
+        {
+            value = default;
+            return false;
+        }
 
         // Start a new MoveNextAsync if we don't have one pending
-        _pendingMoveNext ??= _enumerator.MoveNextAsync();
+        _pendingMoveNext ??= _enumerator.MoveNextAsync().AsTask();
 
         // Check if the move next has completed (synchronously available)
-        if (_pendingMoveNext.Value.IsCompleted)
+        if (_pendingMoveNext.IsCompleted)
         {
-            var hasValue = _pendingMoveNext.Value.Result;
+            var hasValue = _pendingMoveNext.Result;
             _pendingMoveNext = null;
 
             if (hasValue)
             {
-                return _enumerator.Current;
+                value = _enumerator.Current;
+                return true;
             }
 
             _stopped = true;
         }
 
-        return default;
+        value = default;
+        return false;
     }
 
-    /// <summary>
-    /// Returns <c>true</c> if the poller has been stopped or the stream has ended.
-    /// </summary>
-    public bool IsStopped => _stopped;
-
-    /// <summary>
-    /// Disposes the poller, canceling any pending enumeration and releasing resources.
-    /// </summary>
     public async ValueTask DisposeAsync()
     {
         if (_stopped) return;

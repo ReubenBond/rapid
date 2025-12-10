@@ -16,7 +16,7 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
 {
     private SimulationHarness _harness = null!;
     private const int TestSeed = 45678;
-    private readonly List<BroadcastEnumerable<ClusterEventNotification>.PollableEnumerator> _consumers = [];
+    private readonly List<AsyncEnumerablePoller<ClusterEventNotification>> _consumers = [];
 
     public ValueTask InitializeAsync()
     {
@@ -24,23 +24,23 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
         return ValueTask.CompletedTask;
     }
 
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         foreach (var consumer in _consumers)
         {
-            consumer.Dispose();
+            await consumer.DisposeAsync().ConfigureAwait(false);
         }
         _consumers.Clear();
 
-        return _harness.DisposeAsync();
+        await _harness.DisposeAsync().ConfigureAwait(false);
     }
 
     /// <summary>
     /// Creates an event consumer for the node and registers it for cleanup during disposal.
     /// </summary>
-    private BroadcastEnumerable<ClusterEventNotification>.PollableEnumerator CreateEventConsumer(SimulationNode node)
+    private AsyncEnumerablePoller<ClusterEventNotification> CreateEventConsumer(SimulationNode node)
     {
-        var consumer = node.GetPollableEventEnumerator();
+        var consumer = new AsyncEnumerablePoller<ClusterEventNotification>(node.EventStream);
         _consumers.Add(consumer);
         return consumer;
     }
@@ -48,34 +48,20 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
     /// <summary>
     /// Drains all available events from the consumer and collects matching events into the bag.
     /// </summary>
-    private static void CollectEvents(BroadcastEnumerable<ClusterEventNotification>.PollableEnumerator consumer, ClusterEvents eventType, ConcurrentBag<ClusterStatusChange> bag)
+    private static void CollectEvents(AsyncEnumerablePoller<ClusterEventNotification> consumer, ClusterEvents eventType, ConcurrentBag<ClusterStatusChange> bag)
     {
-        while (consumer.TryGetNext(out var notification))
+        foreach (var notification in consumer.ConsumeCompleted().Where(n => n.Event == eventType))
         {
-            if (notification.Event == eventType)
-            {
-                bag.Add(notification.Change);
-            }
-        }
-    }
-
-    /// <summary>
-    /// Drains all available events from the consumer and collects all notifications into the bag.
-    /// </summary>
-    private static void CollectEvents(BroadcastEnumerable<ClusterEventNotification>.PollableEnumerator consumer, ConcurrentBag<ClusterEventNotification> bag)
-    {
-        while (consumer.TryGetNext(out var notification))
-        {
-            bag.Add(notification);
+            bag.Add(notification.Change);
         }
     }
 
     /// <summary>
     /// Drains all available events from the consumer and records event types into the queue.
     /// </summary>
-    private static void CollectEvents(BroadcastEnumerable<ClusterEventNotification>.PollableEnumerator consumer, ConcurrentQueue<string> queue)
+    private static void CollectEvents(AsyncEnumerablePoller<ClusterEventNotification> consumer, ConcurrentQueue<string> queue)
     {
-        while (consumer.TryGetNext(out var notification))
+        foreach (var notification in consumer.ConsumeCompleted())
         {
             queue.Enqueue(notification.Event == ClusterEvents.ViewChangeProposal ? "Proposal" : "ViewChange");
         }
