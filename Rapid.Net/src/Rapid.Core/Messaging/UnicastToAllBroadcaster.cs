@@ -16,4 +16,12 @@ public sealed class UnicastToAllBroadcaster(IMessagingClient client) : IBroadcas
             _client.SendOneWayMessage(member, request, cancellationToken);
         }
     }
+
+    public void Broadcast(RapidRequest request, BroadcastFailureCallback? onDeliveryFailure, CancellationToken cancellationToken)
+    {
+        foreach (var member in _membership)
+        {
+            _client.SendOneWayMessage(member, request, onDeliveryFailure != null ? ep => onDeliveryFailure(ep) : null, cancellationToken);
+        }
+    }
 }

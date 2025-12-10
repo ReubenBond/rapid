@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using Grpc.Core;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -31,6 +32,18 @@ internal sealed partial class GrpcClient(IOptions<RapidProtocolOptions> options,
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "GrpcClient stopping, waiting for {Count} pending tasks")]
     private partial void LogStopping(int Count);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "One-way message delivery failed to {Remote}: RPC error {StatusCode} - {Error}")]
+    private partial void LogOneWayDeliveryFailedRpc(LoggableEndpoint Remote, StatusCode StatusCode, string Error);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "One-way message delivery failed to {Remote}: Timeout after {Timeout}")]
+    private partial void LogOneWayDeliveryFailedTimeout(LoggableEndpoint Remote, TimeSpan Timeout);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "One-way message delivery failed to {Remote}: Unexpected error - {Error}")]
+    private partial void LogOneWayDeliveryFailedUnexpected(LoggableEndpoint Remote, string Error);
+
+    [LoggerMessage(Level = LogLevel.Trace, Message = "One-way message delivered successfully to {Remote}")]
+    private partial void LogOneWayDeliverySucceeded(LoggableEndpoint Remote);
 
     public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
@@ -90,30 +103,53 @@ internal sealed partial class GrpcClient(IOptions<RapidProtocolOptions> options,
     public void SendOneWayMessage(Endpoint remote, RapidRequest request, CancellationToken cancellationToken)
     {
         var taskId = Interlocked.Increment(ref _taskIdCounter);
-        var task = SendOneWayMessageInternalAsync(remote, request, taskId, cancellationToken);
+        var task = SendOneWayMessageInternalAsync(remote, request, taskId, onDeliveryFailure: null, cancellationToken);
         _pendingTasks.TryAdd(taskId, task);
     }
 
-    private async Task SendOneWayMessageInternalAsync(Endpoint remote, RapidRequest request, int taskId, CancellationToken cancellationToken)
+    public void SendOneWayMessage(Endpoint remote, RapidRequest request, DeliveryFailureCallback? onDeliveryFailure, CancellationToken cancellationToken)
+    {
+        var taskId = Interlocked.Increment(ref _taskIdCounter);
+        var task = SendOneWayMessageInternalAsync(remote, request, taskId, onDeliveryFailure, cancellationToken);
+        _pendingTasks.TryAdd(taskId, task);
+    }
+
+    [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "One-way messages ignore failures but may invoke callback")]
+    private async Task SendOneWayMessageInternalAsync(Endpoint remote, RapidRequest request, int taskId, DeliveryFailureCallback? onDeliveryFailure, CancellationToken cancellationToken)
     {
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         cts.CancelAfter(_options.GrpcTimeout);
 
         var client = GetOrCreateClient(remote);
-#pragma warning disable CA1031 // Do not catch general exception types
+
         try
         {
             await client.SendRequestAsync(request, cancellationToken: cts.Token);
+            LogOneWayDeliverySucceeded(new LoggableEndpoint(remote));
         }
-        catch
+        catch (RpcException ex)
         {
-            // Ignore.
+            LogOneWayDeliveryFailedRpc(new LoggableEndpoint(remote), ex.StatusCode, ex.Message);
+            onDeliveryFailure?.Invoke(remote);
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            LogOneWayDeliveryFailedTimeout(new LoggableEndpoint(remote), _options.GrpcTimeout);
+            onDeliveryFailure?.Invoke(remote);
+        }
+        catch (OperationCanceledException)
+        {
+            // User cancellation - don't invoke callback
+        }
+        catch (Exception ex)
+        {
+            LogOneWayDeliveryFailedUnexpected(new LoggableEndpoint(remote), ex.Message);
+            onDeliveryFailure?.Invoke(remote);
         }
         finally
         {
             _pendingTasks.TryRemove(taskId, out _);
         }
-#pragma warning restore CA1031 // Do not catch general exception types
     }
 
     private Pb.MembershipService.MembershipServiceClient GetOrCreateClient(Endpoint remote)

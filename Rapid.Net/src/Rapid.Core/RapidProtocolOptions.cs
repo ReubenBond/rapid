@@ -41,7 +41,9 @@ public sealed class RapidProtocolOptions
     public TimeSpan BatchingWindow { get; set; } = TimeSpan.FromMilliseconds(100);
 
     /// <summary>
-    /// Base delay for consensus fallback timeout. Default: 500 milliseconds
+    /// Base delay for consensus fallback timeout. Default: 500 milliseconds.
+    /// This is the minimum time to wait before falling back to Classic Paxos
+    /// if Fast Paxos hasn't completed. Actual delay includes random jitter.
     /// </summary>
     public TimeSpan ConsensusFallbackTimeoutBaseDelay { get; set; } = TimeSpan.FromMilliseconds(500);
 

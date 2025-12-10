@@ -228,20 +228,41 @@ internal sealed class InMemoryMessagingClient : IMessagingClient
         ObjectDisposedException.ThrowIf(_disposed, this);
 
         var taskId = Interlocked.Increment(ref _taskIdCounter);
-        var task = SendOneWayMessageInternalAsync(remote, request, taskId, cancellationToken);
+        var task = SendOneWayMessageInternalAsync(remote, request, taskId, onDeliveryFailure: null, cancellationToken);
         _pendingTasks.TryAdd(taskId, task);
     }
 
-    private async Task SendOneWayMessageInternalAsync(Endpoint remote, RapidRequest request, int taskId, CancellationToken cancellationToken)
+    public void SendOneWayMessage(Endpoint remote, RapidRequest request, DeliveryFailureCallback? onDeliveryFailure, CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        var taskId = Interlocked.Increment(ref _taskIdCounter);
+        var task = SendOneWayMessageInternalAsync(remote, request, taskId, onDeliveryFailure, cancellationToken);
+        _pendingTasks.TryAdd(taskId, task);
+    }
+
+    private async Task SendOneWayMessageInternalAsync(Endpoint remote, RapidRequest request, int taskId, DeliveryFailureCallback? onDeliveryFailure, CancellationToken cancellationToken)
     {
 #pragma warning disable CA1031
         try
         {
             await SendMessageAsync(remote, request, cancellationToken).ConfigureAwait(true);
         }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("partition", StringComparison.OrdinalIgnoreCase))
+        {
+            onDeliveryFailure?.Invoke(remote);
+        }
+        catch (TimeoutException)
+        {
+            onDeliveryFailure?.Invoke(remote);
+        }
+        catch (OperationCanceledException)
+        {
+            // User cancellation - don't invoke callback
+        }
         catch
         {
-            // Ignore failures for one-way messages
+            onDeliveryFailure?.Invoke(remote);
         }
         finally
         {

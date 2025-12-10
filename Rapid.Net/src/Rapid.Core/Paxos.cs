@@ -195,6 +195,11 @@ internal sealed partial class Paxos
             return;
         }
 
+        if (_completion.Task.IsCompleted)
+        {
+            return; // Already decided
+        }
+
         _crnd = new Rank { Round = round, NodeIndex = _myAddr.GetHashCode() };
         LogPrepareCalled(_myAddr, _crnd);
 
@@ -207,6 +212,7 @@ internal sealed partial class Paxos
 
         var request = RapidUtils.ToRapidRequest(prepare);
         LogBroadcastingPhase1a();
+
         _broadcaster.Broadcast(request, cancellationToken);
     }
 
@@ -462,4 +468,3 @@ internal sealed partial class Paxos
             .FirstOrDefault() ?? [];
     }
 }
-

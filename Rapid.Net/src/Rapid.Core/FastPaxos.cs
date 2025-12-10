@@ -9,6 +9,11 @@ namespace Rapid;
 
 /// <summary>
 /// Single-decree consensus. We always start with a Fast round.
+/// 
+/// This implementation supports delivery-aware fallback to Classic Paxos.
+/// When message delivery failures are detected during broadcast, and if
+/// too many failures occur (preventing Fast Paxos from succeeding),
+/// Classic Paxos is triggered immediately rather than waiting for a timeout.
 /// </summary>
 internal sealed partial class FastPaxos : IAsyncDisposable
 {
@@ -27,6 +32,7 @@ internal sealed partial class FastPaxos : IAsyncDisposable
     private readonly CancellationTokenSource _scheduledClassicRoundCts = new();
     private int _disposed;
     private Task? _classicRoundTask;
+    private int _classicRoundTriggered;
 
     private readonly struct LoggableEndpoints(IEnumerable<Endpoint> endpoints)
     {
@@ -88,6 +94,9 @@ internal sealed partial class FastPaxos : IAsyncDisposable
     [LoggerMessage(Level = LogLevel.Debug, Message = "Dispose: cleaning up FastPaxos resources")]
     private partial void LogDispose();
 
+    [LoggerMessage(Level = LogLevel.Information, Message = "Early fallback to Classic Paxos: {FailureCount} delivery failures (f={F}, need at least {Threshold} for Fast Paxos)")]
+    private partial void LogEarlyFallbackTriggered(int FailureCount, int F, long Threshold);
+
     private readonly struct LoggableEndpoint(Endpoint endpoint)
     {
         private readonly Endpoint _endpoint = endpoint;
@@ -122,8 +131,7 @@ internal sealed partial class FastPaxos : IAsyncDisposable
         // especially for very large clusters.
         _jitterRate = 1 / (double)membershipSize;
 
-        _paxos = new Paxos(myAddr, configurationId, membershipSize, client, broadcaster,
-                          _onDecidedTcs, paxosLogger);
+        _paxos = new Paxos(myAddr, configurationId, membershipSize, client, broadcaster, _onDecidedTcs, paxosLogger);
 
         LogFastPaxosInitialized(new LoggableEndpoint(myAddr), configurationId, membershipSize);
     }
@@ -159,31 +167,83 @@ internal sealed partial class FastPaxos : IAsyncDisposable
         consensusMessage.Endpoints.AddRange(proposal);
 
         var proposalMessage = RapidUtils.ToRapidRequest(consensusMessage);
-        _broadcaster.Broadcast(proposalMessage, cancellationToken);
 
+        // Always schedule the timeout-based fallback as a safety net
         LogSchedulingClassicRound(recoveryDelay);
         _classicRoundTask = ScheduleClassicRoundAsync(recoveryDelay, _sharedResources.ShuttingDownToken);
-    }
 
-    /// <summary>
-    /// Trigger Paxos phase1a.
-    /// </summary>
-    private async Task ScheduleClassicRoundAsync(TimeSpan recoveryDelay, CancellationToken cancellationToken)
-    {
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _scheduledClassicRoundCts.Token);
-        await Task.Delay(recoveryDelay, _sharedResources.TimeProvider, cts.Token).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
-        if (_onDecidedTcs.Task.IsCompleted || cts.IsCancellationRequested)
+        // Calculate threshold for early fallback
+        // Fast Paxos requires N - f votes, where f = floor((N-1)/4)
+        var f = (int)Math.Floor((_membershipSize - 1) / 4.0);
+        var fastPaxosThreshold = _membershipSize - f;
+
+        // Track delivery failures to trigger early fallback
+        int failureCount = 0;
+
+        // Use callback-based broadcast to detect delivery failures
+        _broadcaster.Broadcast(proposalMessage, failedEndpoint =>
         {
-            LogClassicRoundSkipped();
-            return;
+            var newFailureCount = Interlocked.Increment(ref failureCount);
+
+            // Calculate max possible votes: membership - failures + our own vote (already counted in membership)
+            var maxPossibleVotes = _membershipSize - newFailureCount;
+
+            // If we can't reach the threshold due to delivery failures, trigger Classic Paxos early
+            if (maxPossibleVotes < fastPaxosThreshold && !_onDecidedTcs.Task.IsCompleted)
+            {
+                LogEarlyFallbackTriggered(newFailureCount, f, fastPaxosThreshold);
+                TriggerClassicPaxosEarly(cancellationToken);
+            }
+        }, cancellationToken);
+
+        async Task ScheduleClassicRoundAsync(TimeSpan recoveryDelay, CancellationToken cancellationToken)
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _scheduledClassicRoundCts.Token);
+            await Task.Delay(recoveryDelay, _sharedResources.TimeProvider, cts.Token).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+            if (_onDecidedTcs.Task.IsCompleted || cts.IsCancellationRequested)
+            {
+                LogClassicRoundSkipped();
+                return;
+            }
+
+            // Use Interlocked to ensure we only trigger once (either here or via early fallback)
+            if (Interlocked.CompareExchange(ref _classicRoundTriggered, 1, 0) != 0)
+            {
+                return; // Already triggered by early fallback
+            }
+
+            LogStartingClassicRound();
+
+            // Start classic Paxos round with round number 2
+            lock (_paxosLock)
+            {
+                _paxos.StartPhase1a(2, cts.Token);
+            }
         }
 
-        LogStartingClassicRound();
-
-        // Start classic Paxos round with round number 2
-        lock (_paxosLock)
+        // Triggers Classic Paxos immediately, bypassing the scheduled delay.
+        // This is called when delivery failures indicate Fast Paxos cannot succeed.
+        void TriggerClassicPaxosEarly(CancellationToken cancellationToken)
         {
-            _paxos.StartPhase1a(2, cts.Token);
+            // Use Interlocked to ensure we only trigger once
+            if (Interlocked.CompareExchange(ref _classicRoundTriggered, 1, 0) != 0)
+            {
+                return; // Already triggered
+            }
+
+            if (_onDecidedTcs.Task.IsCompleted)
+            {
+                return; // Already decided
+            }
+
+            lock (_paxosLock)
+            {
+                // Cancel the scheduled timeout since we're triggering early
+                _scheduledClassicRoundCts.Cancel();
+
+                // Start Classic Paxos round 2 immediately
+                _paxos.StartPhase1a(2, cancellationToken);
+            }
         }
     }
 
