@@ -46,7 +46,7 @@ internal sealed partial class RapidClusterService(
             if (_options.SeedAddress == null || _options.ListenAddress.Equals(_options.SeedAddress))
             {
                 // Start a new cluster
-                await StartClusterAsync(stoppingToken).ConfigureAwait(true);
+                StartCluster();
             }
             else
             {
@@ -70,15 +70,14 @@ internal sealed partial class RapidClusterService(
         }
     }
 
-    private async Task StartClusterAsync(CancellationToken cancellationToken)
+    private void StartCluster()
     {
         var currentIdentifier = RapidUtils.NodeIdFromUuid(sharedResources.NewGuid());
 
         MembershipService = membershipServiceFactory.CreateForNewCluster(
             _options.ListenAddress,
             currentIdentifier,
-            _options.Metadata,
-            _options.Subscriptions);
+            _options.Metadata);
     }
 
     private async Task JoinClusterAsync(CancellationToken cancellationToken)
@@ -162,8 +161,7 @@ internal sealed partial class RapidClusterService(
             successfulResponse.ConfigurationId,
             successfulResponse.Identifiers,
             successfulResponse.Endpoints,
-            metadataMap,
-            _options.Subscriptions);
+            metadataMap);
     }
 
     public override async Task StopAsync(CancellationToken cancellationToken)

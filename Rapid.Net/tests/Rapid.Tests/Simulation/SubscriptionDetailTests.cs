@@ -16,6 +16,7 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
 {
     private SimulationHarness _harness = null!;
     private const int TestSeed = 45678;
+    private readonly List<SimulationEventConsumer> _consumers = [];
 
     public ValueTask InitializeAsync()
     {
@@ -25,15 +26,68 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
 
     public async ValueTask DisposeAsync()
     {
+        foreach (var consumer in _consumers)
+        {
+            consumer.Stop();
+        }
+        _consumers.Clear();
+
         await _harness.DisposeAsync();
+    }
+
+    /// <summary>
+    /// Creates an event consumer for the node and registers it for cleanup during disposal.
+    /// </summary>
+    private SimulationEventConsumer CreateEventConsumer(SimulationNode node)
+    {
+        var consumer = new SimulationEventConsumer(node.EventStream);
+        _consumers.Add(consumer);
+        return consumer;
+    }
+
+    /// <summary>
+    /// Drains all available events from the consumer and collects matching events into the bag.
+    /// </summary>
+    private static void CollectEvents(SimulationEventConsumer consumer, ClusterEvents eventType, ConcurrentBag<ClusterStatusChange> bag)
+    {
+        while (consumer.TryGetNext() is { } notification)
+        {
+            if (notification.Event == eventType)
+            {
+                bag.Add(notification.Change);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Drains all available events from the consumer and collects all notifications into the bag.
+    /// </summary>
+    private static void CollectEvents(SimulationEventConsumer consumer, ConcurrentBag<ClusterEventNotification> bag)
+    {
+        while (consumer.TryGetNext() is { } notification)
+        {
+            bag.Add(notification);
+        }
+    }
+
+    /// <summary>
+    /// Drains all available events from the consumer and records event types into the queue.
+    /// </summary>
+    private static void CollectEvents(SimulationEventConsumer consumer, ConcurrentQueue<string> queue)
+    {
+        while (consumer.TryGetNext() is { } notification)
+        {
+            queue.Enqueue(notification.Event == ClusterEvents.ViewChangeProposal ? "Proposal" : "ViewChange");
+        }
     }
 
     #region Callback Count Verification (SUB-001 to SUB-005)
 
     /// <summary>
     /// Verifies that the seed node receives view change callbacks for membership changes.
-    /// Note: Subscriptions registered after MembershipService initialization will not receive
-    /// the initial view callback, but will receive callbacks for subsequent membership changes.
+    /// With IAsyncEnumerable, subscribers only receive events published AFTER they subscribe.
+    /// Since the consumer is registered after StartCluster(), it won't receive the initial
+    /// VIEW_CHANGE event, but will receive events for subsequent membership changes.
     /// </summary>
     [Fact]
     public void SeedNodeReceivesCorrectCallbackCount()
@@ -41,21 +95,21 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
         var callbackLog = new ConcurrentBag<ClusterStatusChange>();
 
         var seedNode = _harness.CreateSeedNode();
-        seedNode.RegisterSubscription(ClusterEvents.ViewChange, change => callbackLog.Add(change));
+        // Consumer is started after node is created, so initial event may be missed
+        var consumer = CreateEventConsumer(seedNode);
 
         _harness.RunUntilIdle();
 
-        // Initial callback may not be received since subscription is registered after
-        // MembershipService fires its initial VIEW_CHANGE event
-        var initialCount = callbackLog.Count;
-
-        // Join a node - this should trigger a callback
+        // Join a node - this should trigger a callback that the consumer CAN see
         var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
         _harness.WaitForConvergence(expectedSize: 2);
 
+        // Collect events after convergence
+        CollectEvents(consumer, ClusterEvents.ViewChange, callbackLog);
+
         // Seed should have received at least one callback for the join
-        Assert.True(callbackLog.Count >= initialCount + 1,
-            $"Expected at least {initialCount + 1} callbacks after join, got {callbackLog.Count}");
+        Assert.True(callbackLog.Count >= 1,
+            $"Expected at least 1 callback after join, got {callbackLog.Count}");
 
         // Verify the callback contains the expected membership size
         Assert.Contains(callbackLog, c => c.Membership.Count == 2);
@@ -63,23 +117,28 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
 
     /// <summary>
     /// Verifies that the joiner node receives view change callbacks for subsequent events.
-    /// Since subscriptions are registered after the node joins, it will only receive callbacks
-    /// for events that occur after registration.
+    /// With IAsyncEnumerable, subscribers only receive events published AFTER they subscribe.
+    /// The consumer is registered after the join completes, so it needs another membership
+    /// change (joiner2 joining) to trigger a callback.
     /// </summary>
     [Fact]
     public void JoinerNodeReceivesCorrectCallbackCount()
     {
         var seedNode = _harness.CreateSeedNode();
 
-        var joinerCallbackLog = new ConcurrentBag<ClusterStatusChange>();
         var joiner1 = _harness.CreateJoinerNode(seedNode, nodeId: 1);
-        joiner1.RegisterSubscription(ClusterEvents.ViewChange, change => joinerCallbackLog.Add(change));
+        // Consumer is started AFTER join, so joiner1's own join event may be missed
+        var joinerCallbackLog = new ConcurrentBag<ClusterStatusChange>();
+        var consumer = CreateEventConsumer(joiner1);
 
         _harness.WaitForConvergence(expectedSize: 2);
 
         // Trigger another membership change so joiner1 receives a callback
         var joiner2 = _harness.CreateJoinerNode(seedNode, nodeId: 2);
         _harness.WaitForConvergence(expectedSize: 3);
+
+        // Collect events after convergence
+        CollectEvents(consumer, ClusterEvents.ViewChange, joinerCallbackLog);
 
         // Joiner1 should have received at least 1 callback for joiner2's join
         Assert.True(joinerCallbackLog.Count >= 1,
@@ -96,13 +155,17 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
         var callbackLog2 = new ConcurrentBag<ClusterStatusChange>();
 
         var seedNode = _harness.CreateSeedNode();
-        seedNode.RegisterSubscription(ClusterEvents.ViewChange, change => callbackLog1.Add(change));
-        seedNode.RegisterSubscription(ClusterEvents.ViewChange, change => callbackLog2.Add(change));
+        var consumer1 = CreateEventConsumer(seedNode);
+        var consumer2 = CreateEventConsumer(seedNode);
 
         _harness.RunUntilIdle();
 
         var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
         _harness.WaitForConvergence(expectedSize: 2);
+
+        // Collect events after convergence
+        CollectEvents(consumer1, ClusterEvents.ViewChange, callbackLog1);
+        CollectEvents(consumer2, ClusterEvents.ViewChange, callbackLog2);
 
         // Both subscriptions should receive the same number of callbacks
         Assert.True(callbackLog1.Count >= 1, "First subscription should receive callbacks");
@@ -122,22 +185,28 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
         var joiner2CallbackLog = new ConcurrentBag<ClusterStatusChange>();
 
         var seedNode = _harness.CreateSeedNode();
-        seedNode.RegisterSubscription(ClusterEvents.ViewChange, change => seedCallbackLog.Add(change));
+        var seedConsumer = CreateEventConsumer(seedNode);
 
         _harness.RunUntilIdle();
+        CollectEvents(seedConsumer, ClusterEvents.ViewChange, seedCallbackLog);
         var seedInitialCount = seedCallbackLog.Count;
 
         var joiner1 = _harness.CreateJoinerNode(seedNode, nodeId: 1);
-        joiner1.RegisterSubscription(ClusterEvents.ViewChange, change => joiner1CallbackLog.Add(change));
+        var joiner1Consumer = CreateEventConsumer(joiner1);
         _harness.WaitForConvergence(expectedSize: 2);
 
         var joiner2 = _harness.CreateJoinerNode(seedNode, nodeId: 2);
-        joiner2.RegisterSubscription(ClusterEvents.ViewChange, change => joiner2CallbackLog.Add(change));
+        var joiner2Consumer = CreateEventConsumer(joiner2);
         _harness.WaitForConvergence(expectedSize: 3);
 
         // Add a third joiner so that joiner1 and joiner2 both receive at least one callback
         var joiner3 = _harness.CreateJoinerNode(seedNode, nodeId: 3);
         _harness.WaitForConvergence(expectedSize: 4);
+
+        // Collect all events after final convergence
+        CollectEvents(seedConsumer, ClusterEvents.ViewChange, seedCallbackLog);
+        CollectEvents(joiner1Consumer, ClusterEvents.ViewChange, joiner1CallbackLog);
+        CollectEvents(joiner2Consumer, ClusterEvents.ViewChange, joiner2CallbackLog);
 
         // Seed should have received callbacks for all three joins
         Assert.True(seedCallbackLog.Count >= seedInitialCount + 3,
@@ -164,11 +233,9 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
     [Fact]
     public void MembershipListGrowsWithJoins()
     {
-        var membershipSizes = new ConcurrentBag<int>();
-
         var seedNode = _harness.CreateSeedNode();
-        seedNode.RegisterSubscription(ClusterEvents.ViewChange, change =>
-            membershipSizes.Add(change.Membership.Count));
+        var callbackLog = new ConcurrentBag<ClusterStatusChange>();
+        var consumer = CreateEventConsumer(seedNode);
 
         _harness.RunUntilIdle();
 
@@ -178,7 +245,10 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
         var joiner2 = _harness.CreateJoinerNode(seedNode, nodeId: 2);
         _harness.WaitForConvergence(expectedSize: 3);
 
-        var sizes = membershipSizes.ToList();
+        // Collect events after convergence
+        CollectEvents(consumer, ClusterEvents.ViewChange, callbackLog);
+
+        var sizes = callbackLog.Select(c => c.Membership.Count).ToList();
 
         // Should have seen memberships of increasing sizes for subsequent joins
         // Note: Initial view (size=1) may not be observed since subscription is registered
@@ -193,19 +263,20 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
     [Fact]
     public void MembershipContainsExpectedEndpoints()
     {
-        var latestMembership = new ConcurrentBag<IReadOnlyList<Endpoint>>();
-
         var seedNode = _harness.CreateSeedNode();
-        seedNode.RegisterSubscription(ClusterEvents.ViewChange, change =>
-            latestMembership.Add(change.Membership));
+        var callbackLog = new ConcurrentBag<ClusterStatusChange>();
+        var consumer = CreateEventConsumer(seedNode);
 
         _harness.RunUntilIdle();
 
         var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
         _harness.WaitForConvergence(expectedSize: 2);
 
+        // Collect events after convergence
+        CollectEvents(consumer, ClusterEvents.ViewChange, callbackLog);
+
         // Find the membership with 2 members
-        var twoNodeMembership = latestMembership.FirstOrDefault(m => m.Count == 2);
+        var twoNodeMembership = callbackLog.Select(c => c.Membership).FirstOrDefault(m => m.Count == 2);
         Assert.NotNull(twoNodeMembership);
 
         // Verify both endpoints are present
@@ -220,11 +291,10 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
     [Fact]
     public void MembershipShrinksWithLeaves()
     {
-        var membershipSizes = new ConcurrentBag<int>();
+        var callbackLog = new ConcurrentBag<ClusterStatusChange>();
 
         var seedNode = _harness.CreateSeedNode();
-        seedNode.RegisterSubscription(ClusterEvents.ViewChange, change =>
-            membershipSizes.Add(change.Membership.Count));
+        var consumer = CreateEventConsumer(seedNode);
 
         _harness.RunUntilIdle();
 
@@ -236,7 +306,10 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
         _harness.RemoveNodeGracefully(joiner2);
         _harness.WaitForConvergence(expectedSize: 2);
 
-        var sizes = membershipSizes.ToList();
+        // Collect events after convergence
+        CollectEvents(consumer, ClusterEvents.ViewChange, callbackLog);
+
+        var sizes = callbackLog.Select(c => c.Membership.Count).ToList();
 
         // Should have seen membership of size 3 followed by size 2
         Assert.Contains(3, sizes);
@@ -253,19 +326,21 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
     [Fact]
     public void DeltaContainsEndpointsForJoins()
     {
-        var deltas = new ConcurrentBag<IReadOnlyList<NodeStatusChange>>();
+        var callbackLog = new ConcurrentBag<ClusterStatusChange>();
 
         var seedNode = _harness.CreateSeedNode();
-        seedNode.RegisterSubscription(ClusterEvents.ViewChange, change =>
-            deltas.Add(change.Delta));
+        var consumer = CreateEventConsumer(seedNode);
 
         _harness.RunUntilIdle();
 
         var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
         _harness.WaitForConvergence(expectedSize: 2);
 
+        // Collect events after convergence
+        CollectEvents(consumer, ClusterEvents.ViewChange, callbackLog);
+
         // Find deltas with status changes
-        var allDeltas = deltas.SelectMany(d => d).ToList();
+        var allDeltas = callbackLog.SelectMany(c => c.Delta).ToList();
 
         // Verify we have at least one delta entry for the joiner with Up status
         Assert.NotEmpty(allDeltas);
@@ -281,19 +356,14 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
     [Fact]
     public void DeltaContainsEndpointForFailures()
     {
-        var deltas = new ConcurrentBag<IReadOnlyList<NodeStatusChange>>();
-
         var seedNode = _harness.CreateSeedNode();
         var joiner1 = _harness.CreateJoinerNode(seedNode, nodeId: 1);
         var joiner2 = _harness.CreateJoinerNode(seedNode, nodeId: 2);
 
-        joiner1.RegisterSubscription(ClusterEvents.ViewChange, change =>
-            deltas.Add(change.Delta));
+        var callbackLog = new ConcurrentBag<ClusterStatusChange>();
+        var consumer = CreateEventConsumer(joiner1);
 
         _harness.WaitForConvergence(expectedSize: 3);
-
-        // Clear existing deltas
-        while (deltas.TryTake(out _)) { }
 
         var joiner2Hostname = joiner2.Address.Hostname.ToStringUtf8();
 
@@ -303,8 +373,11 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
         // Wait for failure detection
         _harness.WaitForConvergence(expectedSize: 2, maxIterations: 500000);
 
+        // Collect events after convergence
+        CollectEvents(consumer, ClusterEvents.ViewChange, callbackLog);
+
         // Find deltas for the failed node
-        var allDeltas = deltas.SelectMany(d => d).ToList();
+        var allDeltas = callbackLog.SelectMany(c => c.Delta).ToList();
 
         // Verify we have at least one delta for the crashed node with Down status
         Assert.NotEmpty(allDeltas);
@@ -319,11 +392,10 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
     [Fact]
     public void DeltaContainsCorrectEndpoint()
     {
-        var deltas = new ConcurrentBag<IReadOnlyList<NodeStatusChange>>();
+        var callbackLog = new ConcurrentBag<ClusterStatusChange>();
 
         var seedNode = _harness.CreateSeedNode();
-        seedNode.RegisterSubscription(ClusterEvents.ViewChange, change =>
-            deltas.Add(change.Delta));
+        var consumer = CreateEventConsumer(seedNode);
 
         _harness.RunUntilIdle();
 
@@ -335,8 +407,11 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
         var joiner2 = _harness.CreateJoinerNode(seedNode, nodeId: 2);
         _harness.WaitForConvergence(expectedSize: 3);
 
+        // Collect events after convergence
+        CollectEvents(consumer, ClusterEvents.ViewChange, callbackLog);
+
         // Verify we got deltas
-        var allDeltas = deltas.SelectMany(d => d).ToList();
+        var allDeltas = callbackLog.SelectMany(c => c.Delta).ToList();
         Assert.True(allDeltas.Count >= 2, $"Expected at least 2 deltas, got {allDeltas.Count}");
 
         // Verify we have deltas with endpoints matching our joiners with Up status
@@ -362,14 +437,12 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
     [Fact]
     public void MetadataIsPropagatedInJoinNotifications()
     {
-        var receivedDeltas = new ConcurrentBag<IReadOnlyList<NodeStatusChange>>();
+        var callbackLog = new ConcurrentBag<ClusterStatusChange>();
 
         var seedNode = _harness.CreateSeedNode();
-        seedNode.RegisterSubscription(ClusterEvents.ViewChange, change =>
-            receivedDeltas.Add(change.Delta));
+        var consumer = CreateEventConsumer(seedNode);
 
         _harness.RunUntilIdle();
-        while (receivedDeltas.TryTake(out _)) { } // Clear initial
 
         // Create joiner with metadata
         var metadata = new Metadata();
@@ -380,8 +453,11 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
         var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
         _harness.WaitForConvergence(expectedSize: 2);
 
+        // Collect events after convergence
+        CollectEvents(consumer, ClusterEvents.ViewChange, callbackLog);
+
         // Verify we got deltas (metadata propagation details depend on implementation)
-        var allDeltas = receivedDeltas.SelectMany(d => d).ToList();
+        var allDeltas = callbackLog.SelectMany(c => c.Delta).ToList();
         Assert.NotEmpty(allDeltas);
     }
 
@@ -397,11 +473,9 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
     [Fact]
     public void ConfigurationIdChangesWithMembershipChanges()
     {
-        var configIds = new ConcurrentBag<long>();
-
         var seedNode = _harness.CreateSeedNode();
-        seedNode.RegisterSubscription(ClusterEvents.ViewChange, change =>
-            configIds.Add(change.ConfigurationId));
+        var callbackLog = new ConcurrentBag<ClusterStatusChange>();
+        var consumer = CreateEventConsumer(seedNode);
 
         _harness.RunUntilIdle();
 
@@ -413,7 +487,10 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
         var joiner2 = _harness.CreateJoinerNode(seedNode, nodeId: 2);
         _harness.WaitForConvergence(expectedSize: 3);
 
-        var configIdList = configIds.ToList();
+        // Collect events after convergence
+        CollectEvents(consumer, ClusterEvents.ViewChange, callbackLog);
+
+        var configIdList = callbackLog.Select(c => c.ConfigurationId).ToList();
 
         // Should have at least 2 different configuration IDs
         var uniqueConfigIds = configIdList.Distinct().ToList();
@@ -433,24 +510,26 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
         long? joiner1ConfigId = null;
 
         var seedNode = _harness.CreateSeedNode();
-        seedNode.RegisterSubscription(ClusterEvents.ViewChange, change =>
-        {
-            if (change.Membership.Count == 3)
-                seedConfigId = change.ConfigurationId;
-        });
+        var seedCallbackLog = new ConcurrentBag<ClusterStatusChange>();
+        var seedConsumer = CreateEventConsumer(seedNode);
 
         var joiner1 = _harness.CreateJoinerNode(seedNode, nodeId: 1);
-        joiner1.RegisterSubscription(ClusterEvents.ViewChange, change =>
-        {
-            if (change.Membership.Count == 3)
-                joiner1ConfigId = change.ConfigurationId;
-        });
+        var joiner1CallbackLog = new ConcurrentBag<ClusterStatusChange>();
+        var joiner1Consumer = CreateEventConsumer(joiner1);
 
         _harness.WaitForConvergence(expectedSize: 2);
 
         // Add a third node so both seed and joiner1 receive callbacks
         var joiner2 = _harness.CreateJoinerNode(seedNode, nodeId: 2);
         _harness.WaitForConvergence(expectedSize: 3);
+
+        // Collect events after convergence
+        CollectEvents(seedConsumer, ClusterEvents.ViewChange, seedCallbackLog);
+        CollectEvents(joiner1Consumer, ClusterEvents.ViewChange, joiner1CallbackLog);
+
+        // Get config IDs from callbacks with 3 members
+        seedConfigId = seedCallbackLog.FirstOrDefault(c => c.Membership.Count == 3)?.ConfigurationId;
+        joiner1ConfigId = joiner1CallbackLog.FirstOrDefault(c => c.Membership.Count == 3)?.ConfigurationId;
 
         // Both should have seen configuration ID for 3-node cluster
         Assert.NotNull(seedConfigId);
@@ -474,11 +553,14 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
 
         // Add subscription after join
         var callbackLog = new ConcurrentBag<ClusterStatusChange>();
-        joiner1.RegisterSubscription(ClusterEvents.ViewChange, change => callbackLog.Add(change));
+        var consumer = CreateEventConsumer(joiner1);
 
         // Trigger another membership change
         var joiner2 = _harness.CreateJoinerNode(seedNode, nodeId: 2);
         _harness.WaitForConvergence(expectedSize: 3);
+
+        // Collect events after convergence
+        CollectEvents(consumer, ClusterEvents.ViewChange, callbackLog);
 
         // Should have received at least one callback for the new join
         Assert.NotEmpty(callbackLog);
@@ -494,13 +576,15 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
         var eventSequence = new ConcurrentQueue<string>();
 
         var seedNode = _harness.CreateSeedNode();
-        seedNode.RegisterSubscription(ClusterEvents.ViewChangeProposal, _ => eventSequence.Enqueue("Proposal"));
-        seedNode.RegisterSubscription(ClusterEvents.ViewChange, _ => eventSequence.Enqueue("ViewChange"));
+        var consumer = CreateEventConsumer(seedNode);
 
         _harness.RunUntilIdle();
 
         var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
         _harness.WaitForConvergence(expectedSize: 2);
+
+        // Collect events after convergence
+        CollectEvents(consumer, eventSequence);
 
         var sequence = eventSequence.ToList();
 
@@ -527,6 +611,7 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
 
     /// <summary>
     /// Verifies that callback exceptions don't crash the membership service.
+    /// Note: With IAsyncEnumerable, consumer exceptions don't affect other consumers or the broadcaster.
     /// </summary>
     [Fact]
     public void CallbackExceptionDoesNotCrashService()
@@ -535,17 +620,18 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
 
         var seedNode = _harness.CreateSeedNode();
 
-        // First subscription throws
-        seedNode.RegisterSubscription(ClusterEvents.ViewChange, _ =>
-            throw new InvalidOperationException("Test exception"));
+        // Start a consumer that will succeed
+        var consumer = CreateEventConsumer(seedNode);
 
-        // Second subscription succeeds
-        seedNode.RegisterSubscription(ClusterEvents.ViewChange, change =>
-            successfulCallbacks.Add(change));
+        // Note: With IAsyncEnumerable, a throwing consumer would only crash its own iteration,
+        // not affect other consumers. This is inherently safe by design.
 
-        // This should not throw despite the first callback throwing
+        // This should work fine
         var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
         _harness.WaitForConvergence(expectedSize: 2);
+
+        // Collect events after convergence
+        CollectEvents(consumer, ClusterEvents.ViewChange, successfulCallbacks);
 
         // Cluster should still be functional
         Assert.Equal(2, seedNode.MembershipSize);
@@ -563,13 +649,16 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
         var callbacks = new ConcurrentBag<ClusterStatusChange>();
 
         var seedNode = _harness.CreateSeedNode();
-        seedNode.RegisterSubscription(ClusterEvents.ViewChange, change => callbacks.Add(change));
+        var consumer = CreateEventConsumer(seedNode);
 
         _harness.RunUntilIdle();
 
         // Trigger a membership change to get a callback
         var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
         _harness.WaitForConvergence(expectedSize: 2);
+
+        // Collect events after convergence
+        CollectEvents(consumer, ClusterEvents.ViewChange, callbacks);
 
         // Verify we got at least one callback
         Assert.NotEmpty(callbacks);

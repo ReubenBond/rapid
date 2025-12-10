@@ -9,11 +9,74 @@ namespace Rapid.Tests;
 public sealed class ClusterIntegrationTests(ITestOutputHelper outputHelper) : IAsyncDisposable
 {
     private readonly TestCluster _cluster = new(outputHelper);
+    private readonly List<CancellationTokenSource> _subscriptionCts = [];
 
     public async ValueTask DisposeAsync()
     {
+        // Cancel all subscriptions
+        foreach (var cts in _subscriptionCts)
+        {
+            await cts.CancelAsync();
+            cts.Dispose();
+        }
+        _subscriptionCts.Clear();
+
         await _cluster.DisposeAsync().ConfigureAwait(true);
         GC.SuppressFinalize(this);
+    }
+
+    /// <summary>
+    /// Starts consuming events from a cluster's EventStream and adds matching events to the bag.
+    /// </summary>
+    private void StartEventConsumer(IRapidCluster cluster, ClusterEvents eventType, ConcurrentBag<ClusterStatusChange> bag)
+    {
+        var cts = new CancellationTokenSource();
+        _subscriptionCts.Add(cts);
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await foreach (var notification in cluster.EventStream.WithCancellation(cts.Token))
+                {
+                    if (notification.Event == eventType)
+                    {
+                        bag.Add(notification.Change);
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected during cleanup
+            }
+        }, cts.Token);
+    }
+
+    /// <summary>
+    /// Starts consuming events and invokes an action for each matching event.
+    /// </summary>
+    private void StartEventConsumer(IRapidCluster cluster, ClusterEvents eventType, Action<ClusterStatusChange> action)
+    {
+        var cts = new CancellationTokenSource();
+        _subscriptionCts.Add(cts);
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await foreach (var notification in cluster.EventStream.WithCancellation(cts.Token))
+                {
+                    if (notification.Event == eventType)
+                    {
+                        action(notification.Change);
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected during cleanup
+            }
+        }, cts.Token);
     }
 
     /// <summary>
@@ -90,11 +153,9 @@ public sealed class ClusterIntegrationTests(ITestOutputHelper outputHelper) : IA
 
         var viewChanges = new ConcurrentBag<ClusterStatusChange>();
 
-        // Create seed with subscription
-        var (seedApp, seed) = await _cluster.CreateSeedNodeAsync(seedAddress, options =>
-        {
-            options.AddSubscription(ClusterEvents.ViewChange, change => viewChanges.Add(change));
-        }, TestContext.Current.CancellationToken);
+        // Create seed and start consuming events
+        var (seedApp, seed) = await _cluster.CreateSeedNodeAsync(seedAddress, TestContext.Current.CancellationToken);
+        StartEventConsumer(seed, ClusterEvents.ViewChange, viewChanges);
 
         var (joinerApp, joiner) = await _cluster.CreateJoinerNodeAsync(joinerAddress, seedAddress, TestContext.Current.CancellationToken);
 
@@ -227,11 +288,9 @@ public sealed class ClusterIntegrationTests(ITestOutputHelper outputHelper) : IA
 
         var proposals = new ConcurrentBag<ClusterStatusChange>();
 
-        // Create seed with subscription
-        var (seedApp, seed) = await _cluster.CreateSeedNodeAsync(seedAddress, options =>
-        {
-            options.AddSubscription(ClusterEvents.ViewChangeProposal, change => proposals.Add(change));
-        }, TestContext.Current.CancellationToken);
+        // Create seed and start consuming proposal events
+        var (seedApp, seed) = await _cluster.CreateSeedNodeAsync(seedAddress, TestContext.Current.CancellationToken);
+        StartEventConsumer(seed, ClusterEvents.ViewChangeProposal, proposals);
 
         var (joinerApp, joiner) = await _cluster.CreateJoinerNodeAsync(joinerAddress, seedAddress, TestContext.Current.CancellationToken);
 
@@ -419,12 +478,12 @@ public sealed class ClusterIntegrationTests(ITestOutputHelper outputHelper) : IA
         var callbackCount2 = 0;
         var callbackCount3 = 0;
 
-        var (seedApp, seed) = await _cluster.CreateSeedNodeAsync(seedAddress, options =>
-        {
-            options.AddSubscription(ClusterEvents.ViewChange, _ => Interlocked.Increment(ref callbackCount1));
-            options.AddSubscription(ClusterEvents.ViewChange, _ => Interlocked.Increment(ref callbackCount2));
-            options.AddSubscription(ClusterEvents.ViewChange, _ => Interlocked.Increment(ref callbackCount3));
-        }, TestContext.Current.CancellationToken);
+        var (seedApp, seed) = await _cluster.CreateSeedNodeAsync(seedAddress, TestContext.Current.CancellationToken);
+
+        // Start three separate consumers
+        StartEventConsumer(seed, ClusterEvents.ViewChange, _ => Interlocked.Increment(ref callbackCount1));
+        StartEventConsumer(seed, ClusterEvents.ViewChange, _ => Interlocked.Increment(ref callbackCount2));
+        StartEventConsumer(seed, ClusterEvents.ViewChange, _ => Interlocked.Increment(ref callbackCount3));
 
         var (joinerApp, joiner) = await _cluster.CreateJoinerNodeAsync(joinerAddress, seedAddress, TestContext.Current.CancellationToken);
 
@@ -445,10 +504,8 @@ public sealed class ClusterIntegrationTests(ITestOutputHelper outputHelper) : IA
 
         ClusterStatusChange? lastChange = null;
 
-        var (seedApp, seed) = await _cluster.CreateSeedNodeAsync(seedAddress, options =>
-        {
-            options.AddSubscription(ClusterEvents.ViewChange, change => lastChange = change);
-        }, TestContext.Current.CancellationToken);
+        var (seedApp, seed) = await _cluster.CreateSeedNodeAsync(seedAddress, TestContext.Current.CancellationToken);
+        StartEventConsumer(seed, ClusterEvents.ViewChange, change => lastChange = change);
 
         var (joinerApp, joiner) = await _cluster.CreateJoinerNodeAsync(joinerAddress, seedAddress, TestContext.Current.CancellationToken);
 
@@ -472,10 +529,8 @@ public sealed class ClusterIntegrationTests(ITestOutputHelper outputHelper) : IA
 
         var configIds = new ConcurrentBag<long>();
 
-        var (seedApp, seed) = await _cluster.CreateSeedNodeAsync(seedAddress, options =>
-        {
-            options.AddSubscription(ClusterEvents.ViewChange, change => configIds.Add(change.ConfigurationId));
-        }, TestContext.Current.CancellationToken);
+        var (seedApp, seed) = await _cluster.CreateSeedNodeAsync(seedAddress, TestContext.Current.CancellationToken);
+        StartEventConsumer(seed, ClusterEvents.ViewChange, change => configIds.Add(change.ConfigurationId));
 
         var (joinerApp, joiner) = await _cluster.CreateJoinerNodeAsync(joinerAddress, seedAddress, TestContext.Current.CancellationToken);
 
@@ -526,10 +581,8 @@ public sealed class ClusterIntegrationTests(ITestOutputHelper outputHelper) : IA
 
         var viewChangeCount = 0;
 
-        var (seedApp, seed) = await _cluster.CreateSeedNodeAsync(seedAddress, options =>
-        {
-            options.AddSubscription(ClusterEvents.ViewChange, _ => Interlocked.Increment(ref viewChangeCount));
-        }, TestContext.Current.CancellationToken);
+        var (seedApp, seed) = await _cluster.CreateSeedNodeAsync(seedAddress, TestContext.Current.CancellationToken);
+        StartEventConsumer(seed, ClusterEvents.ViewChange, _ => Interlocked.Increment(ref viewChangeCount));
 
         var (joinerApp, joiner) = await _cluster.CreateJoinerNodeAsync(joinerAddress, seedAddress, TestContext.Current.CancellationToken);
 

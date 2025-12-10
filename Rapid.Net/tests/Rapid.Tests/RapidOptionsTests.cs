@@ -190,98 +190,6 @@ public class RapidOptionsTests
 
     #endregion
 
-    #region Subscriptions Tests
-
-    [Fact]
-    public void SubscriptionsDefaultIsEmpty()
-    {
-        var options = new RapidOptions();
-        Assert.Empty(options.Subscriptions);
-    }
-
-    [Fact]
-    public void AddSubscriptionViewChangeAddsSubscription()
-    {
-        var options = new RapidOptions();
-        Action<ClusterStatusChange> callback = _ => { };
-
-        options.AddSubscription(ClusterEvents.ViewChange, callback);
-
-        Assert.Single(options.Subscriptions);
-        Assert.True(options.Subscriptions.ContainsKey(ClusterEvents.ViewChange));
-        Assert.Single(options.Subscriptions[ClusterEvents.ViewChange]);
-    }
-
-    [Fact]
-    public void AddSubscriptionViewChangeProposalAddsSubscription()
-    {
-        var options = new RapidOptions();
-        Action<ClusterStatusChange> callback = _ => { };
-
-        options.AddSubscription(ClusterEvents.ViewChangeProposal, callback);
-
-        Assert.True(options.Subscriptions.ContainsKey(ClusterEvents.ViewChangeProposal));
-    }
-
-    [Fact]
-    public void AddSubscriptionMultipleCallbacksSameEventAllAdded()
-    {
-        var options = new RapidOptions();
-        Action<ClusterStatusChange> callback1 = _ => { };
-        Action<ClusterStatusChange> callback2 = _ => { };
-        Action<ClusterStatusChange> callback3 = _ => { };
-
-        options.AddSubscription(ClusterEvents.ViewChange, callback1);
-        options.AddSubscription(ClusterEvents.ViewChange, callback2);
-        options.AddSubscription(ClusterEvents.ViewChange, callback3);
-
-        Assert.Equal(3, options.Subscriptions[ClusterEvents.ViewChange].Count);
-    }
-
-    [Fact]
-    public void AddSubscriptionDifferentEventsAllAdded()
-    {
-        var options = new RapidOptions();
-        Action<ClusterStatusChange> callback1 = _ => { };
-        Action<ClusterStatusChange> callback2 = _ => { };
-
-        options.AddSubscription(ClusterEvents.ViewChange, callback1);
-        options.AddSubscription(ClusterEvents.ViewChangeProposal, callback2);
-
-        Assert.Equal(2, options.Subscriptions.Count);
-        Assert.True(options.Subscriptions.ContainsKey(ClusterEvents.ViewChange));
-        Assert.True(options.Subscriptions.ContainsKey(ClusterEvents.ViewChangeProposal));
-    }
-
-    [Fact]
-    public void AddSubscriptionCallbackIsInvokable()
-    {
-        var options = new RapidOptions();
-        var invokeCount = 0;
-        Action<ClusterStatusChange> callback = _ => invokeCount++;
-
-        options.AddSubscription(ClusterEvents.ViewChange, callback);
-
-        var change = new ClusterStatusChange(1, [], []);
-        options.Subscriptions[ClusterEvents.ViewChange][0](change);
-
-        Assert.Equal(1, invokeCount);
-    }
-
-    [Fact]
-    public void AddSubscriptionSameCallbackMultipleTimesAllAdded()
-    {
-        var options = new RapidOptions();
-        Action<ClusterStatusChange> callback = _ => { };
-
-        options.AddSubscription(ClusterEvents.ViewChange, callback);
-        options.AddSubscription(ClusterEvents.ViewChange, callback);
-
-        Assert.Equal(2, options.Subscriptions[ClusterEvents.ViewChange].Count);
-    }
-
-    #endregion
-
     #region Full Configuration Tests
 
     [Fact]
@@ -289,7 +197,6 @@ public class RapidOptionsTests
     {
         var listenAddr = Utils.HostFromParts("10.0.0.1", 5000);
         var seedAddr = Utils.HostFromParts("10.0.0.2", 5000);
-        var changeCount = 0;
 
         var options = new RapidOptions
         {
@@ -303,12 +210,9 @@ public class RapidOptionsTests
             ["version"] = ByteString.CopyFromUtf8("1.0.0")
         });
 
-        options.AddSubscription(ClusterEvents.ViewChange, _ => changeCount++);
-
         Assert.Equal(listenAddr, options.ListenAddress);
         Assert.Equal(seedAddr, options.SeedAddress);
         Assert.Equal(2, options.Metadata.Metadata_.Count);
-        Assert.Single(options.Subscriptions);
     }
 
     #endregion

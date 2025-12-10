@@ -173,7 +173,6 @@ internal sealed class SimulationNode : IDisposable
         var cutDetector = new MultiNodeCutDetector(opts.RingCount, opts.HighWaterMark, opts.LowWaterMark);
         var metadataMap = new Dictionary<Endpoint, Metadata> { { Address, actualMetadata } };
         var broadcaster = new UnicastToAllBroadcaster(MessagingClient);
-        Dictionary<ClusterEvents, List<Action<ClusterStatusChange>>> subscriptions = [];
 
         _membershipService = new MembershipService(
             Address,
@@ -187,7 +186,6 @@ internal sealed class SimulationNode : IDisposable
             _fastPaxosFactory,
             _viewAccessor,
             metadataMap,
-            subscriptions,
             _membershipServiceLogger);
 
         // Signal that the node is now initialized and ready to handle requests
@@ -266,7 +264,6 @@ internal sealed class SimulationNode : IDisposable
             [.. successfulResponse.Endpoints]).BuildWithConfigurationId(new ConfigurationId(successfulResponse.ConfigurationId));
         var cutDetector = new MultiNodeCutDetector(opts.RingCount, opts.HighWaterMark, opts.LowWaterMark);
         var broadcaster = new UnicastToAllBroadcaster(MessagingClient);
-        Dictionary<ClusterEvents, List<Action<ClusterStatusChange>>> subscriptions = [];
 
         _membershipService = new MembershipService(
             Address,
@@ -280,7 +277,6 @@ internal sealed class SimulationNode : IDisposable
             _fastPaxosFactory,
             _viewAccessor,
             metadataMap,
-            subscriptions,
             _membershipServiceLogger);
 
         // Signal that the node is now initialized and ready to handle requests
@@ -421,17 +417,11 @@ internal sealed class SimulationNode : IDisposable
     }
 
     /// <summary>
-    /// Registers a subscription for cluster events.
+    /// Gets the async enumerable for subscribing to cluster events.
+    /// Each subscriber receives all events published after they start iterating.
     /// </summary>
-    public void RegisterSubscription(ClusterEvents eventType, Action<ClusterStatusChange> callback)
-    {
-        if (_membershipService is null)
-        {
-            throw new InvalidOperationException("Membership service has not been initialized.");
-        }
-
-        _membershipService.RegisterSubscription(eventType, callback);
-    }
+    public IAsyncEnumerable<ClusterEventNotification> EventStream =>
+        _membershipService?.EventStream ?? throw new InvalidOperationException("Membership service has not been initialized.");
 
     /// <summary>
     /// Gracefully leaves the cluster.

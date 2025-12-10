@@ -24,9 +24,11 @@ public interface IRapidCluster
     Dictionary<Endpoint, Metadata> GetClusterMetadata();
 
     /// <summary>
-    /// Register callbacks for cluster events.
+    /// Gets the async enumerable for subscribing to cluster events.
+    /// Each subscriber receives all events published after they start iterating.
+    /// Uses the Orleans-style TaskCompletionSource chaining pattern for efficient broadcast.
     /// </summary>
-    void RegisterSubscription(ClusterEvents eventType, Action<ClusterStatusChange> callback);
+    IAsyncEnumerable<ClusterEventNotification> EventStream { get; }
 
     /// <summary>
     /// Gracefully leaves the cluster.
@@ -46,13 +48,16 @@ public interface IRapidCluster
 /// </summary>
 internal sealed class RapidCluster(RapidClusterService clusterService, IMembershipViewAccessor viewAccessor) : IRapidCluster
 {
+    private static readonly IAsyncEnumerable<ClusterEventNotification> EmptyEventStream = CreateEmpty();
+
     public IReadOnlyList<Endpoint> GetMemberlist() => viewAccessor.CurrentView.Members;
 
     public int GetMembershipSize() => viewAccessor.CurrentView.Size;
 
     public Dictionary<Endpoint, Metadata> GetClusterMetadata() => clusterService.MembershipService?.GetMetadata() ?? [];
 
-    public void RegisterSubscription(ClusterEvents eventType, Action<ClusterStatusChange> callback) => clusterService.MembershipService?.RegisterSubscription(eventType, callback);
+    public IAsyncEnumerable<ClusterEventNotification> EventStream
+        => clusterService.MembershipService?.EventStream ?? EmptyEventStream;
 
     public async Task LeaveGracefullyAsync(CancellationToken cancellationToken = default)
     {
@@ -63,4 +68,10 @@ internal sealed class RapidCluster(RapidClusterService clusterService, IMembersh
     }
 
     public IMembershipViewAccessor ViewAccessor => viewAccessor;
+
+    private static async IAsyncEnumerable<ClusterEventNotification> CreateEmpty()
+    {
+        await Task.CompletedTask.ConfigureAwait(false);
+        yield break;
+    }
 }

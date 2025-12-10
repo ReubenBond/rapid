@@ -17,3 +17,10 @@ public enum ClusterEvents
     /// <summary>When a node detects that it has been removed from the network.</summary>
     Kicked
 }
+
+/// <summary>
+/// Represents a cluster event notification combining the event type and the status change details.
+/// </summary>
+/// <param name="Event">The type of cluster event that occurred.</param>
+/// <param name="Change">The status change details associated with this event.</param>
+public readonly record struct ClusterEventNotification(ClusterEvents Event, ClusterStatusChange Change);

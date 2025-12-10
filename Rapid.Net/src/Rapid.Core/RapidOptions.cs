@@ -24,11 +24,6 @@ public sealed class RapidOptions
     public Metadata Metadata { get; set; } = new();
 
     /// <summary>
-    /// Event subscriptions.
-    /// </summary>
-    internal Dictionary<ClusterEvents, List<Action<ClusterStatusChange>>> Subscriptions { get; } = [];
-
-    /// <summary>
     /// Sets metadata from a dictionary.
     /// </summary>
     public void SetMetadata(Dictionary<string, ByteString> metadata)
@@ -39,17 +34,5 @@ public sealed class RapidOptions
         {
             Metadata.Metadata_.Add(kvp.Key, kvp.Value);
         }
-    }
-
-    /// <summary>
-    /// Adds an event subscription.
-    /// </summary>
-    public void AddSubscription(ClusterEvents eventType, Action<ClusterStatusChange> callback)
-    {
-        if (!Subscriptions.ContainsKey(eventType))
-        {
-            Subscriptions[eventType] = [];
-        }
-        Subscriptions[eventType].Add(callback);
     }
 }

@@ -1,4 +1,3 @@
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
@@ -30,8 +29,8 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     private readonly IFastPaxosFactory _fastPaxosFactory;
     private MembershipView _membershipView;
 
-    // Event subscriptions
-    private readonly Dictionary<ClusterEvents, List<Action<ClusterStatusChange>>> _subscriptions;
+    // Event subscriptions (IAsyncEnumerable-based using Orleans pattern)
+    private readonly ClusterEventBroadcaster _eventBroadcaster = new();
 
     // Fields used by batching logic.
     private readonly Channel<AlertMessage> _sendQueue;
@@ -171,9 +170,6 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     [LoggerMessage(Level = LogLevel.Debug, Message = "DecideViewChange: publishing VIEW_CHANGE event, configId={ConfigId}, membershipSize={MembershipSize}")]
     private partial void LogPublishingViewChange(CurrentConfigId ConfigId, MembershipSize MembershipSize);
 
-    [LoggerMessage(Level = LogLevel.Debug, Message = "RegisterSubscription: registered callback for event {Event}")]
-    private partial void LogRegisterSubscription(ClusterEvents Event);
-
     [LoggerMessage(Level = LogLevel.Debug, Message = "Shutdown: cancelling background tasks and disposing failure detectors")]
     private partial void LogShutdown();
 
@@ -213,9 +209,6 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     [LoggerMessage(Level = LogLevel.Debug, Message = "FastPaxos decided continuation skipped due to shutdown")]
     private partial void LogFastPaxosDecidedSkippedShutdown();
 
-    [LoggerMessage(Level = LogLevel.Error, Message = "Callback exception for event {Event} with configId={ConfigId}")]
-    private partial void LogCallbackException(Exception ex, ClusterEvents Event, long ConfigId);
-
     private readonly struct LoggableRingNumbers(IEnumerable<int> ringNumbers)
     {
         private readonly IEnumerable<int> _ringNumbers = ringNumbers;
@@ -235,8 +228,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
         MembershipViewAccessor viewAccessor,
         ILogger<MembershipService> logger)
         : this(myAddr, cutDetection, membershipView, sharedResources, options, messagingClient,
-              broadcaster, edgeFailureDetector, fastPaxosFactory, viewAccessor, [],
-              [], logger)
+              broadcaster, edgeFailureDetector, fastPaxosFactory, viewAccessor, [], logger)
     {
     }
 
@@ -248,7 +240,6 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
                             IFastPaxosFactory fastPaxosFactory,
                             MembershipViewAccessor viewAccessor,
                             Dictionary<Endpoint, Metadata> metadataMap,
-                            Dictionary<ClusterEvents, List<Action<ClusterStatusChange>>> subscriptions,
                             ILogger<MembershipService> logger)
     {
         _myAddr = myAddr;
@@ -260,21 +251,11 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
         _metadataManager.AddMetadata(metadataMap);
         _messagingClient = messagingClient;
         _broadcaster = broadcaster;
-        _subscriptions = subscriptions;
         _fdFactory = edgeFailureDetector;
         _fastPaxosFactory = fastPaxosFactory;
         _viewAccessor = viewAccessor;
         _logger = logger;
         _sendQueue = Channel.CreateUnbounded<AlertMessage>();
-
-        // Make sure there is an empty list for every enum type
-        foreach (var evt in Enum.GetValues<ClusterEvents>())
-        {
-            if (!_subscriptions.ContainsKey(evt))
-            {
-                _subscriptions[evt] = [];
-            }
-        }
 
         // Start background jobs and track them
         var alertBatcherTask = Task.Factory.StartNew(AlertBatcherAsync, _sharedResources.ShuttingDownToken, TaskCreationOptions.None, _sharedResources.TaskScheduler).Unwrap();
@@ -290,7 +271,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
 
         CreateFailureDetectorsForCurrentConfiguration();
 
-        // Execute all VIEW_CHANGE callbacks. This informs applications that a start/join has successfully completed.
+        // Publish initial VIEW_CHANGE event. This informs applications that a start/join has successfully completed.
         var configurationId = _membershipView.ConfigurationId;
         var currentMembership = _membershipView.GetRing(0);
         var nodeStatusChanges = GetInitialViewChange();
@@ -299,7 +280,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
         // Publish the initial view to the accessor
         _viewAccessor.PublishView(_membershipView);
 
-        InvokeCallbacks(ClusterEvents.ViewChange, clusterStatusChange);
+        PublishEvent(ClusterEvents.ViewChange, clusterStatusChange);
 
         LogMembershipServiceInitialized(new LoggableEndpoint(myAddr), new CurrentConfigId(_membershipView), new MembershipSize(_membershipView));
     }
@@ -506,7 +487,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
                     var currentMembership = _membershipView.GetRing(0);
                     var clusterStatusChange = new ClusterStatusChange(currentConfigurationId, [.. currentMembership], nodeStatusChanges);
 
-                    InvokeCallbacks(ClusterEvents.ViewChangeProposal, clusterStatusChange);
+                    PublishEvent(ClusterEvents.ViewChangeProposal, clusterStatusChange);
 
                     _fastPaxosInstance.Propose(proposals, cancellationToken);
                 }
@@ -673,22 +654,17 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
 
             LogPublishingViewChange(new CurrentConfigId(_membershipView), new MembershipSize(_membershipView));
 
-            InvokeCallbacks(ClusterEvents.ViewChange, clusterStatusChange);
+            PublishEvent(ClusterEvents.ViewChange, clusterStatusChange);
         }
 
         await previousPaxosInstance.DisposeAsync();
     }
 
     /// <summary>
-    /// Invoked by subscribers waiting for event notifications.
+    /// Gets the async enumerable for subscribing to cluster events.
+    /// Each subscriber receives all events published after they start iterating.
     /// </summary>
-    /// <param name="evt">Cluster event to subscribe to</param>
-    /// <param name="callback">Callback to be executed when <paramref name="evt"/> occurs.</param>
-    public void RegisterSubscription(ClusterEvents evt, Action<ClusterStatusChange> callback)
-    {
-        LogRegisterSubscription(evt);
-        _subscriptions[evt].Add(callback);
-    }
+    public IAsyncEnumerable<ClusterEventNotification> EventStream => _eventBroadcaster;
 
     /// <summary>
     /// Gets the list of endpoints currently in the membership view.
@@ -715,6 +691,10 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     {
         LogShutdown();
         _viewAccessor.Complete();
+
+        // Dispose the event broadcaster to signal completion to all subscribers
+        _eventBroadcaster.Dispose();
+
         foreach (var fd in _failureDetectors)
         {
             fd.Dispose();
@@ -879,28 +859,14 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     }
 
     /// <summary>
-    /// Safely invokes all callbacks registered for the specified event.
-    /// Callback exceptions are caught and logged to prevent subscriber errors from disrupting cluster state transitions.
+    /// Publishes a cluster event to all subscribers via the broadcaster.
     /// </summary>
-    /// <param name="evt">The cluster event type to invoke callbacks for.</param>
-    /// <param name="statusChange">The cluster status change to pass to callbacks.</param>
-    private void InvokeCallbacks(ClusterEvents evt, ClusterStatusChange statusChange)
+    /// <param name="evt">The cluster event type.</param>
+    /// <param name="statusChange">The cluster status change details.</param>
+    private void PublishEvent(ClusterEvents evt, ClusterStatusChange statusChange)
     {
-        foreach (var cb in _subscriptions[evt])
-        {
-            try
-            {
-                cb(statusChange);
-            }
-#pragma warning disable CA1031 // Intentionally catching all exceptions from user callbacks
-            catch (Exception ex)
-#pragma warning restore CA1031
-            {
-                // Callback exceptions are intentionally swallowed to prevent
-                // subscriber errors from disrupting cluster state transitions.
-                LogCallbackException(ex, evt, statusChange.ConfigurationId);
-            }
-        }
+        var notification = new ClusterEventNotification(evt, statusChange);
+        _eventBroadcaster.TryPublish(notification);
     }
 
     /// <summary>

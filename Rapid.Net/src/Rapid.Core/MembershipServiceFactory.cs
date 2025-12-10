@@ -23,8 +23,7 @@ internal sealed class MembershipServiceFactory(
     public MembershipService CreateForNewCluster(
         Endpoint localEndpoint,
         NodeId nodeId,
-        Metadata metadata,
-        Dictionary<ClusterEvents, List<Action<ClusterStatusChange>>> subscriptions)
+        Metadata metadata)
     {
         var opts = protocolOptions.Value;
         var membershipView = new MembershipViewBuilder(opts.RingCount, [nodeId], [localEndpoint]).Build();
@@ -44,7 +43,6 @@ internal sealed class MembershipServiceFactory(
             fastPaxosFactory,
             viewAccessor,
             metadataMap,
-            subscriptions,
             logger);
     }
 
@@ -53,8 +51,7 @@ internal sealed class MembershipServiceFactory(
         long configurationId,
         IEnumerable<NodeId> nodeIds,
         IEnumerable<Endpoint> endpoints,
-        Dictionary<Endpoint, Metadata> metadataMap,
-        Dictionary<ClusterEvents, List<Action<ClusterStatusChange>>> subscriptions)
+        Dictionary<Endpoint, Metadata> metadataMap)
     {
         // Convert to collections as MembershipViewBuilder requires ICollection
         var nodeIdList = nodeIds.ToList();
@@ -77,7 +74,6 @@ internal sealed class MembershipServiceFactory(
             fastPaxosFactory,
             viewAccessor,
             metadataMap,
-            subscriptions,
             logger);
     }
 }

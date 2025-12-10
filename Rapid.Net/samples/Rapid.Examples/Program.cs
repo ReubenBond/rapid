@@ -10,8 +10,6 @@ using Rapid;
 /// </summary>
 internal sealed partial class Program
 {
-    private const int SleepIntervalMs = 1000;
-    private const int MaxTries = 400;
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Starting Rapid agent on {Listen}")]
     private static partial void LogStarting(ILogger logger, string Listen);
@@ -34,7 +32,7 @@ internal sealed partial class Program
     [LoggerMessage(Level = LogLevel.Warning, Message = "Kicked from cluster: {Change}")]
     private static partial void LogKicked(ILogger logger, ClusterStatusChange Change);
 
-    static async Task<int> Main(string[] args)
+    private static async Task<int> Main(string[] args)
     {
         var listenOption = new Option<string>(
             "--listen",
@@ -60,7 +58,7 @@ internal sealed partial class Program
         return rootCommand.Parse(args).InvokeAsync().GetAwaiter().GetResult();
     }
 
-    static async Task RunAgentAsync(string listenAddress, string seedAddress)
+    private static async Task RunAgentAsync(string listenAddress, string seedAddress)
     {
         var builder = WebApplication.CreateBuilder();
 
@@ -108,51 +106,43 @@ internal sealed partial class Program
     /// Background service to monitor the cluster and subscribe to events.
     /// </summary>
 #pragma warning disable CA1812 // Avoid uninstantiated internal classes - Instantiated by DI
-    private sealed class ClusterMonitorService : BackgroundService
+    private sealed class ClusterMonitorService(
+        IRapidCluster cluster,
+        ILogger<Program.ClusterMonitorService> logger,
+        IHostApplicationLifetime lifetime) : BackgroundService
 #pragma warning restore CA1812
     {
-        private readonly IRapidCluster _cluster;
-        private readonly ILogger<ClusterMonitorService> _logger;
-        private readonly IHostApplicationLifetime _lifetime;
-
-        public ClusterMonitorService(
-            IRapidCluster cluster,
-            ILogger<ClusterMonitorService> logger,
-            IHostApplicationLifetime lifetime)
-        {
-            _cluster = cluster;
-            _logger = logger;
-            _lifetime = lifetime;
-
-            // Register event subscriptions
-            _cluster.RegisterSubscription(ClusterEvents.ViewChangeProposal, change =>
-                LogProposalDetected(logger, change));
-
-            _cluster.RegisterSubscription(ClusterEvents.ViewChange, change =>
-                LogViewChange(logger, change.ConfigurationId, change.Membership.Count));
-
-            _cluster.RegisterSubscription(ClusterEvents.Kicked, change =>
-                LogKicked(logger, change));
-        }
-
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            // Wait a bit for the cluster to initialize
-            await Task.Delay(2000, stoppingToken);
-
-            // Periodically print membership
-            for (var i = 0; i < MaxTries && !stoppingToken.IsCancellationRequested; i++)
+            try
             {
-                var size = _cluster.GetMembershipSize();
-                LogMembershipSize(_logger, size);
-                await Task.Delay(SleepIntervalMs, stoppingToken);
+                await foreach (var notification in cluster.EventStream.WithCancellation(stoppingToken))
+                {
+                    switch (notification.Event)
+                    {
+                        case ClusterEvents.ViewChangeProposal:
+                            LogProposalDetected(logger, notification.Change);
+                            break;
+                        case ClusterEvents.ViewChange:
+                            LogViewChange(logger, notification.Change.ConfigurationId, notification.Change.Membership.Count);
+                            LogMembershipSize(logger, notification.Change.Membership.Count);
+                            break;
+                        case ClusterEvents.Kicked:
+                            LogKicked(logger, notification.Change);
+                            break;
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected during shutdown
             }
 
             // Leave gracefully
-            await _cluster.LeaveGracefullyAsync();
+            await cluster.LeaveGracefullyAsync();
 
             // Signal shutdown
-            _lifetime.StopApplication();
+            lifetime.StopApplication();
         }
     }
 }

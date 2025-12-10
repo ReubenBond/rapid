@@ -11,15 +11,81 @@ namespace Rapid.Tests;
 public sealed class SubscriptionsTests(ITestOutputHelper outputHelper) : IAsyncDisposable
 {
     private readonly TestCluster _cluster = new(outputHelper);
+    private readonly List<CancellationTokenSource> _subscriptionCts = [];
 
     public async ValueTask DisposeAsync()
     {
+        // Cancel all subscriptions
+        foreach (var cts in _subscriptionCts)
+        {
+            await cts.CancelAsync();
+            cts.Dispose();
+        }
+        _subscriptionCts.Clear();
+
         await _cluster.DisposeAsync().ConfigureAwait(true);
         GC.SuppressFinalize(this);
     }
 
     /// <summary>
+    /// Starts consuming events from a cluster's EventStream and collects them into a TestCallback.
+    /// </summary>
+    private void StartEventConsumer(IRapidCluster cluster, ClusterEvents eventType, TestCallback callback)
+    {
+        var cts = new CancellationTokenSource();
+        _subscriptionCts.Add(cts);
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await foreach (var notification in cluster.EventStream.WithCancellation(cts.Token))
+                {
+                    if (notification.Event == eventType)
+                    {
+                        callback.Accept(notification.Change);
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected during cleanup
+            }
+        }, cts.Token);
+    }
+
+    /// <summary>
+    /// Starts consuming events from a cluster's EventStream and adds them to a bag.
+    /// </summary>
+    private void StartEventConsumer(IRapidCluster cluster, ClusterEvents eventType, ConcurrentBag<ClusterStatusChange> bag)
+    {
+        var cts = new CancellationTokenSource();
+        _subscriptionCts.Add(cts);
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await foreach (var notification in cluster.EventStream.WithCancellation(cts.Token))
+                {
+                    if (notification.Event == eventType)
+                    {
+                        bag.Add(notification.Change);
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected during cleanup
+            }
+        }, cts.Token);
+    }
+
+    /// <summary>
     /// Two node cluster, one subscription each.
+    /// With IAsyncEnumerable, subscribers only receive events published AFTER they subscribe.
+    /// The seed's consumer is started before the join, so it receives the join event.
+    /// The joiner's consumer may miss the initial view change if it's published synchronously during join.
     /// </summary>
     [Fact]
     public async Task SubscriptionOnJoin()
@@ -28,16 +94,13 @@ public sealed class SubscriptionsTests(ITestOutputHelper outputHelper) : IAsyncD
         var joinerAddress = Utils.HostFromParts("127.0.0.1", _cluster.GetNextPort());
 
         var seedCb = new TestCallback();
-        var (seedApp, seed) = await _cluster.CreateSeedNodeAsync(seedAddress, options =>
-        {
-            options.AddSubscription(ClusterEvents.ViewChange, seedCb.Accept);
-        }, TestContext.Current.CancellationToken);
+        var (seedApp, seed) = await _cluster.CreateSeedNodeAsync(seedAddress, TestContext.Current.CancellationToken);
+        StartEventConsumer(seed, ClusterEvents.ViewChange, seedCb);
 
+        var (joinerApp, joiner) = await _cluster.CreateJoinerNodeAsync(joinerAddress, seedAddress, TestContext.Current.CancellationToken);
+        // Note: Joiner's consumer is started AFTER join completes, so it may miss the initial view change
         var joinCb = new TestCallback();
-        var (joinerApp, joiner) = await _cluster.CreateJoinerNodeAsync(joinerAddress, seedAddress, options =>
-        {
-            options.AddSubscription(ClusterEvents.ViewChange, joinCb.Accept);
-        }, TestContext.Current.CancellationToken);
+        StartEventConsumer(joiner, ClusterEvents.ViewChange, joinCb);
 
         await TestCluster.WaitForClusterSizeAsync(seed, 2, TimeSpan.FromSeconds(10)).ConfigureAwait(true);
         await TestCluster.WaitForClusterSizeAsync(joiner, 2, TimeSpan.FromSeconds(10)).ConfigureAwait(true);
@@ -45,27 +108,28 @@ public sealed class SubscriptionsTests(ITestOutputHelper outputHelper) : IAsyncD
         // Give callbacks time to fire
         await Task.Delay(500, TestContext.Current.CancellationToken);
 
-        // Seed should receive at least 2 events: initial start and join
-        Assert.True(seedCb.NumTimesCalled() >= 2, $"Expected seed to receive at least 2 events, got {seedCb.NumTimesCalled()}");
+        // Seed should receive at least 1 event for the join (consumer started before joiner joined)
+        Assert.True(seedCb.NumTimesCalled() >= 1, $"Expected seed to receive at least 1 event, got {seedCb.NumTimesCalled()}");
 
-        // Joiner should receive at least 1 event: the join itself
-        Assert.True(joinCb.NumTimesCalled() >= 1, $"Expected joiner to receive at least 1 event, got {joinCb.NumTimesCalled()}");
-
-        // Verify that the final membership includes both nodes
-        // Look for a callback with 2 members (may not be the last one due to timing)
+        // Verify that the seed's final membership includes both nodes
         var seedMaxMembership = seedCb.GetMembershipLog().Max(m => m.Count);
         Assert.True(seedMaxMembership >= 2, $"Seed max membership was {seedMaxMembership}, expected at least 2");
 
-        var joinerMaxMembership = joinCb.GetMembershipLog().Max(m => m.Count);
-        Assert.True(joinerMaxMembership >= 2, $"Joiner max membership was {joinerMaxMembership}, expected at least 2");
+        // The joiner's consumer was started after the join completed, so it may receive 0 events.
+        // This is expected behavior with IAsyncEnumerable - you only get events published after subscribing.
+        // The important thing is that the seed received the join event.
 
-        // Verify all reported statuses are UP
+        // Verify all reported statuses from seed are UP
         TestNodeStatus(seedCb.GetDeltaLog(), EdgeStatus.Up);
-        TestNodeStatus(joinCb.GetDeltaLog(), EdgeStatus.Up);
+        if (joinCb.NumTimesCalled() > 0)
+        {
+            TestNodeStatus(joinCb.GetDeltaLog(), EdgeStatus.Up);
+        }
     }
 
     /// <summary>
     /// Two node cluster, two subscriptions each.
+    /// With IAsyncEnumerable, subscribers only receive events published AFTER they subscribe.
     /// </summary>
     [Fact]
     public async Task MultipleSubscriptionsOnJoin()
@@ -75,38 +139,41 @@ public sealed class SubscriptionsTests(ITestOutputHelper outputHelper) : IAsyncD
 
         var seedCb1 = new TestCallback();
         var seedCb2 = new TestCallback();
-        var (seedApp, seed) = await _cluster.CreateSeedNodeAsync(seedAddress, options =>
-        {
-            options.AddSubscription(ClusterEvents.ViewChange, seedCb1.Accept);
-            options.AddSubscription(ClusterEvents.ViewChange, seedCb2.Accept);
-        }, TestContext.Current.CancellationToken);
+        var (seedApp, seed) = await _cluster.CreateSeedNodeAsync(seedAddress, TestContext.Current.CancellationToken);
+        StartEventConsumer(seed, ClusterEvents.ViewChange, seedCb1);
+        StartEventConsumer(seed, ClusterEvents.ViewChange, seedCb2);
 
+        var (joinerApp, joiner) = await _cluster.CreateJoinerNodeAsync(joinerAddress, seedAddress, TestContext.Current.CancellationToken);
+        // Note: Joiner's consumers are started AFTER join completes
         var joinCb1 = new TestCallback();
         var joinCb2 = new TestCallback();
-        var (joinerApp, joiner) = await _cluster.CreateJoinerNodeAsync(joinerAddress, seedAddress, options =>
-        {
-            options.AddSubscription(ClusterEvents.ViewChange, joinCb1.Accept);
-            options.AddSubscription(ClusterEvents.ViewChange, joinCb2.Accept);
-        }, TestContext.Current.CancellationToken);
+        StartEventConsumer(joiner, ClusterEvents.ViewChange, joinCb1);
+        StartEventConsumer(joiner, ClusterEvents.ViewChange, joinCb2);
 
         await TestCluster.WaitForClusterSizeAsync(seed, 2, TimeSpan.FromSeconds(10)).ConfigureAwait(true);
 
         // Give callbacks time to fire
         await Task.Delay(500, TestContext.Current.CancellationToken);
 
-        // Both seed callbacks should receive the same number of events
-        Assert.True(seedCb1.NumTimesCalled() >= 2);
-        Assert.True(seedCb2.NumTimesCalled() >= 2);
+        // Both seed callbacks should receive the same number of events (consumer started before join)
+        Assert.True(seedCb1.NumTimesCalled() >= 1, $"Expected seedCb1 to receive at least 1 event, got {seedCb1.NumTimesCalled()}");
+        Assert.True(seedCb2.NumTimesCalled() >= 1, $"Expected seedCb2 to receive at least 1 event, got {seedCb2.NumTimesCalled()}");
+        // Both should receive the same events since they subscribed at the same time
+        Assert.Equal(seedCb1.NumTimesCalled(), seedCb2.NumTimesCalled());
 
-        // Both joiner callbacks should receive the same number of events
-        Assert.True(joinCb1.NumTimesCalled() >= 1);
-        Assert.True(joinCb2.NumTimesCalled() >= 1);
-
-        // Verify all reported statuses are UP
+        // Verify all reported statuses from seed are UP
         TestNodeStatus(seedCb1.GetDeltaLog(), EdgeStatus.Up);
         TestNodeStatus(seedCb2.GetDeltaLog(), EdgeStatus.Up);
-        TestNodeStatus(joinCb1.GetDeltaLog(), EdgeStatus.Up);
-        TestNodeStatus(joinCb2.GetDeltaLog(), EdgeStatus.Up);
+
+        // Joiner callbacks may be 0 as they were started after join completed
+        if (joinCb1.NumTimesCalled() > 0)
+        {
+            TestNodeStatus(joinCb1.GetDeltaLog(), EdgeStatus.Up);
+        }
+        if (joinCb2.NumTimesCalled() > 0)
+        {
+            TestNodeStatus(joinCb2.GetDeltaLog(), EdgeStatus.Up);
+        }
     }
 
     /// <summary>
@@ -119,10 +186,8 @@ public sealed class SubscriptionsTests(ITestOutputHelper outputHelper) : IAsyncD
         var joinerAddress = Utils.HostFromParts("127.0.0.1", _cluster.GetNextPort());
 
         var viewChanges = new ConcurrentBag<ClusterStatusChange>();
-        var (seedApp, seed) = await _cluster.CreateSeedNodeAsync(seedAddress, options =>
-        {
-            options.AddSubscription(ClusterEvents.ViewChange, change => viewChanges.Add(change));
-        }, TestContext.Current.CancellationToken);
+        var (seedApp, seed) = await _cluster.CreateSeedNodeAsync(seedAddress, TestContext.Current.CancellationToken);
+        StartEventConsumer(seed, ClusterEvents.ViewChange, viewChanges);
 
         var (joinerApp, joiner) = await _cluster.CreateJoinerNodeAsync(joinerAddress, seedAddress, TestContext.Current.CancellationToken);
 
@@ -152,8 +217,8 @@ public sealed class SubscriptionsTests(ITestOutputHelper outputHelper) : IAsyncD
             {
                 ["role"] = ByteString.CopyFromUtf8("seed")
             });
-            options.AddSubscription(ClusterEvents.ViewChange, change => viewChanges.Add(change));
         }, TestContext.Current.CancellationToken);
+        StartEventConsumer(seed, ClusterEvents.ViewChange, viewChanges);
 
         var (joinerApp, joiner) = await _cluster.CreateJoinerNodeAsync(joinerAddress, seedAddress, options =>
         {
@@ -175,6 +240,8 @@ public sealed class SubscriptionsTests(ITestOutputHelper outputHelper) : IAsyncD
 
     /// <summary>
     /// Multi-node cluster with subscriptions.
+    /// With IAsyncEnumerable, subscribers only receive events published AFTER they subscribe.
+    /// Joiner1's consumer is started after it joins, so it can receive joiner2's join event.
     /// </summary>
     [Fact]
     public async Task SubscriptionWithMultipleNodes()
@@ -184,24 +251,20 @@ public sealed class SubscriptionsTests(ITestOutputHelper outputHelper) : IAsyncD
         var joiner2Address = Utils.HostFromParts("127.0.0.1", _cluster.GetNextPort());
 
         var seedCb = new TestCallback();
-        var (seedApp, seed) = await _cluster.CreateSeedNodeAsync(seedAddress, options =>
-        {
-            options.AddSubscription(ClusterEvents.ViewChange, seedCb.Accept);
-        }, TestContext.Current.CancellationToken);
+        var (seedApp, seed) = await _cluster.CreateSeedNodeAsync(seedAddress, TestContext.Current.CancellationToken);
+        StartEventConsumer(seed, ClusterEvents.ViewChange, seedCb);
 
+        var (joiner1App, joiner1) = await _cluster.CreateJoinerNodeAsync(joiner1Address, seedAddress, TestContext.Current.CancellationToken);
+        // Joiner1's consumer is started AFTER join, but BEFORE joiner2 joins
         var joiner1Cb = new TestCallback();
-        var (joiner1App, joiner1) = await _cluster.CreateJoinerNodeAsync(joiner1Address, seedAddress, options =>
-        {
-            options.AddSubscription(ClusterEvents.ViewChange, joiner1Cb.Accept);
-        }, TestContext.Current.CancellationToken);
+        StartEventConsumer(joiner1, ClusterEvents.ViewChange, joiner1Cb);
 
         await TestCluster.WaitForClusterSizeAsync(seed, 2, TimeSpan.FromSeconds(10)).ConfigureAwait(true);
 
+        var (joiner2App, joiner2) = await _cluster.CreateJoinerNodeAsync(joiner2Address, seedAddress, TestContext.Current.CancellationToken);
+        // Joiner2's consumer is started AFTER join
         var joiner2Cb = new TestCallback();
-        var (joiner2App, joiner2) = await _cluster.CreateJoinerNodeAsync(joiner2Address, seedAddress, options =>
-        {
-            options.AddSubscription(ClusterEvents.ViewChange, joiner2Cb.Accept);
-        }, TestContext.Current.CancellationToken);
+        StartEventConsumer(joiner2, ClusterEvents.ViewChange, joiner2Cb);
 
         await TestCluster.WaitForClusterSizeAsync(seed, 3, TimeSpan.FromSeconds(15)).ConfigureAwait(true);
         await TestCluster.WaitForClusterSizeAsync(joiner1, 3, TimeSpan.FromSeconds(15)).ConfigureAwait(true);
@@ -210,22 +273,21 @@ public sealed class SubscriptionsTests(ITestOutputHelper outputHelper) : IAsyncD
         // Give callbacks time to fire
         await Task.Delay(500, TestContext.Current.CancellationToken);
 
-        // Seed receives: initial start, joiner1 join, joiner2 join = at least 3 events
-        Assert.True(seedCb.NumTimesCalled() >= 3, $"Expected seed to receive at least 3 events, got {seedCb.NumTimesCalled()}");
+        // Seed receives callbacks for both joins (consumer started before any joiner joined)
+        Assert.True(seedCb.NumTimesCalled() >= 2, $"Expected seed to receive at least 2 events, got {seedCb.NumTimesCalled()}");
 
-        // Joiner1 receives: join (2 nodes), joiner2 join = at least 2 events
-        Assert.True(joiner1Cb.NumTimesCalled() >= 2, $"Expected joiner1 to receive at least 2 events, got {joiner1Cb.NumTimesCalled()}");
+        // Joiner1's consumer was started after it joined but before joiner2 joined,
+        // so it should receive at least the joiner2 join event
+        Assert.True(joiner1Cb.NumTimesCalled() >= 1, $"Expected joiner1 to receive at least 1 event, got {joiner1Cb.NumTimesCalled()}");
 
-        // Joiner2 receives: join (3 nodes) = at least 1 event
-        Assert.True(joiner2Cb.NumTimesCalled() >= 1, $"Expected joiner2 to receive at least 1 event, got {joiner2Cb.NumTimesCalled()}");
+        // Joiner2's consumer was started after it joined, so may receive 0 events
+        // This is expected behavior with IAsyncEnumerable
 
         // Final membership should have 3 nodes (check max to handle timing issues)
         var seedMaxMembership = seedCb.GetMembershipLog().Max(m => m.Count);
         var joiner1MaxMembership = joiner1Cb.GetMembershipLog().Max(m => m.Count);
-        var joiner2MaxMembership = joiner2Cb.GetMembershipLog().Max(m => m.Count);
         Assert.True(seedMaxMembership >= 3, $"Seed max membership was {seedMaxMembership}, expected at least 3");
         Assert.True(joiner1MaxMembership >= 3, $"Joiner1 max membership was {joiner1MaxMembership}, expected at least 3");
-        Assert.True(joiner2MaxMembership >= 3, $"Joiner2 max membership was {joiner2MaxMembership}, expected at least 3");
     }
 
     /// <summary>
