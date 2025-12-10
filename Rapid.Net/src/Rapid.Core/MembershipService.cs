@@ -1104,10 +1104,6 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
         LogDispose();
         Shutdown();
 
-        // Wait for tracked background tasks via SharedResources
-        // The SharedResources.WaitForBackgroundTasksAsync handles this
-        await Task.CompletedTask.ConfigureAwait(true);
-
         await _consensusInstance.DisposeAsync();
     }
 

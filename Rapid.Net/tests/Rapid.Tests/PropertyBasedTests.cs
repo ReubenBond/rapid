@@ -211,7 +211,7 @@ public class PropertyBasedTests
                 }
                 var view = builder.Build();
 
-                var detector = new SimpleCutDetector(observersPerSubject, view);
+                var detector = new SimpleCutDetector(view);
 
                 var subject = nodes[0].Endpoint;
 
@@ -249,7 +249,7 @@ public class PropertyBasedTests
                 }
                 var view = builder.Build();
 
-                var detector = new SimpleCutDetector(observersPerSubject, view);
+                var detector = new SimpleCutDetector(view);
 
                 // Create an unknown endpoint
                 var unknownEndpoint = new Endpoint
@@ -292,7 +292,7 @@ public class PropertyBasedTests
                 }
                 var view = builder.Build();
 
-                var detector = new MultiNodeCutDetector(k, h, l, view);
+                var detector = new MultiNodeCutDetector(h, l, view);
 
                 var subject = nodes[0].Endpoint;
 
@@ -330,7 +330,7 @@ public class PropertyBasedTests
                 var view = builder.Build();
 
                 // Use K > H >= L (e.g., K=k, H=k-1, L=1)
-                var detector = new MultiNodeCutDetector(k, k - 1, 1, view);
+                var detector = new MultiNodeCutDetector(k - 1, 1, view);
 
                 var observer = nodes[1].Endpoint;
                 var subject = nodes[0].Endpoint;

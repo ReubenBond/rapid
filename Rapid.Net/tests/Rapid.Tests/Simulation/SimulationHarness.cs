@@ -44,15 +44,15 @@ internal sealed class SimulationHarness : IAsyncDisposable
         StartDateTime = DateTimeOffset.UtcNow;
 
         Random = new SimulationRandom(seed);
-        
+
         // Create shared clock and harness-level queue
         _clock = new SimulationClock();
         _harnessQueue = new SimulationTaskQueue(_clock);
         _harnessScheduler = new SimulationTaskScheduler(_harnessQueue);
-        
+
         // Create time provider using harness queue (for GetUtcNow queries)
         _timeProvider = new SimulationTimeProvider(_harnessQueue, StartDateTime);
-        
+
         Network = new SimulationNetwork(this, Random);
 
         // Create logger factory with file and xUnit providers
@@ -242,10 +242,10 @@ internal sealed class SimulationHarness : IAsyncDisposable
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(duration, TimeSpan.Zero);
 
         SuspendNode(node);
-        
+
         // Schedule auto-resume on the harness queue
         _harnessQueue.EnqueueAfter(() => ResumeNode(node), duration);
-        
+
         LogEvent(SimulationEventType.NodeSuspended, $"Node suspended for {duration}");
     }
 
@@ -922,7 +922,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
 
         // Clear harness queue
         _harnessQueue.Clear();
-        
+
         // Clear all node contexts
         foreach (var (_, context) in _nodeContexts)
         {

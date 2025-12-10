@@ -5,7 +5,7 @@ namespace Rapid;
 
 /// <summary>
 /// Factory for creating cut detectors based on cluster size.
-/// This exists because the appropriate cut detector varies based on effective cluster parameters.
+/// This exists because the appropriate cut detector varies based on cluster parameters.
 /// </summary>
 internal interface ICutDetectorFactory
 {
@@ -15,16 +15,15 @@ internal interface ICutDetectorFactory
     /// <param name="membershipView">The current membership view.</param>
     /// <returns>
     /// A cut detector appropriate for the cluster size:
-    /// - For single-node clusters (ObserversPerSubject = 0): SimpleCutDetector with threshold 1
-    /// - For small clusters where MultiNodeCutDetector constraints cannot be satisfied: SimpleCutDetector
-    /// - For larger clusters (ObserversPerSubject >= 3 and K > H): MultiNodeCutDetector with H/L watermarks
+    /// - For small clusters (RingCount &lt; 3): SimpleCutDetector
+    /// - For larger clusters (RingCount >= 3): MultiNodeCutDetector with H/L watermarks
     /// </returns>
     ICutDetector Create(MembershipView membershipView);
 }
 
 /// <summary>
 /// Default implementation of ICutDetectorFactory.
-/// Uses RapidProtocolOptions to compute effective parameters based on cluster size.
+/// Uses the membership view's RingCount as the authoritative source for ObserversPerSubject.
 /// </summary>
 internal sealed class CutDetectorFactory(
     IOptions<RapidProtocolOptions> protocolOptions,
@@ -37,25 +36,17 @@ internal sealed class CutDetectorFactory(
     public ICutDetector Create(MembershipView membershipView)
     {
         ArgumentNullException.ThrowIfNull(membershipView);
-        
-        var (observersPerSubject, highWatermark, lowWatermark) = _options.GetEffectiveParameters(membershipView.Size);
-        
-        // For single-node cluster, no cut detection needed
-        if (observersPerSubject == 0)
-        {
-            // Use SimpleCutDetector with K=1 - it will never trigger since there are no observers
-            // but it provides a valid implementation that won't crash
-            return new SimpleCutDetector(1, membershipView, simpleCutDetectorLogger);
-        }
-        
-        // MultiNodeCutDetector requires K >= 3 and K > H >= L >= 1
+
+        var observersPerSubject = membershipView.RingCount;
+
+        // MultiNodeCutDetector requires ObserversPerSubject >= 3 and ObserversPerSubject > H >= L >= 1
         // If these constraints cannot be satisfied, use SimpleCutDetector
-        if (observersPerSubject < 3 || observersPerSubject <= highWatermark)
+        if (observersPerSubject < 3 || observersPerSubject <= _options.HighWatermark)
         {
-            return new SimpleCutDetector(observersPerSubject, membershipView, simpleCutDetectorLogger);
+            return new SimpleCutDetector(membershipView, simpleCutDetectorLogger);
         }
-        
+
         // For larger clusters with valid parameters, use the full multi-node cut detection
-        return new MultiNodeCutDetector(observersPerSubject, highWatermark, lowWatermark, membershipView, multiNodeCutDetectorLogger);
+        return new MultiNodeCutDetector(_options.HighWatermark, _options.LowWatermark, membershipView, multiNodeCutDetectorLogger);
     }
 }

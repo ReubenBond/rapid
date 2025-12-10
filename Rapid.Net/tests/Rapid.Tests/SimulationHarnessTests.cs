@@ -278,10 +278,10 @@ public sealed class SimulationHarnessTests : IAsyncLifetime
     {
         var seedNode = _harness.CreateSeedNode();
         var context = _harness.GetNodeContext(seedNode);
-        
+
         // Run until idle first to clear any startup tasks from CreateSeedNode
         _harness.RunUntilIdle();
-        
+
         var executionCount = 0;
 
         // Queue multiple tasks on the node

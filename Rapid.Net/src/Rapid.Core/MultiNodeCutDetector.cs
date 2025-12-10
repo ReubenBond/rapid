@@ -18,7 +18,6 @@ namespace Rapid;
 /// </summary>
 internal sealed partial class MultiNodeCutDetector : ICutDetector
 {
-    private readonly int _observersPerSubject; // Number of observers per subject and vice versa
     private readonly int _highWaterMark; // High watermark
     private readonly int _lowWaterMark; // Low watermark
     private readonly MembershipView _membershipView;
@@ -30,6 +29,11 @@ internal sealed partial class MultiNodeCutDetector : ICutDetector
     private readonly HashSet<Endpoint> _proposal = [];
     private readonly HashSet<Endpoint> _preProposal = [];
     private bool _seenLinkDownEvents;
+
+    /// <summary>
+    /// Number of observers per subject, derived from the membership view's ring count.
+    /// </summary>
+    private int ObserversPerSubject => _membershipView.RingCount;
 
     private readonly struct LoggableEndpoint(Endpoint endpoint)
     {
@@ -67,39 +71,39 @@ internal sealed partial class MultiNodeCutDetector : ICutDetector
     /// <summary>
     /// Creates a MultiNodeCutDetector for larger clusters.
     /// </summary>
-    /// <param name="observersPerSubject">Number of observers per subject (K, must be at least 3)</param>
     /// <param name="highWaterMark">High watermark threshold (H)</param>
     /// <param name="lowWaterMark">Low watermark threshold (L)</param>
-    /// <param name="membershipView">The current membership view for observer lookups</param>
+    /// <param name="membershipView">The current membership view for observer lookups (K is derived from RingCount)</param>
     /// <param name="logger">Optional logger for diagnostic output</param>
-    /// <exception cref="ArgumentException">If constraints K greater than H, H at least L, L at least 1 are not satisfied, or K less than 3</exception>
-    public MultiNodeCutDetector(int observersPerSubject, int highWaterMark, int lowWaterMark, MembershipView membershipView, ILogger<MultiNodeCutDetector>? logger = null)
+    /// <exception cref="ArgumentException">If constraints K > H >= L >= 1 are not satisfied, or K less than 3</exception>
+    public MultiNodeCutDetector(int highWaterMark, int lowWaterMark, MembershipView membershipView, ILogger<MultiNodeCutDetector>? logger = null)
     {
+        ArgumentNullException.ThrowIfNull(membershipView);
+
+        var k = membershipView.RingCount;
+
         // Multi-node cut detection requires K >= 3 for proper H/L watermark behavior
         // For K < 3, use SimpleCutDetector instead
-        if (observersPerSubject < 3)
+        if (k < 3)
         {
             throw new ArgumentException(
-                $"MultiNodeCutDetector requires at least 3 observers per subject, got {observersPerSubject}. Use SimpleCutDetector for smaller clusters.",
-                nameof(observersPerSubject));
+                $"MultiNodeCutDetector requires at least 3 observers per subject, got {k}. Use SimpleCutDetector for smaller clusters.",
+                nameof(membershipView));
         }
 
         // Constraints: K > H >= L >= 1
         if (highWaterMark < 1 || lowWaterMark < 1 ||
-            highWaterMark >= observersPerSubject || lowWaterMark > highWaterMark)
+            highWaterMark >= k || lowWaterMark > highWaterMark)
         {
-            throw new ArgumentException($"Arguments do not satisfy K > H >= L >= 1: (K: {observersPerSubject}, H: {highWaterMark}, L: {lowWaterMark})");
+            throw new ArgumentException($"Arguments do not satisfy K > H >= L >= 1: (K: {k}, H: {highWaterMark}, L: {lowWaterMark})");
         }
 
-        ArgumentNullException.ThrowIfNull(membershipView);
-
-        _observersPerSubject = observersPerSubject;
         _highWaterMark = highWaterMark;
         _lowWaterMark = lowWaterMark;
         _membershipView = membershipView;
         _logger = logger ?? NullLogger<MultiNodeCutDetector>.Instance;
 
-        LogCreated(_observersPerSubject, _highWaterMark, _lowWaterMark, membershipView.Size);
+        LogCreated(k, _highWaterMark, _lowWaterMark, membershipView.Size);
     }
 
     public int GetNumProposals()
@@ -132,10 +136,12 @@ internal sealed partial class MultiNodeCutDetector : ICutDetector
     private List<Endpoint> AggregateForProposal(Endpoint linkSrc, Endpoint linkDst,
                                                 EdgeStatus edgeStatus, int ringNumber)
     {
-        // Note: We don't validate ringNumber against _observersPerSubject here because
-        // the ring numbers come from MembershipView which uses the configured K (e.g., 10)
-        // while this detector may be using effectiveK (e.g., 3-4) for smaller clusters.
-        // We just count unique votes per ring number.
+        if (ringNumber < 0 || ringNumber >= ObserversPerSubject)
+        {
+            throw new ArgumentException(
+                $"ringNumber ({ringNumber}) must be in range [0, {ObserversPerSubject})",
+                nameof(ringNumber));
+        }
 
         LogAggregate(new LoggableEndpoint(linkSrc), new LoggableEndpoint(linkDst), edgeStatus, ringNumber);
 
@@ -148,7 +154,7 @@ internal sealed partial class MultiNodeCutDetector : ICutDetector
 
             if (!_reportsPerHost.TryGetValue(linkDst, out var reportsForHost))
             {
-                reportsForHost = new Dictionary<int, Endpoint>(_observersPerSubject);
+                reportsForHost = new Dictionary<int, Endpoint>(ObserversPerSubject);
                 _reportsPerHost[linkDst] = reportsForHost;
             }
 

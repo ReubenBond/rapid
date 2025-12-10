@@ -426,7 +426,7 @@ public sealed class JoinProtocolTests : IAsyncLifetime
         // Note: Due to the partition, failure detection may eventually remove seedNode (node 0)
         // from the view of nodes 1, 2, 3. This is expected behavior.
         Assert.True(joiner3.IsInitialized);
-        
+
         // Verify that joiner3 is part of the cluster (initial membership size was 4)
         // The partition may cause the cluster to shrink back to 3 (without node 0)
         Assert.True(joiner3.MembershipSize >= 3);

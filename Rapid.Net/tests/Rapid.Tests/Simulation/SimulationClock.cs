@@ -59,7 +59,7 @@ internal sealed class SimulationClock
         {
             if (time < _currentTime)
             {
-                throw new ArgumentOutOfRangeException(nameof(time), 
+                throw new ArgumentOutOfRangeException(nameof(time),
                     $"Cannot go back in time. Current time is {_currentTime}, attempted to set to {time}.");
             }
             _currentTime = time;

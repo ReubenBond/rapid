@@ -20,7 +20,6 @@ namespace Rapid;
 /// </summary>
 internal sealed partial class SimpleCutDetector : ICutDetector
 {
-    private readonly int _requiredVotes;
     private readonly MembershipView _membershipView;
     private readonly ILogger<SimpleCutDetector> _logger;
     private readonly Lock _lock = new();
@@ -29,6 +28,18 @@ internal sealed partial class SimpleCutDetector : ICutDetector
     private readonly HashSet<Endpoint> _pendingProposals = [];
     private readonly HashSet<Endpoint> _alreadyProposed = [];
     private bool _seenLinkDownEvents;
+
+    /// <summary>
+    /// Number of observers per subject, derived from the membership view's ring count.
+    /// </summary>
+    private int ObserversPerSubject => _membershipView.RingCount;
+
+    /// <summary>
+    /// Number of votes required to trigger a proposal.
+    /// For ObserversPerSubject=1: require 1 vote (the only observer)
+    /// For ObserversPerSubject=2: require 2 votes (both observers must agree)
+    /// </summary>
+    private int RequiredVotes => ObserversPerSubject;
 
     private readonly struct LoggableEndpoint(Endpoint endpoint)
     {
@@ -66,28 +77,25 @@ internal sealed partial class SimpleCutDetector : ICutDetector
     /// <summary>
     /// Creates a SimpleCutDetector for small clusters.
     /// </summary>
-    /// <param name="observersPerSubject">Number of observers per subject (1 or 2)</param>
-    /// <param name="membershipView">The current membership view for observer lookups</param>
+    /// <param name="membershipView">The current membership view for observer lookups (K is derived from RingCount)</param>
     /// <param name="logger">Optional logger for diagnostic output</param>
-    /// <exception cref="ArgumentException">If observersPerSubject is not 1 or 2</exception>
-    public SimpleCutDetector(int observersPerSubject, MembershipView membershipView, ILogger<SimpleCutDetector>? logger = null)
+    /// <exception cref="ArgumentException">If membershipView.RingCount is not 1 or 2</exception>
+    public SimpleCutDetector(MembershipView membershipView, ILogger<SimpleCutDetector>? logger = null)
     {
-        if (observersPerSubject < 1 || observersPerSubject > 2)
+        ArgumentNullException.ThrowIfNull(membershipView);
+
+        var k = membershipView.RingCount;
+        if (k < 1 || k > 2)
         {
             throw new ArgumentException(
-                $"SimpleCutDetector is for small clusters with 1-2 observers per subject, got {observersPerSubject}",
-                nameof(observersPerSubject));
+                $"SimpleCutDetector is for small clusters with 1-2 observers per subject, got {k}",
+                nameof(membershipView));
         }
-
-        ArgumentNullException.ThrowIfNull(membershipView);
 
         _membershipView = membershipView;
         _logger = logger ?? NullLogger<SimpleCutDetector>.Instance;
-        // For K=1: require 1 vote (the only observer)
-        // For K=2: require 2 votes (both observers must agree)
-        _requiredVotes = observersPerSubject;
 
-        LogCreated(_requiredVotes, membershipView.Size);
+        LogCreated(RequiredVotes, membershipView.Size);
     }
 
     public int GetNumProposals()
@@ -113,10 +121,12 @@ internal sealed partial class SimpleCutDetector : ICutDetector
     private List<Endpoint> AggregateForProposal(Endpoint linkSrc, Endpoint linkDst,
                                                 EdgeStatus edgeStatus, int ringNumber)
     {
-        // Note: We don't validate ringNumber against _observersPerSubject here because
-        // the ring numbers come from MembershipView which uses the configured K (e.g., 10)
-        // while this detector may be using effectiveK (1 or 2) for small clusters.
-        // We just count unique votes per ring number.
+        if (ringNumber < 0 || ringNumber >= ObserversPerSubject)
+        {
+            throw new ArgumentException(
+                $"ringNumber ({ringNumber}) must be in range [0, {ObserversPerSubject})",
+                nameof(ringNumber));
+        }
 
         LogAggregate(new LoggableEndpoint(linkSrc), new LoggableEndpoint(linkDst), edgeStatus, ringNumber);
 
@@ -140,16 +150,16 @@ internal sealed partial class SimpleCutDetector : ICutDetector
             }
 
             var numReportsForHost = reportsForHost.Count;
-            LogReportCount(new LoggableEndpoint(linkDst), numReportsForHost, _requiredVotes);
+            LogReportCount(new LoggableEndpoint(linkDst), numReportsForHost, RequiredVotes);
 
             // Track nodes that have at least one report (for edge invalidation)
-            if (numReportsForHost == 1 && _requiredVotes > 1)
+            if (numReportsForHost == 1 && RequiredVotes > 1)
             {
                 _pendingProposals.Add(linkDst);
                 LogAddedToPending(new LoggableEndpoint(linkDst));
             }
 
-            if (numReportsForHost >= _requiredVotes)
+            if (numReportsForHost >= RequiredVotes)
             {
                 // Threshold reached - propose this node for view change (but only once)
                 _pendingProposals.Remove(linkDst);

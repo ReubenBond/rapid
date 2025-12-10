@@ -181,7 +181,7 @@ internal sealed class SimulationNode : IAsyncDisposable, IDisposable
 
         var opts = _protocolOptions.Value;
         var membershipView = new MembershipViewBuilder(opts.ObserversPerSubject, [nodeId], [Address]).Build();
-        
+
         // Use factory to create appropriate cut detector for single-node cluster
         var cutDetector = _cutDetectorFactory.Create(membershipView);
         var metadataMap = new Dictionary<Endpoint, Metadata> { { Address, actualMetadata } };
@@ -277,7 +277,7 @@ internal sealed class SimulationNode : IAsyncDisposable, IDisposable
             opts.ObserversPerSubject,
             [.. successfulResponse.Identifiers],
             [.. successfulResponse.Endpoints]).BuildWithConfigurationId(new ConfigurationId(successfulResponse.ConfigurationId));
-        
+
         // Use factory to create appropriate cut detector based on actual cluster size
         var cutDetector = _cutDetectorFactory.Create(membershipView);
         var broadcaster = new UnicastToAllBroadcaster(MessagingClient);
