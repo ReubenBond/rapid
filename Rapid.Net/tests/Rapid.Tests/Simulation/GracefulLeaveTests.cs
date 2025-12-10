@@ -14,7 +14,7 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
 {
     private SimulationHarness _harness = null!;
     private const int TestSeed = 67890;
-    private readonly List<SimulationEventConsumer> _consumers = [];
+    private readonly List<AsyncEnumerablePoller<ClusterEventNotification>> _consumers = [];
 
     public ValueTask InitializeAsync()
     {
@@ -26,7 +26,7 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
     {
         foreach (var consumer in _consumers)
         {
-            consumer.Stop();
+            await consumer.DisposeAsync().ConfigureAwait(false);
         }
         _consumers.Clear();
 
@@ -36,9 +36,9 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
     /// <summary>
     /// Creates an event consumer for the node and registers it for cleanup during disposal.
     /// </summary>
-    private SimulationEventConsumer CreateEventConsumer(SimulationNode node)
+    private AsyncEnumerablePoller<ClusterEventNotification> CreateEventConsumer(SimulationNode node)
     {
-        var consumer = new SimulationEventConsumer(node.EventStream);
+        var consumer = new AsyncEnumerablePoller<ClusterEventNotification>(node.EventStream);
         _consumers.Add(consumer);
         return consumer;
     }
@@ -46,10 +46,10 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
     /// <summary>
     /// Drains all available events from the consumer and counts ViewChange events.
     /// </summary>
-    private static int CountViewChangeEvents(SimulationEventConsumer consumer)
+    private static int CountViewChangeEvents(AsyncEnumerablePoller<ClusterEventNotification> consumer)
     {
         var count = 0;
-        while (consumer.TryGetNext() is { } notification)
+        while (consumer.Poll() is { } notification)
         {
             if (notification.Event == ClusterEvents.ViewChange)
             {
@@ -62,10 +62,10 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
     /// <summary>
     /// Drains all available events from the consumer and collects membership sizes from ViewChange events.
     /// </summary>
-    private static List<int> CollectViewChangeMembershipSizes(SimulationEventConsumer consumer)
+    private static List<int> CollectViewChangeMembershipSizes(AsyncEnumerablePoller<ClusterEventNotification> consumer)
     {
         var sizes = new List<int>();
-        while (consumer.TryGetNext() is { } notification)
+        while (consumer.Poll() is { } notification)
         {
             if (notification.Event == ClusterEvents.ViewChange)
             {

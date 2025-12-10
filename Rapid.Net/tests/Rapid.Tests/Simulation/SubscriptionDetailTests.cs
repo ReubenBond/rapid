@@ -16,7 +16,7 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
 {
     private SimulationHarness _harness = null!;
     private const int TestSeed = 45678;
-    private readonly List<SimulationEventConsumer> _consumers = [];
+    private readonly List<AsyncEnumerablePoller<ClusterEventNotification>> _consumers = [];
 
     public ValueTask InitializeAsync()
     {
@@ -28,7 +28,7 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
     {
         foreach (var consumer in _consumers)
         {
-            consumer.Stop();
+            await consumer.DisposeAsync().ConfigureAwait(false);
         }
         _consumers.Clear();
 
@@ -38,9 +38,9 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
     /// <summary>
     /// Creates an event consumer for the node and registers it for cleanup during disposal.
     /// </summary>
-    private SimulationEventConsumer CreateEventConsumer(SimulationNode node)
+    private AsyncEnumerablePoller<ClusterEventNotification> CreateEventConsumer(SimulationNode node)
     {
-        var consumer = new SimulationEventConsumer(node.EventStream);
+        var consumer = new AsyncEnumerablePoller<ClusterEventNotification>(node.EventStream);
         _consumers.Add(consumer);
         return consumer;
     }
@@ -48,9 +48,9 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
     /// <summary>
     /// Drains all available events from the consumer and collects matching events into the bag.
     /// </summary>
-    private static void CollectEvents(SimulationEventConsumer consumer, ClusterEvents eventType, ConcurrentBag<ClusterStatusChange> bag)
+    private static void CollectEvents(AsyncEnumerablePoller<ClusterEventNotification> consumer, ClusterEvents eventType, ConcurrentBag<ClusterStatusChange> bag)
     {
-        while (consumer.TryGetNext() is { } notification)
+        while (consumer.Poll() is { } notification)
         {
             if (notification.Event == eventType)
             {
@@ -62,9 +62,9 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
     /// <summary>
     /// Drains all available events from the consumer and collects all notifications into the bag.
     /// </summary>
-    private static void CollectEvents(SimulationEventConsumer consumer, ConcurrentBag<ClusterEventNotification> bag)
+    private static void CollectEvents(AsyncEnumerablePoller<ClusterEventNotification> consumer, ConcurrentBag<ClusterEventNotification> bag)
     {
-        while (consumer.TryGetNext() is { } notification)
+        while (consumer.Poll() is { } notification)
         {
             bag.Add(notification);
         }
@@ -73,9 +73,9 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
     /// <summary>
     /// Drains all available events from the consumer and records event types into the queue.
     /// </summary>
-    private static void CollectEvents(SimulationEventConsumer consumer, ConcurrentQueue<string> queue)
+    private static void CollectEvents(AsyncEnumerablePoller<ClusterEventNotification> consumer, ConcurrentQueue<string> queue)
     {
-        while (consumer.TryGetNext() is { } notification)
+        while (consumer.Poll() is { } notification)
         {
             queue.Enqueue(notification.Event == ClusterEvents.ViewChangeProposal ? "Proposal" : "ViewChange");
         }

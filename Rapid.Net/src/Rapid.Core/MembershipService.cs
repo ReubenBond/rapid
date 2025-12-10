@@ -30,7 +30,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     private MembershipView _membershipView;
 
     // Event subscriptions (IAsyncEnumerable-based using Orleans pattern)
-    private readonly ClusterEventBroadcaster _eventBroadcaster = new();
+    private readonly BroadcastEnumerable<ClusterEventNotification> _eventBroadcaster = new();
 
     // Fields used by batching logic.
     private readonly Channel<AlertMessage> _sendQueue;
