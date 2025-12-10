@@ -76,6 +76,9 @@ public static class RapidServiceCollectionExtensions
         // Register FastPaxos factory
         services.AddSingleton<IFastPaxosFactory, FastPaxosFactory>();
 
+        // Register CutDetector factory
+        services.AddSingleton<ICutDetectorFactory, CutDetectorFactory>();
+
         // Register MembershipViewAccessor as singleton (used by both MembershipService and consumers)
         services.AddSingleton<MembershipViewAccessor>();
         services.AddSingleton<IMembershipViewAccessor>(sp => sp.GetRequiredService<MembershipViewAccessor>());

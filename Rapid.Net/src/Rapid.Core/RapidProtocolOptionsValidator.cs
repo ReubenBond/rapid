@@ -49,24 +49,38 @@ internal sealed class RapidProtocolOptionsValidator : IValidateOptions<RapidProt
             return ValidateOptionsResult.Fail("LeaveMessageTimeout must be positive");
         }
 
-        if (options.RingCount <= 0)
+        // Validate K, H, L constraints from the Rapid paper: K >= 3, K > H > L > 0
+        if (options.ObserversPerSubject < RapidProtocolOptions.MinObserversPerSubject)
         {
-            return ValidateOptionsResult.Fail("RingCount must be positive");
+            return ValidateOptionsResult.Fail(
+                $"ObserversPerSubject must be at least {RapidProtocolOptions.MinObserversPerSubject}. " +
+                "The Rapid protocol requires a minimum of 3 observers per subject for proper failure detection.");
         }
 
-        if (options.HighWaterMark <= 0)
+        if (options.HighWatermark <= 0)
         {
-            return ValidateOptionsResult.Fail("HighWaterMark must be positive");
+            return ValidateOptionsResult.Fail("HighWatermark must be positive");
         }
 
-        if (options.LowWaterMark < 0)
+        if (options.LowWatermark <= 0)
         {
-            return ValidateOptionsResult.Fail("LowWaterMark must be non-negative");
+            return ValidateOptionsResult.Fail("LowWatermark must be positive");
         }
 
-        if (options.LowWaterMark >= options.HighWaterMark)
+        // K > H: Need at least one more observer than required for stable detection
+        if (options.HighWatermark >= options.ObserversPerSubject)
         {
-            return ValidateOptionsResult.Fail("LowWaterMark must be less than HighWaterMark");
+            return ValidateOptionsResult.Fail(
+                $"HighWatermark ({options.HighWatermark}) must be less than ObserversPerSubject ({options.ObserversPerSubject}). " +
+                "The protocol requires K > H to allow for some observer failures.");
+        }
+
+        // H > L: Need a gap between stable and unstable thresholds
+        if (options.LowWatermark >= options.HighWatermark)
+        {
+            return ValidateOptionsResult.Fail(
+                $"LowWatermark ({options.LowWatermark}) must be less than HighWatermark ({options.HighWatermark}). " +
+                "The gap between H and L is required for almost-everywhere agreement.");
         }
 
         if (options.FailureDetectorConsecutiveFailures <= 0)

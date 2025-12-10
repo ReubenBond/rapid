@@ -15,6 +15,7 @@ internal sealed class MembershipServiceFactory(
     IEdgeFailureDetectorFactory edgeFailureDetectorFactory,
     IBroadcasterFactory broadcasterFactory,
     IFastPaxosFactory fastPaxosFactory,
+    ICutDetectorFactory cutDetectorFactory,
     SharedResources sharedResources,
     MembershipViewAccessor viewAccessor,
     IOptions<RapidProtocolOptions> protocolOptions,
@@ -26,8 +27,14 @@ internal sealed class MembershipServiceFactory(
         Metadata metadata)
     {
         var opts = protocolOptions.Value;
-        var membershipView = new MembershipViewBuilder(opts.RingCount, [nodeId], [localEndpoint]).Build();
-        var cutDetector = new MultiNodeCutDetector(opts.RingCount, opts.HighWaterMark, opts.LowWaterMark);
+        
+        // For a new cluster starting with 1 node, use configured K for rings
+        // but cut detector needs effective values based on cluster size
+        var membershipView = new MembershipViewBuilder(opts.ObserversPerSubject, [nodeId], [localEndpoint]).Build();
+        
+        // For a single-node cluster, the cut detector will be recreated when nodes join
+        var cutDetector = cutDetectorFactory.Create(membershipView);
+        
         var metadataMap = new Dictionary<Endpoint, Metadata> { { localEndpoint, metadata } };
         var broadcaster = broadcasterFactory.Create();
 
@@ -41,6 +48,7 @@ internal sealed class MembershipServiceFactory(
             broadcaster,
             edgeFailureDetectorFactory,
             fastPaxosFactory,
+            cutDetectorFactory,
             viewAccessor,
             metadataMap,
             logger);
@@ -56,10 +64,15 @@ internal sealed class MembershipServiceFactory(
         // Convert to collections as MembershipViewBuilder requires ICollection
         var nodeIdList = nodeIds.ToList();
         var endpointList = endpoints.ToList();
+        var clusterSize = endpointList.Count;
 
         var opts = protocolOptions.Value;
-        var membershipView = new MembershipViewBuilder(opts.RingCount, nodeIdList, endpointList).BuildWithConfigurationId(new ConfigurationId(configurationId));
-        var cutDetector = new MultiNodeCutDetector(opts.RingCount, opts.HighWaterMark, opts.LowWaterMark);
+        var membershipView = new MembershipViewBuilder(opts.ObserversPerSubject, nodeIdList, endpointList)
+            .BuildWithConfigurationId(new ConfigurationId(configurationId));
+        
+        // Use cut detector factory to create detector based on actual cluster size
+        var cutDetector = cutDetectorFactory.Create(membershipView);
+        
         var broadcaster = broadcasterFactory.Create();
 
         return new MembershipService(
@@ -72,6 +85,7 @@ internal sealed class MembershipServiceFactory(
             broadcaster,
             edgeFailureDetectorFactory,
             fastPaxosFactory,
+            cutDetectorFactory,
             viewAccessor,
             metadataMap,
             logger);

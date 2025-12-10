@@ -50,12 +50,12 @@ public sealed class EdgeCaseTests : IAsyncLifetime
     [Fact]
     public void CustomRingCountWorks()
     {
-        // K > H >= L >= 0 constraint: with RingCount=5, HighWaterMark must be < 5
+        // K > H > L > 0 constraint: with ObserversPerSubject=5, HighWatermark must be < 5
         var options = new RapidProtocolOptions
         {
-            RingCount = 5,
-            HighWaterMark = 4,
-            LowWaterMark = 2
+            ObserversPerSubject = 5,
+            HighWatermark = 4,
+            LowWatermark = 2
         };
         var seedNode = _harness.CreateSeedNode(options: options);
 
@@ -65,11 +65,11 @@ public sealed class EdgeCaseTests : IAsyncLifetime
     [Fact]
     public void CustomHighLowWatermarkWorks()
     {
-        // K > H >= L >= 0 constraint: default RingCount=10
+        // K > H > L > 0 constraint: default ObserversPerSubject=10
         var options = new RapidProtocolOptions
         {
-            HighWaterMark = 8,
-            LowWaterMark = 4
+            HighWatermark = 8,
+            LowWatermark = 3
         };
         var seedNode = _harness.CreateSeedNode(options: options);
 
@@ -190,14 +190,14 @@ public sealed class EdgeCaseTests : IAsyncLifetime
     [Fact]
     public void MultipleNodesWithDifferentOptions()
     {
-        // Use lower ring count with compatible watermark settings
-        var options1 = new RapidProtocolOptions { RingCount = 3, HighWaterMark = 2, LowWaterMark = 1 };
-        var options2 = new RapidProtocolOptions { RingCount = 3, HighWaterMark = 2, LowWaterMark = 1 };
+        // Use lower observers per subject with compatible watermark settings
+        var options1 = new RapidProtocolOptions { ObserversPerSubject = 3, HighWatermark = 2, LowWatermark = 1 };
+        var options2 = new RapidProtocolOptions { ObserversPerSubject = 3, HighWatermark = 2, LowWatermark = 1 };
 
         var seedNode = _harness.CreateSeedNode(options: options1);
         var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1, options: options2);
 
-        // Both should be operational with same ring count
+        // Both should be operational with same observers per subject
         Assert.True(seedNode.IsInitialized);
         Assert.True(joiner.IsInitialized);
     }

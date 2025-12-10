@@ -245,25 +245,25 @@ public class RapidProtocolOptionsValidatorTests
 
     #endregion
 
-    #region RingCount Validation
+    #region ObserversPerSubject Validation
 
     [Fact]
-    public void ValidateRingCountZeroFails()
+    public void ValidateObserversPerSubjectZeroFails()
     {
         var options = CreateValidOptions();
-        options.RingCount = 0;
+        options.ObserversPerSubject = 0;
 
         var result = _validator.Validate(null, options);
 
         Assert.True(result.Failed);
-        Assert.Contains("RingCount", result.FailureMessage, StringComparison.Ordinal);
+        Assert.Contains("ObserversPerSubject", result.FailureMessage, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void ValidateRingCountNegativeFails()
+    public void ValidateObserversPerSubjectNegativeFails()
     {
         var options = CreateValidOptions();
-        options.RingCount = -1;
+        options.ObserversPerSubject = -1;
 
         var result = _validator.Validate(null, options);
 
@@ -271,10 +271,35 @@ public class RapidProtocolOptionsValidatorTests
     }
 
     [Fact]
-    public void ValidateRingCountPositiveSucceeds()
+    public void ValidateObserversPerSubjectBelowMinimumFails()
     {
         var options = CreateValidOptions();
-        options.RingCount = 10;
+        options.ObserversPerSubject = 2; // Below minimum of 3
+
+        var result = _validator.Validate(null, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains("at least 3", result.FailureMessage, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ValidateObserversPerSubjectMinimumSucceeds()
+    {
+        var options = CreateValidOptions();
+        options.ObserversPerSubject = 3; // Minimum value
+        options.HighWatermark = 2;
+        options.LowWatermark = 1;
+
+        var result = _validator.Validate(null, options);
+
+        Assert.True(result.Succeeded);
+    }
+
+    [Fact]
+    public void ValidateObserversPerSubjectPositiveSucceeds()
+    {
+        var options = CreateValidOptions();
+        options.ObserversPerSubject = 10;
 
         var result = _validator.Validate(null, options);
 
@@ -283,25 +308,25 @@ public class RapidProtocolOptionsValidatorTests
 
     #endregion
 
-    #region HighWaterMark Validation
+    #region HighWatermark Validation
 
     [Fact]
-    public void ValidateHighWaterMarkZeroFails()
+    public void ValidateHighWatermarkZeroFails()
     {
         var options = CreateValidOptions();
-        options.HighWaterMark = 0;
+        options.HighWatermark = 0;
 
         var result = _validator.Validate(null, options);
 
         Assert.True(result.Failed);
-        Assert.Contains("HighWaterMark", result.FailureMessage, StringComparison.Ordinal);
+        Assert.Contains("HighWatermark", result.FailureMessage, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void ValidateHighWaterMarkNegativeFails()
+    public void ValidateHighWatermarkNegativeFails()
     {
         var options = CreateValidOptions();
-        options.HighWaterMark = -1;
+        options.HighWatermark = -1;
 
         var result = _validator.Validate(null, options);
 
@@ -309,37 +334,75 @@ public class RapidProtocolOptionsValidatorTests
     }
 
     [Fact]
-    public void ValidateHighWaterMarkPositiveSucceeds()
+    public void ValidateHighWatermarkPositiveSucceeds()
     {
         var options = CreateValidOptions();
-        options.HighWaterMark = 9;
+        options.HighWatermark = 9;
 
         var result = _validator.Validate(null, options);
 
         Assert.True(result.Succeeded);
+    }
+
+    [Fact]
+    public void ValidateHighWatermarkEqualToObserversPerSubjectFails()
+    {
+        var options = CreateValidOptions();
+        options.ObserversPerSubject = 10;
+        options.HighWatermark = 10; // Must be < K
+
+        var result = _validator.Validate(null, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains("must be less than ObserversPerSubject", result.FailureMessage, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ValidateHighWatermarkGreaterThanObserversPerSubjectFails()
+    {
+        var options = CreateValidOptions();
+        options.ObserversPerSubject = 10;
+        options.HighWatermark = 11; // Must be < K
+
+        var result = _validator.Validate(null, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains("must be less than ObserversPerSubject", result.FailureMessage, StringComparison.Ordinal);
     }
 
     #endregion
 
-    #region LowWaterMark Validation
+    #region LowWatermark Validation
 
     [Fact]
-    public void ValidateLowWaterMarkNegativeFails()
+    public void ValidateLowWatermarkNegativeFails()
     {
         var options = CreateValidOptions();
-        options.LowWaterMark = -1;
+        options.LowWatermark = -1;
 
         var result = _validator.Validate(null, options);
 
         Assert.True(result.Failed);
-        Assert.Contains("LowWaterMark", result.FailureMessage, StringComparison.Ordinal);
+        Assert.Contains("LowWatermark", result.FailureMessage, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void ValidateLowWaterMarkZeroSucceeds()
+    public void ValidateLowWatermarkZeroFails()
     {
         var options = CreateValidOptions();
-        options.LowWaterMark = 0;
+        options.LowWatermark = 0;
+
+        var result = _validator.Validate(null, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains("LowWatermark", result.FailureMessage, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ValidateLowWatermarkPositiveSucceeds()
+    {
+        var options = CreateValidOptions();
+        options.LowWatermark = 3;
 
         var result = _validator.Validate(null, options);
 
@@ -347,40 +410,29 @@ public class RapidProtocolOptionsValidatorTests
     }
 
     [Fact]
-    public void ValidateLowWaterMarkPositiveSucceeds()
+    public void ValidateLowWatermarkEqualToHighWatermarkFails()
     {
         var options = CreateValidOptions();
-        options.LowWaterMark = 4;
-
-        var result = _validator.Validate(null, options);
-
-        Assert.True(result.Succeeded);
-    }
-
-    [Fact]
-    public void ValidateLowWaterMarkEqualToHighWaterMarkFails()
-    {
-        var options = CreateValidOptions();
-        options.LowWaterMark = 9;
-        options.HighWaterMark = 9;
+        options.LowWatermark = 9;
+        options.HighWatermark = 9;
 
         var result = _validator.Validate(null, options);
 
         Assert.True(result.Failed);
-        Assert.Contains("LowWaterMark must be less than HighWaterMark", result.FailureMessage, StringComparison.Ordinal);
+        Assert.Contains("must be less than HighWatermark", result.FailureMessage, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void ValidateLowWaterMarkGreaterThanHighWaterMarkFails()
+    public void ValidateLowWatermarkGreaterThanHighWatermarkFails()
     {
         var options = CreateValidOptions();
-        options.LowWaterMark = 10;
-        options.HighWaterMark = 5;
+        options.LowWatermark = 10;
+        options.HighWatermark = 5;
 
         var result = _validator.Validate(null, options);
 
         Assert.True(result.Failed);
-        Assert.Contains("LowWaterMark must be less than HighWaterMark", result.FailureMessage, StringComparison.Ordinal);
+        Assert.Contains("must be less than HighWatermark", result.FailureMessage, StringComparison.Ordinal);
     }
 
     #endregion
@@ -476,6 +528,104 @@ public class RapidProtocolOptionsValidatorTests
         var result = _validator.Validate("TestOptions", options);
 
         Assert.True(result.Succeeded);
+    }
+
+    #endregion
+
+    #region GetEffectiveParameters Tests
+
+    [Fact]
+    public void GetEffectiveParameters_SingleNodeCluster_ReturnsZeros()
+    {
+        var options = CreateValidOptions();
+
+        var (effectiveK, effectiveH, effectiveL) = options.GetEffectiveParameters(1);
+
+        Assert.Equal(0, effectiveK);
+        Assert.Equal(0, effectiveH);
+        Assert.Equal(0, effectiveL);
+    }
+
+    [Fact]
+    public void GetEffectiveParameters_LargeCluster_ReturnsConfiguredValues()
+    {
+        var options = CreateValidOptions();
+        options.ObserversPerSubject = 10;
+        options.HighWatermark = 9;
+        options.LowWatermark = 3;
+
+        var (effectiveK, effectiveH, effectiveL) = options.GetEffectiveParameters(100);
+
+        Assert.Equal(10, effectiveK);
+        Assert.Equal(9, effectiveH);
+        Assert.Equal(3, effectiveL);
+    }
+
+    [Fact]
+    public void GetEffectiveParameters_SmallCluster_ScalesValues()
+    {
+        var options = CreateValidOptions();
+        options.ObserversPerSubject = 10;
+        options.HighWatermark = 9;
+        options.LowWatermark = 3;
+
+        // 4-node cluster can only have 3 observers per subject
+        var (effectiveK, effectiveH, effectiveL) = options.GetEffectiveParameters(4);
+
+        Assert.Equal(3, effectiveK);
+        // H and L should be scaled down proportionally, maintaining K >= H >= L >= 1
+        // For small clusters, strict inequality isn't always achievable
+        Assert.True(effectiveK >= effectiveH, $"K >= H failed: {effectiveK} >= {effectiveH}");
+        Assert.True(effectiveH >= effectiveL, $"H >= L failed: {effectiveH} >= {effectiveL}");
+        Assert.True(effectiveL >= 1, $"L >= 1 failed: {effectiveL}");
+    }
+
+    [Fact]
+    public void GetEffectiveParameters_TwoNodeCluster_ReturnsMinimalValues()
+    {
+        var options = CreateValidOptions();
+        options.ObserversPerSubject = 10;
+        options.HighWatermark = 9;
+        options.LowWatermark = 3;
+
+        // 2-node cluster can only have 1 observer per subject
+        var (effectiveK, effectiveH, effectiveL) = options.GetEffectiveParameters(2);
+
+        // With effectiveK=1, this is below minimum so returns scaled values
+        Assert.Equal(1, effectiveK);
+    }
+
+    [Fact]
+    public void GetEffectiveParameters_ThreeNodeCluster_ReturnsMinimalValues()
+    {
+        var options = CreateValidOptions();
+        options.ObserversPerSubject = 10;
+        options.HighWatermark = 9;
+        options.LowWatermark = 3;
+
+        // 3-node cluster can have 2 observers per subject
+        var (effectiveK, effectiveH, effectiveL) = options.GetEffectiveParameters(3);
+
+        Assert.Equal(2, effectiveK);
+    }
+
+    [Fact]
+    public void GetEffectiveParameters_MaintainsConstraints()
+    {
+        var options = CreateValidOptions();
+        options.ObserversPerSubject = 10;
+        options.HighWatermark = 9;
+        options.LowWatermark = 3;
+
+        for (var clusterSize = 4; clusterSize <= 20; clusterSize++)
+        {
+            var (effectiveK, effectiveH, effectiveL) = options.GetEffectiveParameters(clusterSize);
+
+            // Verify constraint K >= H >= L >= 1 (relaxed for small clusters)
+            Assert.True(effectiveK >= effectiveH, $"K >= H failed for cluster size {clusterSize}: {effectiveK} >= {effectiveH}");
+            Assert.True(effectiveH >= effectiveL, $"H >= L failed for cluster size {clusterSize}: {effectiveH} >= {effectiveL}");
+            Assert.True(effectiveL >= 1, $"L >= 1 failed for cluster size {clusterSize}: {effectiveL}");
+        }
     }
 
     #endregion

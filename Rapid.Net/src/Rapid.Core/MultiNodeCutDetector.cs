@@ -7,14 +7,19 @@ namespace Rapid;
 /// - there are H reports about a node.
 /// - there is no other node about which there are more than L but less than H reports.
 /// 
-/// The output of this filter gives us almost-everywhere agreement
+/// The output of this filter gives us almost-everywhere agreement.
+/// 
+/// This detector requires K >= 3 observers per subject to function correctly.
+/// For smaller clusters, use <see cref="SimpleCutDetector"/> instead.
+/// 
+/// A new instance is created for each view, so no Clear() method is needed.
 /// </summary>
-internal sealed class MultiNodeCutDetector
+internal sealed class MultiNodeCutDetector : ICutDetector
 {
-    private const int MinObserversPerSubject = 3;
     private readonly int _observersPerSubject; // Number of observers per subject and vice versa
     private readonly int _highWaterMark; // High watermark
     private readonly int _lowWaterMark; // Low watermark
+    private readonly MembershipView _membershipView;
     private readonly Lock _lock = new();
     private int _proposalCount;
     private int _updatesInProgress;
@@ -23,16 +28,38 @@ internal sealed class MultiNodeCutDetector
     private readonly HashSet<Endpoint> _preProposal = [];
     private bool _seenLinkDownEvents;
 
-    public MultiNodeCutDetector(int observersPerSubject, int highWaterMark, int lowWaterMark)
+    /// <summary>
+    /// Creates a MultiNodeCutDetector for larger clusters.
+    /// </summary>
+    /// <param name="observersPerSubject">Number of observers per subject (K, must be at least 3)</param>
+    /// <param name="highWaterMark">High watermark threshold (H)</param>
+    /// <param name="lowWaterMark">Low watermark threshold (L)</param>
+    /// <param name="membershipView">The current membership view for observer lookups</param>
+    /// <exception cref="ArgumentException">If constraints K greater than H, H at least L, L at least 1 are not satisfied, or K less than 3</exception>
+    public MultiNodeCutDetector(int observersPerSubject, int highWaterMark, int lowWaterMark, MembershipView membershipView)
     {
-        if (highWaterMark > observersPerSubject || lowWaterMark > highWaterMark || observersPerSubject < MinObserversPerSubject || lowWaterMark <= 0 || highWaterMark <= 0)
+        // Multi-node cut detection requires K >= 3 for proper H/L watermark behavior
+        // For K < 3, use SimpleCutDetector instead
+        if (observersPerSubject < 3)
         {
-            throw new ArgumentException($"Arguments do not satisfy K > H >= L >= 0: (K: {observersPerSubject}, H: {highWaterMark}, L: {lowWaterMark})");
+            throw new ArgumentException(
+                $"MultiNodeCutDetector requires at least 3 observers per subject, got {observersPerSubject}. Use SimpleCutDetector for smaller clusters.",
+                nameof(observersPerSubject));
         }
+
+        // Constraints: K > H >= L >= 1
+        if (highWaterMark < 1 || lowWaterMark < 1 ||
+            highWaterMark >= observersPerSubject || lowWaterMark > highWaterMark)
+        {
+            throw new ArgumentException($"Arguments do not satisfy K > H >= L >= 1: (K: {observersPerSubject}, H: {highWaterMark}, L: {lowWaterMark})");
+        }
+
+        ArgumentNullException.ThrowIfNull(membershipView);
 
         _observersPerSubject = observersPerSubject;
         _highWaterMark = highWaterMark;
         _lowWaterMark = lowWaterMark;
+        _membershipView = membershipView;
     }
 
     public int GetNumProposals()
@@ -65,7 +92,7 @@ internal sealed class MultiNodeCutDetector
     private List<Endpoint> AggregateForProposal(Endpoint linkSrc, Endpoint linkDst,
                                                 EdgeStatus edgeStatus, int ringNumber)
     {
-        if (ringNumber > _observersPerSubject)
+        if (ringNumber >= _observersPerSubject)
             throw new ArgumentException($"Ring number {ringNumber} exceeds K={_observersPerSubject}");
 
         lock (_lock)
@@ -121,9 +148,8 @@ internal sealed class MultiNodeCutDetector
     /// Invalidates edges between nodes that are failing or have failed. This step may be skipped safely
     /// when there are no failing nodes.
     /// </summary>
-    /// <param name="view">MembershipView object required to find observer-subject relationships between failing nodes.</param>
     /// <returns>A list of endpoints representing a view change proposal.</returns>
-    public List<Endpoint> InvalidateFailingEdges(MembershipView view)
+    public List<Endpoint> InvalidateFailingEdges()
     {
         lock (_lock)
         {
@@ -138,9 +164,9 @@ internal sealed class MultiNodeCutDetector
 
             foreach (var nodeInFlux in preProposalCopy)
             {
-                var observers = view.IsHostPresent(nodeInFlux)
-                    ? view.GetObserversOf(nodeInFlux)          // For failing nodes
-                    : view.GetExpectedObserversOf(nodeInFlux); // For joining nodes
+                var observers = _membershipView.IsHostPresent(nodeInFlux)
+                    ? _membershipView.GetObserversOf(nodeInFlux)          // For failing nodes
+                    : _membershipView.GetExpectedObserversOf(nodeInFlux); // For joining nodes
 
                 // Account for all edges between nodes that are past the L threshold
                 var ringNumber = 0;
@@ -149,7 +175,7 @@ internal sealed class MultiNodeCutDetector
                     if (_proposal.Contains(observer) || _preProposal.Contains(observer))
                     {
                         // Implicit detection of edges between observer and nodeInFlux
-                        var edgeStatus = view.IsHostPresent(nodeInFlux) ? EdgeStatus.Down : EdgeStatus.Up;
+                        var edgeStatus = _membershipView.IsHostPresent(nodeInFlux) ? EdgeStatus.Down : EdgeStatus.Up;
                         proposalsToReturn.AddRange(AggregateForProposal(observer, nodeInFlux, edgeStatus, ringNumber));
                     }
                     ringNumber++;
@@ -157,22 +183,6 @@ internal sealed class MultiNodeCutDetector
             }
 
             return proposalsToReturn;
-        }
-    }
-
-    /// <summary>
-    /// Clears all view change reports being tracked. To be used right after a view change.
-    /// </summary>
-    public void Clear()
-    {
-        lock (_lock)
-        {
-            _reportsPerHost.Clear();
-            _proposal.Clear();
-            _updatesInProgress = 0;
-            _proposalCount = 0;
-            _preProposal.Clear();
-            _seenLinkDownEvents = false;
         }
     }
 }

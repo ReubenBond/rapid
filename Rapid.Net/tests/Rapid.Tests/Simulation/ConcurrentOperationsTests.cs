@@ -28,8 +28,8 @@ public sealed class ConcurrentOperationsTests : IAsyncLifetime
         FailureDetectorConsecutiveFailures = 100,
         // Lower watermarks to allow consensus with fewer active observers
         // This is necessary because suspended nodes can't report as observers
-        HighWaterMark = 3,
-        LowWaterMark = 2,
+        HighWatermark = 3,
+        LowWatermark = 2,
         // Use a shorter consensus fallback delay so classic Paxos starts faster
         // This ensures consensus completes within the message timeout
         // when fast Paxos can't succeed due to suspended nodes

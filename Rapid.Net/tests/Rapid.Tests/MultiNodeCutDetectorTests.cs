@@ -27,12 +27,27 @@ public class MultiNodeCutDetectorTests
     }
 
     /// <summary>
+    /// Creates a MembershipView for testing MultiNodeCutDetector.
+    /// </summary>
+    private static MembershipView CreateTestView(int numNodes = 30, int k = K)
+    {
+        var builder = new MembershipViewBuilder(k);
+        for (var i = 0; i < numNodes; i++)
+        {
+            var node = Utils.HostFromParts("127.0.0." + (i + 1), 1000 + i);
+            builder.RingAdd(node, Utils.NodeIdFromUuid(Guid.NewGuid()));
+        }
+        return builder.Build();
+    }
+
+    /// <summary>
     /// A series of updates with the right ring indexes
     /// </summary>
     [Fact]
     public void CutDetectionTest()
     {
-        var detector = new MultiNodeCutDetector(K, H, L);
+        var view = CreateTestView();
+        var detector = new MultiNodeCutDetector(K, H, L, view);
         var dst = Utils.HostFromParts("127.0.0.2", 2);
         List<Endpoint> ret;
 
@@ -53,7 +68,8 @@ public class MultiNodeCutDetectorTests
     [Fact]
     public void CutDetectionTestBlockingOneBlocker()
     {
-        var detector = new MultiNodeCutDetector(K, H, L);
+        var view = CreateTestView();
+        var detector = new MultiNodeCutDetector(K, H, L, view);
         var dst1 = Utils.HostFromParts("127.0.0.2", 2);
         var dst2 = Utils.HostFromParts("127.0.0.3", 2);
         List<Endpoint> ret;
@@ -88,7 +104,8 @@ public class MultiNodeCutDetectorTests
     [Fact]
     public void CutDetectionTestBlockingThreeBlockers()
     {
-        var detector = new MultiNodeCutDetector(K, H, L);
+        var view = CreateTestView();
+        var detector = new MultiNodeCutDetector(K, H, L, view);
         var dst1 = Utils.HostFromParts("127.0.0.2", 2);
         var dst2 = Utils.HostFromParts("127.0.0.3", 2);
         var dst3 = Utils.HostFromParts("127.0.0.4", 2);
@@ -137,7 +154,8 @@ public class MultiNodeCutDetectorTests
     [Fact]
     public void CutDetectionTestBlockingMultipleBlockersPastH()
     {
-        var detector = new MultiNodeCutDetector(K, H, L);
+        var view = CreateTestView();
+        var detector = new MultiNodeCutDetector(K, H, L, view);
         var dst1 = Utils.HostFromParts("127.0.0.2", 2);
         var dst2 = Utils.HostFromParts("127.0.0.3", 2);
         var dst3 = Utils.HostFromParts("127.0.0.4", 2);
@@ -191,7 +209,8 @@ public class MultiNodeCutDetectorTests
     [Fact]
     public void CutDetectionTestBelowL()
     {
-        var detector = new MultiNodeCutDetector(K, H, L);
+        var view = CreateTestView();
+        var detector = new MultiNodeCutDetector(K, H, L, view);
         var dst1 = Utils.HostFromParts("127.0.0.2", 2);
         var dst2 = Utils.HostFromParts("127.0.0.3", 2);
         var dst3 = Utils.HostFromParts("127.0.0.4", 2);
@@ -236,7 +255,8 @@ public class MultiNodeCutDetectorTests
     [Fact]
     public void CutDetectionTestBatch()
     {
-        var detector = new MultiNodeCutDetector(K, H, L);
+        var view = CreateTestView();
+        var detector = new MultiNodeCutDetector(K, H, L, view);
         const int numNodes = 3;
         var endpoints = new List<Endpoint>();
 
@@ -263,7 +283,6 @@ public class MultiNodeCutDetectorTests
     public void CutDetectionTestLinkInvalidation()
     {
         var builder = new MembershipViewBuilder(K);
-        var detector = new MultiNodeCutDetector(K, H, L);
         const int numNodes = 30;
         var endpoints = new List<Endpoint>();
 
@@ -275,6 +294,7 @@ public class MultiNodeCutDetectorTests
         }
 
         var mView = builder.Build();
+        var detector = new MultiNodeCutDetector(K, H, L, mView);
 
         var dst = endpoints[0];
         var observers = mView.GetObserversOf(dst);
@@ -308,7 +328,7 @@ public class MultiNodeCutDetectorTests
 
         // At this point, (K - H - 1) observers of dst will be past H, and dst will be in H - 1. 
         // Link invalidation should bring the failed observers and dst to the stable region.
-        ret = detector.InvalidateFailingEdges(mView);
+        ret = detector.InvalidateFailingEdges();
         Assert.Equal(4, ret.Count);
         Assert.Equal(1, detector.GetNumProposals());
 
@@ -323,105 +343,140 @@ public class MultiNodeCutDetectorTests
     [Fact]
     public void ConstructorValidParametersSucceeds()
     {
-        var detector = new MultiNodeCutDetector(10, 8, 2);
+        var view = CreateTestView();
+        var detector = new MultiNodeCutDetector(10, 8, 2, view);
         Assert.Equal(0, detector.GetNumProposals());
     }
 
     [Fact]
     public void ConstructorMinimumKSucceeds()
     {
-        var detector = new MultiNodeCutDetector(3, 2, 1);
+        var view = CreateTestView(10, 3);
+        var detector = new MultiNodeCutDetector(3, 2, 1, view);
         Assert.Equal(0, detector.GetNumProposals());
     }
 
     [Fact]
-    public void ConstructorKBelowMinimumThrows() => Assert.Throws<ArgumentException>(() => new MultiNodeCutDetector(2, 2, 1));
+    public void ConstructorNullViewThrows()
+    {
+        Assert.Throws<ArgumentNullException>(() => new MultiNodeCutDetector(10, 8, 2, null!));
+    }
 
     [Fact]
-    public void ConstructorHGreaterThanKThrows() => Assert.Throws<ArgumentException>(() => new MultiNodeCutDetector(5, 6, 2));
+    public void ConstructorKBelowMinimumThrows()
+    {
+        var view = CreateTestView();
+        Assert.Throws<ArgumentException>(() => new MultiNodeCutDetector(2, 2, 1, view));
+    }
 
     [Fact]
-    public void ConstructorLGreaterThanHThrows() => Assert.Throws<ArgumentException>(() => new MultiNodeCutDetector(10, 5, 6));
+    public void ConstructorHGreaterThanKThrows()
+    {
+        var view = CreateTestView();
+        Assert.Throws<ArgumentException>(() => new MultiNodeCutDetector(5, 6, 2, view));
+    }
 
     [Fact]
-    public void ConstructorLZeroThrows() => Assert.Throws<ArgumentException>(() => new MultiNodeCutDetector(10, 8, 0));
+    public void ConstructorLGreaterThanHThrows()
+    {
+        var view = CreateTestView();
+        Assert.Throws<ArgumentException>(() => new MultiNodeCutDetector(10, 5, 6, view));
+    }
 
     [Fact]
-    public void ConstructorHZeroThrows() => Assert.Throws<ArgumentException>(() => new MultiNodeCutDetector(10, 0, 0));
+    public void ConstructorLZeroThrows()
+    {
+        var view = CreateTestView();
+        Assert.Throws<ArgumentException>(() => new MultiNodeCutDetector(10, 8, 0, view));
+    }
+
+    [Fact]
+    public void ConstructorHZeroThrows()
+    {
+        var view = CreateTestView();
+        Assert.Throws<ArgumentException>(() => new MultiNodeCutDetector(10, 0, 0, view));
+    }
 
     [Fact]
     public void ConstructorHEqualsLSucceeds()
     {
-        var detector = new MultiNodeCutDetector(5, 3, 3);
+        var view = CreateTestView(10, 5);
+        var detector = new MultiNodeCutDetector(5, 3, 3, view);
         Assert.Equal(0, detector.GetNumProposals());
     }
 
     [Fact]
-    public void ConstructorHEqualsKSucceeds()
+    public void ConstructorHEqualsKThrows()
     {
-        var detector = new MultiNodeCutDetector(5, 5, 2);
-        Assert.Equal(0, detector.GetNumProposals());
+        var view = CreateTestView();
+        Assert.Throws<ArgumentException>(() => new MultiNodeCutDetector(5, 5, 2, view));
     }
 
     #endregion
 
-    #region Clear Tests
+    #region Detector Replacement Tests (replaces Clear tests)
 
     [Fact]
-    public void ClearResetsProposalCount()
+    public void NewDetector_ResetsProposalCount()
     {
-        var detector = new MultiNodeCutDetector(K, H, L);
+        var view = CreateTestView();
+        var detector1 = new MultiNodeCutDetector(K, H, L, view);
         var dst = Utils.HostFromParts("127.0.0.2", 2);
 
         for (var i = 0; i < K; i++)
         {
-            detector.AggregateForProposal(CreateAlertMessage(
+            detector1.AggregateForProposal(CreateAlertMessage(
                 Utils.HostFromParts("127.0.0.1", i + 1), dst, EdgeStatus.Up, ConfigurationId, i));
         }
 
-        Assert.Equal(1, detector.GetNumProposals());
+        Assert.Equal(1, detector1.GetNumProposals());
 
-        detector.Clear();
+        // Create new detector (simulating view change)
+        var detector2 = new MultiNodeCutDetector(K, H, L, view);
 
-        Assert.Equal(0, detector.GetNumProposals());
+        Assert.Equal(0, detector2.GetNumProposals());
     }
 
     [Fact]
-    public void ClearAllowsNewProposals()
+    public void NewDetector_AllowsNewProposals()
     {
-        var detector = new MultiNodeCutDetector(K, H, L);
+        var view = CreateTestView();
+        var detector1 = new MultiNodeCutDetector(K, H, L, view);
         var dst1 = Utils.HostFromParts("127.0.0.2", 2);
         var dst2 = Utils.HostFromParts("127.0.0.3", 3);
 
         for (var i = 0; i < K; i++)
         {
-            detector.AggregateForProposal(CreateAlertMessage(
+            detector1.AggregateForProposal(CreateAlertMessage(
                 Utils.HostFromParts("127.0.0.1", i + 1), dst1, EdgeStatus.Up, ConfigurationId, i));
         }
 
-        Assert.Equal(1, detector.GetNumProposals());
+        Assert.Equal(1, detector1.GetNumProposals());
 
-        detector.Clear();
+        // Create new detector (simulating view change)
+        var detector2 = new MultiNodeCutDetector(K, H, L, view);
 
         for (var i = 0; i < K; i++)
         {
-            detector.AggregateForProposal(CreateAlertMessage(
+            detector2.AggregateForProposal(CreateAlertMessage(
                 Utils.HostFromParts("127.0.0.1", i + 1), dst2, EdgeStatus.Up, ConfigurationId, i));
         }
 
-        Assert.Equal(1, detector.GetNumProposals());
+        Assert.Equal(1, detector2.GetNumProposals());
     }
 
     [Fact]
-    public void ClearMultipleCallsSafe()
+    public void MultipleNewDetectors_Safe()
     {
-        var detector = new MultiNodeCutDetector(K, H, L);
+        var view = CreateTestView();
+        // Simulating multiple view changes - each creates a fresh detector
+        var detector1 = new MultiNodeCutDetector(K, H, L, view);
+        var detector2 = new MultiNodeCutDetector(K, H, L, view);
+        var detector3 = new MultiNodeCutDetector(K, H, L, view);
 
-        detector.Clear();
-        detector.Clear();
-        detector.Clear();
-
-        Assert.Equal(0, detector.GetNumProposals());
+        Assert.Equal(0, detector1.GetNumProposals());
+        Assert.Equal(0, detector2.GetNumProposals());
+        Assert.Equal(0, detector3.GetNumProposals());
     }
 
     #endregion
@@ -431,7 +486,8 @@ public class MultiNodeCutDetectorTests
     [Fact]
     public void AggregateForProposalDuplicateAlertIgnored()
     {
-        var detector = new MultiNodeCutDetector(K, H, L);
+        var view = CreateTestView();
+        var detector = new MultiNodeCutDetector(K, H, L, view);
         var src = Utils.HostFromParts("127.0.0.1", 1);
         var dst = Utils.HostFromParts("127.0.0.2", 2);
 
@@ -447,7 +503,8 @@ public class MultiNodeCutDetectorTests
     [Fact]
     public void AggregateForProposalDifferentRingNumbersNotDuplicate()
     {
-        var detector = new MultiNodeCutDetector(K, H, L);
+        var view = CreateTestView();
+        var detector = new MultiNodeCutDetector(K, H, L, view);
         var src = Utils.HostFromParts("127.0.0.1", 1);
         var dst = Utils.HostFromParts("127.0.0.2", 2);
 
@@ -465,7 +522,8 @@ public class MultiNodeCutDetectorTests
     [Fact]
     public void AggregateForProposalMultipleRingNumbersAllProcessed()
     {
-        var detector = new MultiNodeCutDetector(K, H, L);
+        var view = CreateTestView();
+        var detector = new MultiNodeCutDetector(K, H, L, view);
         var src = Utils.HostFromParts("127.0.0.1", 1);
         var dst = Utils.HostFromParts("127.0.0.2", 2);
 
@@ -493,7 +551,8 @@ public class MultiNodeCutDetectorTests
     [Fact]
     public void AggregateForProposalEdgeStatusUpWorksCorrectly()
     {
-        var detector = new MultiNodeCutDetector(K, H, L);
+        var view = CreateTestView();
+        var detector = new MultiNodeCutDetector(K, H, L, view);
         var dst = Utils.HostFromParts("127.0.0.2", 2);
 
         for (var i = 0; i < K; i++)
@@ -508,7 +567,8 @@ public class MultiNodeCutDetectorTests
     [Fact]
     public void AggregateForProposalEdgeStatusDownWorksCorrectly()
     {
-        var detector = new MultiNodeCutDetector(K, H, L);
+        var view = CreateTestView();
+        var detector = new MultiNodeCutDetector(K, H, L, view);
         var dst = Utils.HostFromParts("127.0.0.2", 2);
 
         for (var i = 0; i < K; i++)
@@ -523,7 +583,8 @@ public class MultiNodeCutDetectorTests
     [Fact]
     public void AggregateForProposalMixedEdgeStatusProcessedSeparately()
     {
-        var detector = new MultiNodeCutDetector(K, H, L);
+        var view = CreateTestView();
+        var detector = new MultiNodeCutDetector(K, H, L, view);
         var dst = Utils.HostFromParts("127.0.0.2", 2);
 
         for (var i = 0; i < H; i++)
@@ -544,7 +605,8 @@ public class MultiNodeCutDetectorTests
     [Fact]
     public void AggregateForProposalRingNumberExceedsKThrows()
     {
-        var detector = new MultiNodeCutDetector(K, H, L);
+        var view = CreateTestView();
+        var detector = new MultiNodeCutDetector(K, H, L, view);
         var src = Utils.HostFromParts("127.0.0.1", 1);
         var dst = Utils.HostFromParts("127.0.0.2", 2);
 
@@ -555,7 +617,8 @@ public class MultiNodeCutDetectorTests
     [Fact]
     public void AggregateForProposalRingNumberZeroValid()
     {
-        var detector = new MultiNodeCutDetector(K, H, L);
+        var view = CreateTestView();
+        var detector = new MultiNodeCutDetector(K, H, L, view);
         var src = Utils.HostFromParts("127.0.0.1", 1);
         var dst = Utils.HostFromParts("127.0.0.2", 2);
 
@@ -567,7 +630,8 @@ public class MultiNodeCutDetectorTests
     [Fact]
     public void AggregateForProposalRingNumberKMinusOneValid()
     {
-        var detector = new MultiNodeCutDetector(K, H, L);
+        var view = CreateTestView();
+        var detector = new MultiNodeCutDetector(K, H, L, view);
         var src = Utils.HostFromParts("127.0.0.1", 1);
         var dst = Utils.HostFromParts("127.0.0.2", 2);
 
@@ -583,7 +647,8 @@ public class MultiNodeCutDetectorTests
     [Fact]
     public void AggregateForProposalTwoNodesReachHSimultaneously()
     {
-        var detector = new MultiNodeCutDetector(K, H, L);
+        var view = CreateTestView();
+        var detector = new MultiNodeCutDetector(K, H, L, view);
         var dst1 = Utils.HostFromParts("127.0.0.2", 2);
         var dst2 = Utils.HostFromParts("127.0.0.3", 3);
 
@@ -615,7 +680,8 @@ public class MultiNodeCutDetectorTests
     [Fact]
     public void AggregateForProposalManyDestinationsAllProposed()
     {
-        var detector = new MultiNodeCutDetector(K, H, L);
+        var view = CreateTestView(100);
+        var detector = new MultiNodeCutDetector(K, H, L, view);
         const int numDestinations = 50;
         var proposalCount = 0;
 
@@ -645,8 +711,8 @@ public class MultiNodeCutDetectorTests
     [Fact]
     public void InvalidateFailingEdgesNoDownEventsReturnsEmpty()
     {
-        var view = new MembershipViewBuilder(K).Build();
-        var detector = new MultiNodeCutDetector(K, H, L);
+        var view = CreateTestView();
+        var detector = new MultiNodeCutDetector(K, H, L, view);
 
         var dst = Utils.HostFromParts("127.0.0.2", 2);
         for (var i = 0; i < H - 1; i++)
@@ -655,7 +721,7 @@ public class MultiNodeCutDetectorTests
                 Utils.HostFromParts("127.0.0.1", i + 1), dst, EdgeStatus.Up, ConfigurationId, i));
         }
 
-        var result = detector.InvalidateFailingEdges(view);
+        var result = detector.InvalidateFailingEdges();
 
         Assert.Empty(result);
     }
@@ -664,7 +730,7 @@ public class MultiNodeCutDetectorTests
     public void InvalidateFailingEdgesEmptyMembershipViewReturnsEmpty()
     {
         var view = new MembershipViewBuilder(K).Build();
-        var detector = new MultiNodeCutDetector(K, H, L);
+        var detector = new MultiNodeCutDetector(K, H, L, view);
 
         var dst = Utils.HostFromParts("127.0.0.2", 2);
         for (var i = 0; i < H - 1; i++)
@@ -673,7 +739,7 @@ public class MultiNodeCutDetectorTests
                 Utils.HostFromParts("127.0.0.1", i + 1), dst, EdgeStatus.Down, ConfigurationId, i));
         }
 
-        var result = detector.InvalidateFailingEdges(view);
+        var result = detector.InvalidateFailingEdges();
 
         Assert.NotNull(result);
     }
@@ -685,7 +751,8 @@ public class MultiNodeCutDetectorTests
     [Fact]
     public void AggregateForProposalNullMessageThrows()
     {
-        var detector = new MultiNodeCutDetector(K, H, L);
+        var view = CreateTestView();
+        var detector = new MultiNodeCutDetector(K, H, L, view);
 
         Assert.Throws<ArgumentNullException>(() => detector.AggregateForProposal(null!));
     }

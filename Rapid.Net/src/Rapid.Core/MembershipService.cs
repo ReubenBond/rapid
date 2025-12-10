@@ -18,7 +18,8 @@ namespace Rapid;
 internal sealed partial class MembershipService : IMembershipServiceHandler, IAsyncDisposable, IDisposable
 {
     private readonly ILogger<MembershipService> _logger;
-    private readonly MultiNodeCutDetector _cutDetection;
+    private ICutDetector _cutDetection;
+    private readonly ICutDetectorFactory _cutDetectorFactory;
     private readonly Endpoint _myAddr;
     private readonly IBroadcaster _broadcaster;
     private readonly Dictionary<Endpoint, Channel<TaskCompletionSource<RapidResponse>>> _joinersToRespondTo = [];
@@ -164,7 +165,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     [LoggerMessage(Level = LogLevel.Debug, Message = "DecideViewChange: notifying {Count} joiners waiting through us for node {Node}")]
     private partial void LogNotifyingJoiners(int Count, LoggableEndpoint Node);
 
-    [LoggerMessage(Level = LogLevel.Debug, Message = "DecideViewChange: cleared cut detection, updated broadcaster, recreated failure detectors")]
+    [LoggerMessage(Level = LogLevel.Debug, Message = "DecideViewChange: recreated cut detector, updated broadcaster, recreated failure detectors")]
     private partial void LogDecideViewChangeCleanup();
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "DecideViewChange: publishing VIEW_CHANGE event, configId={ConfigId}, membershipSize={MembershipSize}")]
@@ -217,7 +218,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
 
     public MembershipService(
         Endpoint myAddr,
-        MultiNodeCutDetector cutDetection,
+        ICutDetector cutDetection,
         MembershipView membershipView,
         SharedResources sharedResources,
         IOptions<RapidProtocolOptions> options,
@@ -225,19 +226,21 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
         IBroadcaster broadcaster,
         IEdgeFailureDetectorFactory edgeFailureDetector,
         IFastPaxosFactory fastPaxosFactory,
+        ICutDetectorFactory cutDetectorFactory,
         MembershipViewAccessor viewAccessor,
         ILogger<MembershipService> logger)
         : this(myAddr, cutDetection, membershipView, sharedResources, options, messagingClient,
-              broadcaster, edgeFailureDetector, fastPaxosFactory, viewAccessor, [], logger)
+              broadcaster, edgeFailureDetector, fastPaxosFactory, cutDetectorFactory, viewAccessor, [], logger)
     {
     }
 
-    public MembershipService(Endpoint myAddr, MultiNodeCutDetector cutDetection,
+    public MembershipService(Endpoint myAddr, ICutDetector cutDetection,
                             MembershipView membershipView, SharedResources sharedResources,
                             IOptions<RapidProtocolOptions> options, IMessagingClient messagingClient,
                             IBroadcaster broadcaster,
                             IEdgeFailureDetectorFactory edgeFailureDetector,
                             IFastPaxosFactory fastPaxosFactory,
+                            ICutDetectorFactory cutDetectorFactory,
                             MembershipViewAccessor viewAccessor,
                             Dictionary<Endpoint, Metadata> metadataMap,
                             ILogger<MembershipService> logger)
@@ -246,6 +249,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
         _options = options.Value;
         _membershipView = membershipView;
         _cutDetection = cutDetection;
+        _cutDetectorFactory = cutDetectorFactory;
         _sharedResources = sharedResources;
         _metadataManager = new MetadataManager();
         _metadataManager.AddMetadata(metadataMap);
@@ -454,9 +458,9 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
                 return RapidUtils.ToRapidResponse(new ConsensusResponse());
             }
 
-            // We already have a proposal for this round
-            // => we have initiated consensus and cannot go back on our proposal.
-            var proposals = new List<Endpoint>();
+            // Use SortedSet for deduplication and consistent ordering across all nodes.
+            // This ensures all nodes propose the same set in the same order.
+            var proposals = new SortedSet<Endpoint>(EndpointComparer.Instance);
             foreach (var msg in messageBatch.Messages)
             {
                 LogProcessingAlert(new LoggableEndpoint(msg.EdgeSrc), new LoggableEndpoint(msg.EdgeDst), msg.EdgeStatus);
@@ -465,13 +469,19 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
                 var extractedMessage = ExtractJoinerUuidAndMetadata(msg);
                 var cutProposals = _cutDetection.AggregateForProposal(extractedMessage);
                 LogCutDetectionProposals(cutProposals.Count);
-                proposals.AddRange(cutProposals);
+                foreach (var proposal in cutProposals)
+                {
+                    proposals.Add(proposal);
+                }
             }
 
             // Lastly, we apply implicit detections
-            var implicitProposals = _cutDetection.InvalidateFailingEdges(_membershipView);
+            var implicitProposals = _cutDetection.InvalidateFailingEdges();
             LogImplicitEdgeInvalidation(implicitProposals.Count);
-            proposals.AddRange(implicitProposals);
+            foreach (var proposal in implicitProposals)
+            {
+                proposals.Add(proposal);
+            }
 
             // If we have a proposal for this stage, start an instance of consensus on it.
             lock (_membershipUpdateLock)
@@ -480,16 +490,17 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
                 {
                     _announcedProposal = true;
                     var currentConfigurationId = _membershipView.ConfigurationId;
-                    LogInitiatingConsensus(new LoggableEndpoints(proposals));
+                    var proposalList = proposals.ToList();
+                    LogInitiatingConsensus(new LoggableEndpoints(proposalList));
 
                     // Inform subscribers that a proposal has been announced.
-                    var nodeStatusChanges = CreateNodeStatusChangeList(proposals);
+                    var nodeStatusChanges = CreateNodeStatusChangeList(proposalList);
                     var currentMembership = _membershipView.GetRing(0);
                     var clusterStatusChange = new ClusterStatusChange(currentConfigurationId, [.. currentMembership], nodeStatusChanges);
 
                     PublishEvent(ClusterEvents.ViewChangeProposal, clusterStatusChange);
 
-                    _fastPaxosInstance.Propose(proposals, cancellationToken);
+                    _fastPaxosInstance.Propose(proposalList, cancellationToken);
                 }
             }
 
@@ -629,8 +640,9 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
                 }
             }
 
-            // Clear data structures for the next round.
-            _cutDetection.Clear();
+            // Recreate cut detector for the new cluster size.
+            // This ensures we use the appropriate detector (Simple vs MultiNode) based on effective K.
+            _cutDetection = _cutDetectorFactory.Create(_membershipView);
             _broadcaster.SetMembership([.. _membershipView.GetRing(0)]);
 
             // Recreate failure detectors

@@ -18,6 +18,7 @@ internal sealed class SimulationNode : IDisposable
     private readonly SharedResources _sharedResources;
     private readonly PingPongFailureDetectorFactory _failureDetectorFactory;
     private readonly IFastPaxosFactory _fastPaxosFactory;
+    private readonly CutDetectorFactory _cutDetectorFactory;
     private readonly MembershipViewAccessor _viewAccessor;
     private readonly IOptions<RapidProtocolOptions> _protocolOptions;
     private readonly ILogger<SimulationNode> _logger;
@@ -119,6 +120,9 @@ internal sealed class SimulationNode : IDisposable
             fastPaxosLogger,
             paxosLogger);
 
+        // Create cut detector factory
+        _cutDetectorFactory = new CutDetectorFactory(_protocolOptions);
+
         // Register with the simulation harness
         harness.RegisterNode(this);
     }
@@ -169,8 +173,10 @@ internal sealed class SimulationNode : IDisposable
         _logger.LogDebug("Node {Address} generated node ID {NodeId}", RapidUtils.Loggable(Address), nodeId);
 
         var opts = _protocolOptions.Value;
-        var membershipView = new MembershipViewBuilder(opts.RingCount, [nodeId], [Address]).Build();
-        var cutDetector = new MultiNodeCutDetector(opts.RingCount, opts.HighWaterMark, opts.LowWaterMark);
+        var membershipView = new MembershipViewBuilder(opts.ObserversPerSubject, [nodeId], [Address]).Build();
+        
+        // Use factory to create appropriate cut detector for single-node cluster
+        var cutDetector = _cutDetectorFactory.Create(membershipView);
         var metadataMap = new Dictionary<Endpoint, Metadata> { { Address, actualMetadata } };
         var broadcaster = new UnicastToAllBroadcaster(MessagingClient);
 
@@ -184,6 +190,7 @@ internal sealed class SimulationNode : IDisposable
             broadcaster,
             _failureDetectorFactory,
             _fastPaxosFactory,
+            _cutDetectorFactory,
             _viewAccessor,
             metadataMap,
             _membershipServiceLogger);
@@ -258,11 +265,14 @@ internal sealed class SimulationNode : IDisposable
         }
 
         var opts = _protocolOptions.Value;
+        var clusterSize = successfulResponse.Endpoints.Count;
         var membershipView = new MembershipViewBuilder(
-            opts.RingCount,
+            opts.ObserversPerSubject,
             [.. successfulResponse.Identifiers],
             [.. successfulResponse.Endpoints]).BuildWithConfigurationId(new ConfigurationId(successfulResponse.ConfigurationId));
-        var cutDetector = new MultiNodeCutDetector(opts.RingCount, opts.HighWaterMark, opts.LowWaterMark);
+        
+        // Use factory to create appropriate cut detector based on actual cluster size
+        var cutDetector = _cutDetectorFactory.Create(membershipView);
         var broadcaster = new UnicastToAllBroadcaster(MessagingClient);
 
         _membershipService = new MembershipService(
@@ -275,6 +285,7 @@ internal sealed class SimulationNode : IDisposable
             broadcaster,
             _failureDetectorFactory,
             _fastPaxosFactory,
+            _cutDetectorFactory,
             _viewAccessor,
             metadataMap,
             _membershipServiceLogger);
