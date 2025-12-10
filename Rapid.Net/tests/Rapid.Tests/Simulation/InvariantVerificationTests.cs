@@ -253,7 +253,7 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
     /// configured timeout period and trigger membership updates.
     /// Uses a 3-node cluster so the remaining 2 nodes can reach consensus to remove the failed node.
     /// </summary>
-    [Fact(Skip = "Requires simulation failure detection to propagate and reach consensus - see infrastructure issue")]
+    [Fact]
     public void FailureDetectionEventuallyOccurs()
     {
         var seedNode = _harness.CreateSeedNode();

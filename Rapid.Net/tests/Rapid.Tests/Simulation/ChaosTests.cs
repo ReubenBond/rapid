@@ -128,7 +128,7 @@ public sealed class ChaosTests : IAsyncLifetime
         Assert.True(_harness.Nodes.Count >= 2);
     }
 
-    [Fact(Skip = "Needs investigation")]
+    [Fact]
     public void InvariantsHoldUnderLightChaos()
     {
         // Create a proper cluster with joined nodes

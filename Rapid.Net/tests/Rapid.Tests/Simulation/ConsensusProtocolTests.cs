@@ -251,7 +251,7 @@ public sealed class ConsensusProtocolTests : IAsyncLifetime
         Assert.Equal(2, joiner.MembershipSize);
     }
 
-    [Fact(Skip = "Message loss tests unreliable with deterministic seeding - critical messages may all be dropped")]
+    [Fact]
     public void ConsensusWithLowMessageLossSucceeds()
     {
         // Enable 5% message loss - this tests the retry logic in join protocol

@@ -157,7 +157,7 @@ public sealed class IntegrationTests : IAsyncLifetime
         Assert.Equal(2, _harness.Nodes.Count);
     }
 
-    [Fact(Skip = "Requires simulation failure detection to propagate and reach consensus - see infrastructure issue")]
+    [Fact]
     public void NewJoinsWorkAfterMembershipChange()
     {
         // Use 3-node cluster so remaining 2 nodes can reach quorum after crash

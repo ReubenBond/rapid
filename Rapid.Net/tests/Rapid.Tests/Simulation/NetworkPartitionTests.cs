@@ -61,7 +61,7 @@ public sealed class NetworkPartitionTests : IAsyncLifetime
         Assert.True(_harness.Network.CanDeliver(joinerAddr, seedAddr));
     }
 
-    [Fact(Skip = "Requires simulation failure detection to propagate and reach consensus - see infrastructure issue")]
+    [Fact]
     public void PartitionedNodeEventuallyDetected()
     {
         var seedNode = _harness.CreateSeedNode();

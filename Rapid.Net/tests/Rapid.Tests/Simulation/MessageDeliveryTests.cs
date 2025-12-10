@@ -145,7 +145,7 @@ public sealed class MessageDeliveryTests : IAsyncLifetime
     /// eventually succeed by retrying failed communications, ensuring robustness
     /// against unreliable networks.
     /// </summary>
-    [Fact(Skip = "Message loss tests unreliable with deterministic seeding - critical messages may all be dropped")]
+    [Fact]
     public void MessageLossDuringJoinRetried()
     {
         // Enable moderate message loss (10% - lower than original 30% to be more reliable)
@@ -168,7 +168,7 @@ public sealed class MessageDeliveryTests : IAsyncLifetime
     /// changes. With 5% message drop rate, the consensus algorithm should still reach
     /// agreement, ensuring the cluster can grow even under adverse network conditions.
     /// </summary>
-    [Fact(Skip = "Message loss tests unreliable with deterministic seeding - critical messages may all be dropped")]
+    [Fact]
     public void MessageLossDuringConsensusRetried()
     {
         // Enable low message loss (5% - lower than original to be more reliable)

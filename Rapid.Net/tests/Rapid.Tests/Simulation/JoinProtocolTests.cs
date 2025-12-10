@@ -127,7 +127,7 @@ public sealed class JoinProtocolTests : IAsyncLifetime
     /// <summary>
     /// Tests that multiple joins succeed with message drops enabled.
     /// </summary>
-    [Fact(Skip = "Message loss tests unreliable with deterministic seeding - critical messages may all be dropped")]
+    [Fact]
     public void MultipleJoinsSucceedWithMessageDrops()
     {
         // Enable random message drops (10% drop rate)
@@ -291,7 +291,7 @@ public sealed class JoinProtocolTests : IAsyncLifetime
     /// <summary>
     /// Tests that join fails when joining through an isolated node.
     /// </summary>
-    [Fact(Skip = "Requires simulation failure detection to propagate and reach consensus - see infrastructure issue")]
+    [Fact]
     public void JoinThroughIsolatedNodeEventuallySucceeds()
     {
         var seedNode = _harness.CreateSeedNode();
