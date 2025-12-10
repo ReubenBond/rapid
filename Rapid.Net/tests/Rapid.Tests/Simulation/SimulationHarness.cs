@@ -942,7 +942,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
         LoggerFactory.Dispose();
         AttachLogFileToTestContext(TestContext.Current);
 
-        await Task.CompletedTask.ConfigureAwait(false);
+        await Task.CompletedTask.ConfigureAwait(true);
     }
 
     /// <summary>

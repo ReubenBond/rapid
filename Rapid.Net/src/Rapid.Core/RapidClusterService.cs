@@ -198,7 +198,7 @@ internal sealed partial class RapidClusterService(
 
         if (MembershipService != null)
         {
-            await MembershipService.DisposeAsync().ConfigureAwait(false);
+            await MembershipService.DisposeAsync().ConfigureAwait(true);
         }
 
         base.Dispose();

@@ -119,12 +119,12 @@ internal sealed partial class Paxos
     private Rank _crnd;
     private List<Endpoint> _cval = [];
 
-    private readonly TaskCompletionSource<List<Endpoint>> _decidedTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource<ConsensusResult> _decidedTcs = new();
 
     /// <summary>
     /// Task that completes when classic Paxos consensus is reached.
     /// </summary>
-    public Task<List<Endpoint>> Decided => _decidedTcs.Task;
+    public Task<ConsensusResult> Decided => _decidedTcs.Task;
 
     // Fast round votes tracking
     private readonly Dictionary<List<Endpoint>, int> _fastRoundVotes = new(ListEndpointComparer.Instance);
@@ -393,7 +393,7 @@ internal sealed partial class Paxos
         if (acceptResponses.Count >= majorityThreshold)
         {
             var endpoints = new List<Endpoint>(phase2bMessage.Endpoints);
-            if (_decidedTcs.TrySetResult(endpoints))
+            if (_decidedTcs.TrySetResult(new ConsensusResult.Decided(endpoints)))
             {
                 LogDecidedValue(new LoggableEndpoints(endpoints));
             }
@@ -476,6 +476,6 @@ internal sealed partial class Paxos
     /// </summary>
     public void Cancel()
     {
-        _decidedTcs.TrySetCanceled();
+        _decidedTcs.TrySetResult(ConsensusResult.Cancelled.Instance);
     }
 }

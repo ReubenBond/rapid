@@ -48,6 +48,10 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     private bool _announcedProposal;
     private ConsensusCoordinator _consensusInstance;
 
+    // Buffer for consensus messages from future configurations
+    // Key: configurationId, Value: list of messages waiting for that config
+    private readonly Dictionary<long, List<RapidRequest>> _pendingConsensusMessages = [];
+
     // View change accessor for publishing updates
     private readonly MembershipViewAccessor _viewAccessor;
 
@@ -195,7 +199,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     [LoggerMessage(Level = LogLevel.Debug, Message = "CreateFailureDetectorsForCurrentConfiguration: skipping, this node is no longer in the ring")]
     private partial void LogSkippingFailureDetectorsNotInRing();
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "ConsensusCoordinator Decided task faulted")]
+    [LoggerMessage(Level = LogLevel.Warning, Message = "ConsensusCoordinator Decided task faulted, resetting consensus state to allow future proposals")]
     private partial void LogConsensusDecidedFaulted(Exception ex);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "EdgeFailureNotification: scheduling callback for subject {Subject}, configId={ConfigId}")]
@@ -209,6 +213,12 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "ConsensusCoordinator decided continuation skipped due to shutdown")]
     private partial void LogConsensusDecidedSkippedShutdown();
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Buffering consensus message {MessageType} for future config {FutureConfigId}, current config is {CurrentConfigId}")]
+    private partial void LogBufferingFutureConsensusMessage(RapidRequest.ContentOneofCase MessageType, long FutureConfigId, long CurrentConfigId);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Replaying {Count} buffered consensus messages for config {ConfigId}")]
+    private partial void LogReplayingBufferedMessages(int Count, long ConfigId);
 
     private readonly struct LoggableRingNumbers(IEnumerable<int> ringNumbers)
     {
@@ -516,8 +526,51 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     private RapidResponse HandleConsensusMessages(RapidRequest request, CancellationToken cancellationToken)
     {
         LogHandleConsensusMessages();
-        _consensusInstance.HandleMessages(request, cancellationToken);
+
+        // Extract configuration ID from the message
+        var messageConfigId = GetConfigurationIdFromConsensusMessage(request);
+        
+        lock (_membershipUpdateLock)
+        {
+            var currentConfigId = _membershipView.ConfigurationId;
+            
+            if (messageConfigId > currentConfigId)
+            {
+                // Message is for a future configuration - buffer it for later processing
+                LogBufferingFutureConsensusMessage(request.ContentCase, messageConfigId, currentConfigId);
+                
+                if (!_pendingConsensusMessages.TryGetValue(messageConfigId, out var pendingList))
+                {
+                    pendingList = [];
+                    _pendingConsensusMessages[messageConfigId] = pendingList;
+                }
+                pendingList.Add(request);
+                
+                return RapidUtils.ToRapidResponse(new ConsensusResponse());
+            }
+            
+            // Message is for current or past configuration - process normally
+            // (past config messages will be rejected by Paxos due to config mismatch)
+            _consensusInstance.HandleMessages(request, cancellationToken);
+        }
+        
         return RapidUtils.ToRapidResponse(new ConsensusResponse());
+    }
+
+    /// <summary>
+    /// Extracts the configuration ID from a consensus message.
+    /// </summary>
+    private static long GetConfigurationIdFromConsensusMessage(RapidRequest request)
+    {
+        return request.ContentCase switch
+        {
+            RapidRequest.ContentOneofCase.FastRoundPhase2BMessage => request.FastRoundPhase2BMessage.ConfigurationId,
+            RapidRequest.ContentOneofCase.Phase1AMessage => request.Phase1AMessage.ConfigurationId,
+            RapidRequest.ContentOneofCase.Phase1BMessage => request.Phase1BMessage.ConfigurationId,
+            RapidRequest.ContentOneofCase.Phase2AMessage => request.Phase2AMessage.ConfigurationId,
+            RapidRequest.ContentOneofCase.Phase2BMessage => request.Phase2BMessage.ConfigurationId,
+            _ => throw new ArgumentException($"Unexpected consensus message type: {request.ContentCase}")
+        };
     }
 
     /// <summary>
@@ -655,6 +708,9 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
             LogDecideViewChangeCleanup();
             _consensusInstance = _consensusCoordinatorFactory.Create(_myAddr, _membershipView.ConfigurationId, _membershipView.Size, _broadcaster);
             RegisterConsensusDecidedContinuation(_consensusInstance);
+
+            // Replay any buffered consensus messages for this configuration
+            ReplayBufferedConsensusMessages(_membershipView.ConfigurationId, _sharedResources.ShuttingDownToken);
 
             // Inform EdgeFailureDetector about membership change
             CreateFailureDetectorsForCurrentConfiguration();
@@ -964,12 +1020,75 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
             if (decision.IsFaulted)
             {
                 LogConsensusDecidedFaulted(decision.Exception!);
+                // Consensus failed (e.g., exhausted all rounds during a partition).
+                // Reset state to allow new proposals when alerts arrive.
+                await ResetConsensusStateAfterFailure(consensusInstance);
                 return;
             }
 
             await DecideViewChange(await decision);
         }, CancellationToken.None, TaskContinuationOptions.None, _sharedResources.TaskScheduler);
         continuationTask.Unwrap().Ignore();
+    }
+
+    /// <summary>
+    /// Resets consensus state after a failure to allow new proposals.
+    /// Called when consensus exhausts all rounds without reaching a decision.
+    /// </summary>
+    private async Task ResetConsensusStateAfterFailure(ConsensusCoordinator failedInstance)
+    {
+        lock (_membershipUpdateLock)
+        {
+            // Only reset if this is still the current consensus instance
+            if (!ReferenceEquals(_consensusInstance, failedInstance))
+            {
+                return;
+            }
+
+            // Reset the announced proposal flag so new alerts can trigger consensus
+            _announcedProposal = false;
+
+            // Create a fresh consensus coordinator for the same configuration
+            _consensusInstance = _consensusCoordinatorFactory.Create(
+                _myAddr, 
+                _membershipView.ConfigurationId, 
+                _membershipView.Size, 
+                _broadcaster);
+            RegisterConsensusDecidedContinuation(_consensusInstance);
+        }
+
+        await failedInstance.DisposeAsync();
+    }
+
+    /// <summary>
+    /// Replays buffered consensus messages for the given configuration.
+    /// Called after a view change to process any messages that arrived before we transitioned.
+    /// Also cleans up messages for old configurations.
+    /// </summary>
+    private void ReplayBufferedConsensusMessages(long currentConfigId, CancellationToken cancellationToken)
+    {
+        // Clean up messages for old configurations (they're no longer relevant)
+        var keysToRemove = _pendingConsensusMessages.Keys.Where(k => k < currentConfigId).ToList();
+        foreach (var key in keysToRemove)
+        {
+            _pendingConsensusMessages.Remove(key);
+        }
+
+        // Replay messages for the current configuration
+        if (_pendingConsensusMessages.TryGetValue(currentConfigId, out var pendingMessages))
+        {
+            _pendingConsensusMessages.Remove(currentConfigId);
+            
+            if (pendingMessages.Count > 0)
+            {
+                LogReplayingBufferedMessages(pendingMessages.Count, currentConfigId);
+                
+                foreach (var message in pendingMessages)
+                {
+                    _consensusInstance.HandleMessages(message, cancellationToken);
+                }
+            }
+        }
     }
 
     /// <summary>
@@ -987,13 +1106,14 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
 
         // Wait for tracked background tasks via SharedResources
         // The SharedResources.WaitForBackgroundTasksAsync handles this
-        await Task.CompletedTask.ConfigureAwait(false);
+        await Task.CompletedTask.ConfigureAwait(true);
 
         await _consensusInstance.DisposeAsync();
     }
 
     /// <summary>
     /// Synchronously disposes the membership service.
+    /// Note: Callers should prefer DisposeAsync when possible.
     /// </summary>
     public void Dispose()
     {

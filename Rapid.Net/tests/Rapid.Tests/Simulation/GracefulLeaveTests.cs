@@ -26,11 +26,11 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
     {
         foreach (var consumer in _consumers)
         {
-            await consumer.DisposeAsync().ConfigureAwait(false);
+            await consumer.DisposeAsync().ConfigureAwait(true);
         }
         _consumers.Clear();
 
-        await _harness.DisposeAsync().ConfigureAwait(false);
+        await _harness.DisposeAsync().ConfigureAwait(true);
     }
 
     /// <summary>

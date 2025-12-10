@@ -11,7 +11,7 @@ namespace Rapid.Tests.Simulation;
 /// Represents a simulated node in a Rapid cluster.
 /// Uses in-memory transport instead of gRPC and does not require a WebApplication.
 /// </summary>
-internal sealed class SimulationNode : IDisposable
+internal sealed class SimulationNode : IAsyncDisposable, IDisposable
 {
     private readonly SimulationHarness _harness;
     private readonly NodeSimulationContext _context;
@@ -472,6 +472,31 @@ internal sealed class SimulationNode : IDisposable
         }
     }
 
+    public async ValueTask DisposeAsync()
+    {
+        if (_disposed) return;
+        _disposed = true;
+
+        _logger.LogDebug("Node {Address} disposing async", RapidUtils.Loggable(Address));
+
+        // First shutdown shared resources to cancel the ShuttingDownToken
+        // This will cause consensus instances to complete
+        _sharedResources.StartShutdown();
+
+        // Now dispose the membership service asynchronously
+        if (_membershipService != null)
+        {
+            _membershipService.Shutdown();
+            await _membershipService.DisposeAsync();
+        }
+
+        _sharedResources.Dispose();
+        MessagingClient.Dispose();
+        _harness.UnregisterNode(this);
+
+        _logger.LogDebug("Node {Address} disposed async", RapidUtils.Loggable(Address));
+    }
+
     public void Dispose()
     {
         if (_disposed) return;
@@ -479,8 +504,13 @@ internal sealed class SimulationNode : IDisposable
 
         _logger.LogDebug("Node {Address} disposing", RapidUtils.Loggable(Address));
 
+        // First shutdown shared resources to cancel the ShuttingDownToken
+        // This will cause consensus instances to complete
+        _sharedResources.StartShutdown();
+
         _membershipService?.Shutdown();
-        _membershipService?.Dispose();
+        // Note: We cannot await DisposeAsync here, so we skip the async dispose
+        // The shutdown above should have cancelled everything
         _sharedResources.Dispose();
         MessagingClient.Dispose();
         _harness.UnregisterNode(this);

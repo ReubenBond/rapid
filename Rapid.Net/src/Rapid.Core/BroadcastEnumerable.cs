@@ -123,7 +123,7 @@ internal sealed class BroadcastEnumerable<T> : IAsyncEnumerable<T>, IDisposable
         {
             try
             {
-                _current = await nextTask.WaitAsync(_cancellationToken).ConfigureAwait(false);
+                _current = await nextTask.WaitAsync(_cancellationToken).ConfigureAwait(true);
                 return _current.IsValid;
             }
             catch (OperationCanceledException)

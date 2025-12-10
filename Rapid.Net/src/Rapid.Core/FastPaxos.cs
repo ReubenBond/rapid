@@ -7,26 +7,6 @@ using Rapid.Pb;
 namespace Rapid;
 
 /// <summary>
-/// The outcome of a fast round attempt.
-/// </summary>
-internal enum FastRoundStatus
-{
-    /// <summary>Fast round succeeded with consensus.</summary>
-    Decided,
-    /// <summary>Fast round failed due to vote split (multiple proposals, none reached threshold).</summary>
-    VoteSplit,
-    /// <summary>Fast round failed due to too many delivery failures.</summary>
-    DeliveryFailure,
-    /// <summary>Fast round was cancelled.</summary>
-    Cancelled
-}
-
-/// <summary>
-/// Result of a fast round attempt.
-/// </summary>
-internal readonly record struct FastRoundResult(FastRoundStatus Status, List<Endpoint>? Decision = null);
-
-/// <summary>
 /// Handles the fast round (round 1) of Fast Paxos consensus.
 /// 
 /// This class is responsible for:
@@ -92,12 +72,13 @@ internal sealed partial class FastPaxos
     [LoggerMessage(Level = LogLevel.Information, Message = "Early fallback needed: {FailureCount} delivery failures (f={F}, need at least {Threshold} for Fast Paxos)")]
     private partial void LogEarlyFallbackNeeded(int FailureCount, int F, long Threshold);
 
-    private readonly TaskCompletionSource<FastRoundResult> _resultTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource<ConsensusResult> _resultTcs = new();
+    private CancellationTokenRegistration _cancellationRegistration;
     
     /// <summary>
     /// Task that completes when fast round finishes (either success or failure).
     /// </summary>
-    public Task<FastRoundResult> Result => _resultTcs.Task;
+    public Task<ConsensusResult> Result => _resultTcs.Task;
 
     public FastPaxos(
             Endpoint myAddr,
@@ -113,6 +94,21 @@ internal sealed partial class FastPaxos
         _logger = logger;
 
         LogFastPaxosInitialized(new LoggableEndpoint(myAddr), configurationId, membershipSize);
+    }
+    
+    /// <summary>
+    /// Register a timeout cancellation token that will complete the result task with Cancelled.
+    /// This should be called when starting the fast round to set up the timeout.
+    /// </summary>
+    public void RegisterTimeoutToken(CancellationToken timeoutToken)
+    {
+        if (timeoutToken.CanBeCanceled)
+        {
+            _cancellationRegistration = timeoutToken.Register(() =>
+            {
+                _resultTcs.TrySetResult(ConsensusResult.Cancelled.Instance);
+            });
+        }
     }
 
     /// <summary>
@@ -154,7 +150,7 @@ internal sealed partial class FastPaxos
             if (maxPossibleVotes < fastPaxosThreshold && !_resultTcs.Task.IsCompleted)
             {
                 LogEarlyFallbackNeeded(newFailureCount, f, fastPaxosThreshold);
-                _resultTcs.TrySetResult(new FastRoundResult(FastRoundStatus.DeliveryFailure));
+                _resultTcs.TrySetResult(ConsensusResult.DeliveryFailure.Instance);
             }
         }, cancellationToken);
     }
@@ -204,7 +200,7 @@ internal sealed partial class FastPaxos
                 LogDecidedViewChange(new LoggableEndpoints(proposalList));
 
                 // We have a successful proposal. Consume it.
-                if (_resultTcs.TrySetResult(new FastRoundResult(FastRoundStatus.Decided, proposalList)))
+                if (_resultTcs.TrySetResult(new ConsensusResult.Decided(proposalList)))
                 {
                     LogFastRoundSucceeded();
                 }
@@ -213,16 +209,18 @@ internal sealed partial class FastPaxos
             {
                 // Fast round cannot succeed due to vote split, complete with failure
                 LogFastRoundMayNotSucceed();
-                _resultTcs.TrySetResult(new FastRoundResult(FastRoundStatus.VoteSplit));
+                _resultTcs.TrySetResult(ConsensusResult.VoteSplit.Instance);
             }
         }
     }
 
     /// <summary>
-    /// Cancel the fast round (e.g., when coordinator decides to move to classic rounds).
+    /// Cancel the fast round, completing the result task with Cancelled.
+    /// Also cleans up any cancellation token registration.
     /// </summary>
     public void Cancel()
     {
-        _resultTcs.TrySetResult(new FastRoundResult(FastRoundStatus.Cancelled));
+        _cancellationRegistration.Dispose();
+        _resultTcs.TrySetResult(ConsensusResult.Cancelled.Instance);
     }
 }

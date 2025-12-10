@@ -139,7 +139,7 @@ public sealed partial class SharedResources(
         }
 
         StartShutdown();
-        await WaitForBackgroundTasksAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        await WaitForBackgroundTasksAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(true);
         _shutdownCts.Dispose();
     }
 

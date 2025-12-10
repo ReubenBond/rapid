@@ -71,7 +71,7 @@ internal sealed class RapidCluster(RapidClusterService clusterService, IMembersh
 
     private static async IAsyncEnumerable<ClusterEventNotification> CreateEmpty()
     {
-        await Task.CompletedTask.ConfigureAwait(false);
+        await Task.CompletedTask.ConfigureAwait(true);
         yield break;
     }
 }

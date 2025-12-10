@@ -31,20 +31,21 @@ internal sealed partial class ConsensusCoordinator : IAsyncDisposable
     private readonly SharedResources _sharedResources;
 
     // The FastPaxos instance for round 1
-    private FastPaxos? _fastPaxos;
+    // Created in constructor so it can receive votes before Propose() is called
+    private readonly FastPaxos _fastPaxos;
     
     // The Paxos instance for classic rounds (2, 3, ...)
     // Also holds acceptor state shared across all rounds
-    private Paxos? _paxos;
+    // Created in constructor so it can receive messages before Propose() is called
+    private readonly Paxos _paxos;
     
     // Synchronization
     private readonly Lock _lock = new();
-    private readonly CancellationTokenSource _disposeCts = new();
     private Task? _consensusLoopTask;
     private int _disposed;
 
     // Decision
-    private readonly TaskCompletionSource<List<Endpoint>> _onDecidedTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource<List<Endpoint>> _onDecidedTcs = new();
     
     /// <summary>
     /// Task that completes when consensus is reached.
@@ -76,11 +77,14 @@ internal sealed partial class ConsensusCoordinator : IAsyncDisposable
     [LoggerMessage(Level = LogLevel.Debug, Message = "Fast round decided: {Decision}")]
     private static partial void LogFastRoundDecided(ILogger logger, LoggableEndpoints Decision);
 
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Fast round timed out after {Timeout}, falling back to classic Paxos")]
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Fast round timed out or cancelled after {Timeout}, falling back to classic Paxos")]
     private static partial void LogFastRoundTimeout(ILogger logger, TimeSpan Timeout);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Fast round failed early, falling back to classic Paxos")]
     private static partial void LogFastRoundFailedEarly(ILogger logger);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Classic round {Round} timed out after {Timeout}")]
+    private static partial void LogClassicRoundTimeout(ILogger logger, int Round, TimeSpan Timeout);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Starting classic round {Round} with delay {Delay}")]
     private static partial void LogStartingClassicRound(ILogger logger, int Round, TimeSpan Delay);
@@ -90,6 +94,9 @@ internal sealed partial class ConsensusCoordinator : IAsyncDisposable
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Consensus loop cancelled")]
     private static partial void LogConsensusCancelled(ILogger logger);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Consensus failed: exhausted all {MaxRounds} rounds without reaching decision")]
+    private static partial void LogConsensusExhausted(ILogger logger, int MaxRounds);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "HandleMessages: received {MessageType}")]
     private static partial void LogHandleMessages(ILogger logger, RapidRequest.ContentOneofCase MessageType);
@@ -123,6 +130,23 @@ internal sealed partial class ConsensusCoordinator : IAsyncDisposable
         // The rate of a random expovariate variable, used to determine jitter
         _jitterRate = 1 / (double)membershipSize;
 
+        // Create FastPaxos and Paxos instances up front so they can receive votes
+        // before this node has locally decided to propose
+        _fastPaxos = new FastPaxos(
+            myAddr,
+            configurationId,
+            membershipSize,
+            broadcaster,
+            fastPaxosLogger);
+
+        _paxos = new Paxos(
+            myAddr,
+            configurationId,
+            membershipSize,
+            client,
+            broadcaster,
+            paxosLogger);
+
         LogInitialized(_coordinatorLogger, new LoggableEndpoint(myAddr), configurationId, membershipSize);
     }
 
@@ -133,49 +157,11 @@ internal sealed partial class ConsensusCoordinator : IAsyncDisposable
     {
         LogPropose(_coordinatorLogger, new LoggableEndpoints(proposal));
 
-        // Create the Paxos instance that holds acceptor state and handles classic rounds
-        _paxos = new Paxos(
-            _myAddr,
-            _configurationId,
-            _membershipSize,
-            _client,
-            _broadcaster,
-            _paxosLogger);
-
-        // Propagate Paxos decision to our TCS
-        _ = PropagateDecisionAsync(_paxos.Decided);
-
         // Register our fast round vote in the acceptor state
         _paxos.RegisterFastRoundVote(proposal);
 
-        // Create the FastPaxos instance for round 1
-        _fastPaxos = new FastPaxos(
-            _myAddr,
-            _configurationId,
-            _membershipSize,
-            _broadcaster,
-            _fastPaxosLogger);
-
-        // Start the consensus loop - use _disposeCts.Token directly since we already handle
-        // disposal through DisposeAsync, and the passed cancellationToken is typically
-        // the shared shutting down token which has a longer lifetime
+        // Start the consensus loop
         _consensusLoopTask = RunConsensusLoopAsync(proposal, _sharedResources.ShuttingDownToken);
-    }
-
-    /// <summary>
-    /// Propagate a decision from Paxos to our main TCS.
-    /// </summary>
-    private async Task PropagateDecisionAsync(Task<List<Endpoint>> decisionTask)
-    {
-        try
-        {
-            var decision = await decisionTask.ConfigureAwait(false);
-            _onDecidedTcs.TrySetResult(decision);
-        }
-        catch (OperationCanceledException)
-        {
-            // Paxos was cancelled, that's fine
-        }
     }
 
     /// <summary>
@@ -188,53 +174,66 @@ internal sealed partial class ConsensusCoordinator : IAsyncDisposable
             // Phase 1: Fast round
             LogStartingFastRound(_coordinatorLogger);
             
-            // Broadcast fast round proposal
-            _fastPaxos!.Propose(proposal, cancellationToken);
-
-            // Wait for fast round result or timeout
             var fastRoundTimeout = GetRandomDelay();
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             
-            var completedTask = await Task.WhenAny(
-                _fastPaxos.Result,
-                Task.Delay(fastRoundTimeout, _sharedResources.TimeProvider, timeoutCts.Token)
-            ).ConfigureAwait(false);
+            // Create a CancellationTokenSource that times out after the fast round delay.
+            // When cancelled, FastPaxos.Result will complete with ConsensusResult.Cancelled.
+            using var fastRoundTimeoutCts = new CancellationTokenSource(fastRoundTimeout, _sharedResources.TimeProvider);
+            using var fastRoundCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, fastRoundTimeoutCts.Token);
+            
+            // Register the timeout token with FastPaxos
+            _fastPaxos.RegisterTimeoutToken(fastRoundCts.Token);
+            
+            // Broadcast fast round proposal
+            _fastPaxos.Propose(proposal, cancellationToken);
 
-            if (_fastPaxos.Result.IsCompletedSuccessfully)
+            // Wait for fast round result - will complete when decided, failed, or timeout (via cancellation)
+            var fastRoundResult = await _fastPaxos.Result.ConfigureAwait(true);
+
+            switch (fastRoundResult)
             {
-                var result = await _fastPaxos.Result.ConfigureAwait(false);
-                await timeoutCts.CancelAsync().ConfigureAwait(false);
-                
-                if (result.Status == FastRoundStatus.Decided && result.Decision != null)
-                {
-                    LogFastRoundDecided(_coordinatorLogger, new LoggableEndpoints(result.Decision));
-                    _onDecidedTcs.TrySetResult(result.Decision);
+                case ConsensusResult.Decided decided:
+                    LogFastRoundDecided(_coordinatorLogger, new LoggableEndpoints(decided.Value));
+                    _onDecidedTcs.TrySetResult(decided.Value);
                     return;
-                }
-                
-                // Fast round failed (vote split or delivery failure), fall through to classic rounds
-                LogFastRoundFailedEarly(_coordinatorLogger);
-            }
-            else
-            {
-                // Timeout
-                LogFastRoundTimeout(_coordinatorLogger, fastRoundTimeout);
-                await timeoutCts.CancelAsync().ConfigureAwait(false);
+                    
+                case ConsensusResult.VoteSplit or ConsensusResult.DeliveryFailure:
+                    LogFastRoundFailedEarly(_coordinatorLogger);
+                    // Fall through to classic rounds
+                    break;
+                    
+                case ConsensusResult.Cancelled:
+                    if (cancellationToken.IsCancellationRequested)
+                    {
+                        LogConsensusCancelled(_coordinatorLogger);
+                        _onDecidedTcs.TrySetCanceled(cancellationToken);
+                        return;
+                    }
+                    // Otherwise it was a timeout - fall through to classic rounds
+                    LogFastRoundTimeout(_coordinatorLogger, fastRoundTimeout);
+                    break;
+                    
+                case ConsensusResult.Timeout:
+                    LogFastRoundTimeout(_coordinatorLogger, fastRoundTimeout);
+                    break;
             }
 
             // Phase 2+: Classic Paxos rounds
-            // Now we just wait on _paxos.Decided while starting new rounds on timeout
             var roundNumber = 2;
             var maxRounds = _options.MaxConsensusRounds;
 
             while (!cancellationToken.IsCancellationRequested && roundNumber <= maxRounds)
             {
+                // Check if Paxos already decided (from a previous round's messages arriving late)
                 if (_paxos!.Decided.IsCompletedSuccessfully)
                 {
-                    var decision = await _paxos.Decided.ConfigureAwait(false);
-                    LogClassicRoundDecided(_coordinatorLogger, roundNumber - 1, new LoggableEndpoints(decision));
-                    _onDecidedTcs.TrySetResult(decision);
-                    return;
+                    var paxosResult = await _paxos.Decided.ConfigureAwait(true);
+                    if (paxosResult is ConsensusResult.Decided decided)
+                    {
+                        LogClassicRoundDecided(_coordinatorLogger, roundNumber - 1, new LoggableEndpoints(decided.Value));
+                        _onDecidedTcs.TrySetResult(decided.Value);
+                        return;
+                    }
                 }
 
                 var delay = GetRetryDelay(roundNumber);
@@ -243,26 +242,53 @@ internal sealed partial class ConsensusCoordinator : IAsyncDisposable
                 // Start the classic round
                 _paxos.StartPhase1a(roundNumber, cancellationToken);
 
-                // Wait for decision or timeout
-                using var roundCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                
-                await Task.WhenAny(
-                    _paxos.Decided,
-                    Task.Delay(delay, _sharedResources.TimeProvider, roundCts.Token)
-                ).ConfigureAwait(false);
-
-                if (_paxos.Decided.IsCompletedSuccessfully)
+                // Wait for decision or timeout using delay
+                try
                 {
-                    var decision = await _paxos.Decided.ConfigureAwait(false);
-                    LogClassicRoundDecided(_coordinatorLogger, roundNumber, new LoggableEndpoints(decision));
-                    _onDecidedTcs.TrySetResult(decision);
-                    await roundCts.CancelAsync().ConfigureAwait(false);
-                    return;
+                    await Task.Delay(delay, _sharedResources.TimeProvider, cancellationToken).ConfigureAwait(true);
+                }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                {
+                    // This shouldn't happen in current flow
                 }
 
-                await roundCts.CancelAsync().ConfigureAwait(false);
+                // Check if we decided during the delay
+                if (_paxos.Decided.IsCompletedSuccessfully)
+                {
+                    var paxosResult = await _paxos.Decided.ConfigureAwait(true);
+                    if (paxosResult is ConsensusResult.Decided decided)
+                    {
+                        LogClassicRoundDecided(_coordinatorLogger, roundNumber, new LoggableEndpoints(decided.Value));
+                        _onDecidedTcs.TrySetResult(decided.Value);
+                        return;
+                    }
+                    else if (paxosResult is ConsensusResult.Cancelled && cancellationToken.IsCancellationRequested)
+                    {
+                        LogConsensusCancelled(_coordinatorLogger);
+                        _onDecidedTcs.TrySetCanceled(cancellationToken);
+                        return;
+                    }
+                }
+
                 // Round timed out, try next round
+                LogClassicRoundTimeout(_coordinatorLogger, roundNumber, delay);
                 roundNumber++;
+            }
+            
+            // Exhausted all rounds without decision
+            if (cancellationToken.IsCancellationRequested)
+            {
+                LogConsensusCancelled(_coordinatorLogger);
+                _onDecidedTcs.TrySetCanceled(cancellationToken);
+            }
+            else
+            {
+                // All rounds exhausted without reaching consensus - this can happen during
+                // network partitions where this node can't communicate with enough peers.
+                // Signal failure so MembershipService can handle appropriately.
+                LogConsensusExhausted(_coordinatorLogger, maxRounds);
+                _onDecidedTcs.TrySetException(new InvalidOperationException(
+                    $"Consensus failed: exhausted all {maxRounds} rounds without reaching decision for configId={_configurationId}"));
             }
         }
         catch (OperationCanceledException)
@@ -284,19 +310,19 @@ internal sealed partial class ConsensusCoordinator : IAsyncDisposable
             switch (request.ContentCase)
             {
                 case RapidRequest.ContentOneofCase.FastRoundPhase2BMessage:
-                    _fastPaxos?.HandleFastRoundProposal(request.FastRoundPhase2BMessage);
+                    _fastPaxos.HandleFastRoundProposal(request.FastRoundPhase2BMessage);
                     break;
                 case RapidRequest.ContentOneofCase.Phase1AMessage:
-                    _paxos?.HandlePhase1aMessage(request.Phase1AMessage, cancellationToken);
+                    _paxos.HandlePhase1aMessage(request.Phase1AMessage, cancellationToken);
                     break;
                 case RapidRequest.ContentOneofCase.Phase1BMessage:
-                    _paxos?.HandlePhase1bMessage(request.Phase1BMessage, cancellationToken);
+                    _paxos.HandlePhase1bMessage(request.Phase1BMessage, cancellationToken);
                     break;
                 case RapidRequest.ContentOneofCase.Phase2AMessage:
-                    _paxos?.HandlePhase2aMessage(request.Phase2AMessage, cancellationToken);
+                    _paxos.HandlePhase2aMessage(request.Phase2AMessage, cancellationToken);
                     break;
                 case RapidRequest.ContentOneofCase.Phase2BMessage:
-                    _paxos?.HandlePhase2bMessage(request.Phase2BMessage);
+                    _paxos.HandlePhase2bMessage(request.Phase2BMessage);
                     break;
                 default:
                     throw new ArgumentException($"Unexpected message case: {request.ContentCase}");
@@ -334,16 +360,16 @@ internal sealed partial class ConsensusCoordinator : IAsyncDisposable
         }
 
         LogDispose(_coordinatorLogger);
-        await _disposeCts.CancelAsync();
-        _disposeCts.Dispose();
+
+        // Cancel both FastPaxos and Paxos to unblock any waiters
+        _fastPaxos.Cancel();
+        _paxos.Cancel();
 
         if (_consensusLoopTask is { } task)
         {
             await task.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
         }
 
-        _fastPaxos?.Cancel();
-        _paxos?.Cancel();
         _onDecidedTcs.TrySetCanceled();
     }
 }
