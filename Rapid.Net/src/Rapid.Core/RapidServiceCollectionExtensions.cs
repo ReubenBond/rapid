@@ -73,8 +73,8 @@ public static class RapidServiceCollectionExtensions
             return new PingPongFailureDetectorFactory(options.ListenAddress, client, sharedResources, protocolOptions, logger);
         });
 
-        // Register FastPaxos factory
-        services.AddSingleton<IFastPaxosFactory, FastPaxosFactory>();
+        // Register ConsensusCoordinator factory
+        services.AddSingleton<IConsensusCoordinatorFactory, ConsensusCoordinatorFactory>();
 
         // Register CutDetector factory
         services.AddSingleton<ICutDetectorFactory, CutDetectorFactory>();

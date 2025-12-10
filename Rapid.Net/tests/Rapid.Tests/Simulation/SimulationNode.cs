@@ -17,7 +17,7 @@ internal sealed class SimulationNode : IDisposable
     private readonly NodeSimulationContext _context;
     private readonly SharedResources _sharedResources;
     private readonly PingPongFailureDetectorFactory _failureDetectorFactory;
-    private readonly IFastPaxosFactory _fastPaxosFactory;
+    private readonly IConsensusCoordinatorFactory _consensusCoordinatorFactory;
     private readonly CutDetectorFactory _cutDetectorFactory;
     private readonly MembershipViewAccessor _viewAccessor;
     private readonly IOptions<RapidProtocolOptions> _protocolOptions;
@@ -108,20 +108,27 @@ internal sealed class SimulationNode : IDisposable
             _protocolOptions,
             failureDetectorLogger);
 
-        // Create fast paxos factory
+        // Create consensus coordinator factory
+        var consensusCoordinatorLogger = factory?.CreateLogger<ConsensusCoordinator>()
+            ?? NullLogger<ConsensusCoordinator>.Instance;
         var fastPaxosLogger = factory?.CreateLogger<FastPaxos>()
             ?? NullLogger<FastPaxos>.Instance;
         var paxosLogger = factory?.CreateLogger<Paxos>()
             ?? NullLogger<Paxos>.Instance;
-        _fastPaxosFactory = new FastPaxosFactory(
+        _consensusCoordinatorFactory = new ConsensusCoordinatorFactory(
             MessagingClient,
             _protocolOptions,
             _sharedResources,
+            consensusCoordinatorLogger,
             fastPaxosLogger,
             paxosLogger);
 
         // Create cut detector factory
-        _cutDetectorFactory = new CutDetectorFactory(_protocolOptions);
+        var simpleCutDetectorLogger = factory?.CreateLogger<SimpleCutDetector>()
+            ?? NullLogger<SimpleCutDetector>.Instance;
+        var multiNodeCutDetectorLogger = factory?.CreateLogger<MultiNodeCutDetector>()
+            ?? NullLogger<MultiNodeCutDetector>.Instance;
+        _cutDetectorFactory = new CutDetectorFactory(_protocolOptions, simpleCutDetectorLogger, multiNodeCutDetectorLogger);
 
         // Register with the simulation harness
         harness.RegisterNode(this);
@@ -189,7 +196,7 @@ internal sealed class SimulationNode : IDisposable
             MessagingClient,
             broadcaster,
             _failureDetectorFactory,
-            _fastPaxosFactory,
+            _consensusCoordinatorFactory,
             _cutDetectorFactory,
             _viewAccessor,
             metadataMap,
@@ -284,7 +291,7 @@ internal sealed class SimulationNode : IDisposable
             MessagingClient,
             broadcaster,
             _failureDetectorFactory,
-            _fastPaxosFactory,
+            _consensusCoordinatorFactory,
             _cutDetectorFactory,
             _viewAccessor,
             metadataMap,

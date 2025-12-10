@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace Rapid;
@@ -25,7 +26,10 @@ internal interface ICutDetectorFactory
 /// Default implementation of ICutDetectorFactory.
 /// Uses RapidProtocolOptions to compute effective parameters based on cluster size.
 /// </summary>
-internal sealed class CutDetectorFactory(IOptions<RapidProtocolOptions> protocolOptions) : ICutDetectorFactory
+internal sealed class CutDetectorFactory(
+    IOptions<RapidProtocolOptions> protocolOptions,
+    ILogger<SimpleCutDetector> simpleCutDetectorLogger,
+    ILogger<MultiNodeCutDetector> multiNodeCutDetectorLogger) : ICutDetectorFactory
 {
     private readonly RapidProtocolOptions _options = protocolOptions.Value;
 
@@ -41,17 +45,17 @@ internal sealed class CutDetectorFactory(IOptions<RapidProtocolOptions> protocol
         {
             // Use SimpleCutDetector with K=1 - it will never trigger since there are no observers
             // but it provides a valid implementation that won't crash
-            return new SimpleCutDetector(1, membershipView);
+            return new SimpleCutDetector(1, membershipView, simpleCutDetectorLogger);
         }
         
         // MultiNodeCutDetector requires K >= 3 and K > H >= L >= 1
         // If these constraints cannot be satisfied, use SimpleCutDetector
         if (observersPerSubject < 3 || observersPerSubject <= highWatermark)
         {
-            return new SimpleCutDetector(observersPerSubject, membershipView);
+            return new SimpleCutDetector(observersPerSubject, membershipView, simpleCutDetectorLogger);
         }
         
         // For larger clusters with valid parameters, use the full multi-node cut detection
-        return new MultiNodeCutDetector(observersPerSubject, highWatermark, lowWatermark, membershipView);
+        return new MultiNodeCutDetector(observersPerSubject, highWatermark, lowWatermark, membershipView, multiNodeCutDetectorLogger);
     }
 }

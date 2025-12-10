@@ -1,43 +1,62 @@
 using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
 
-using Microsoft.Extensions.Options;
 using Rapid.Messaging;
 using Rapid.Pb;
 
 namespace Rapid;
 
 /// <summary>
-/// Single-decree consensus. We always start with a Fast round.
-/// 
-/// This implementation supports delivery-aware fallback to Classic Paxos.
-/// When message delivery failures are detected during broadcast, and if
-/// too many failures occur (preventing Fast Paxos from succeeding),
-/// Classic Paxos is triggered immediately rather than waiting for a timeout.
+/// The outcome of a fast round attempt.
 /// </summary>
-internal sealed partial class FastPaxos : IAsyncDisposable
+internal enum FastRoundStatus
+{
+    /// <summary>Fast round succeeded with consensus.</summary>
+    Decided,
+    /// <summary>Fast round failed due to vote split (multiple proposals, none reached threshold).</summary>
+    VoteSplit,
+    /// <summary>Fast round failed due to too many delivery failures.</summary>
+    DeliveryFailure,
+    /// <summary>Fast round was cancelled.</summary>
+    Cancelled
+}
+
+/// <summary>
+/// Result of a fast round attempt.
+/// </summary>
+internal readonly record struct FastRoundResult(FastRoundStatus Status, List<Endpoint>? Decision = null);
+
+/// <summary>
+/// Handles the fast round (round 1) of Fast Paxos consensus.
+/// 
+/// This class is responsible for:
+/// - Broadcasting fast round proposals (Phase 2b messages)
+/// - Collecting fast round votes and deciding if threshold is met
+/// - Returning a result indicating success, vote split, or delivery failure
+/// 
+/// This class does NOT handle classic Paxos rounds. The ConsensusCoordinator
+/// is responsible for creating Paxos instances for classic rounds (2, 3, ...).
+/// </summary>
+internal sealed partial class FastPaxos
 {
     private readonly ILogger<FastPaxos> _logger;
-    private readonly double _jitterRate;
     private readonly Endpoint _myAddr;
     private readonly long _configurationId;
     private readonly long _membershipSize;
     private readonly IBroadcaster _broadcaster;
     private readonly Dictionary<List<Endpoint>, int> _votesPerProposal = new(ListEndpointComparer.Instance);
     private readonly HashSet<Endpoint> _votesReceived = [];
-    private readonly Paxos _paxos;
-    private readonly Lock _paxosLock = new();
-    private readonly RapidProtocolOptions _options;
-    private readonly SharedResources _sharedResources;
-    private readonly CancellationTokenSource _scheduledClassicRoundCts = new();
-    private int _disposed;
-    private Task? _classicRoundTask;
-    private int _classicRoundTriggered;
 
     private readonly struct LoggableEndpoints(IEnumerable<Endpoint> endpoints)
     {
         private readonly IEnumerable<Endpoint> _endpoints = endpoints;
         public override readonly string ToString() => string.Join(", ", _endpoints.Select(RapidUtils.Loggable));
+    }
+
+    private readonly struct LoggableEndpoint(Endpoint endpoint)
+    {
+        private readonly Endpoint _endpoint = endpoint;
+        public override readonly string ToString() => RapidUtils.Loggable(_endpoint);
     }
 
     [LoggerMessage(Level = LogLevel.Trace, Message = "Configuration ID mismatch for proposal: current_config:{CurrentConfig}")]
@@ -49,23 +68,11 @@ internal sealed partial class FastPaxos : IAsyncDisposable
     [LoggerMessage(Level = LogLevel.Trace, Message = "Fast round may not succeed for proposal")]
     private partial void LogFastRoundMayNotSucceed();
 
-    [LoggerMessage(Level = LogLevel.Trace, Message = "Scheduling classic round with delay: {Delay}")]
-    private partial void LogSchedulingClassicRound(TimeSpan Delay);
-
     [LoggerMessage(Level = LogLevel.Debug, Message = "FastPaxos initialized: myAddr={MyAddr}, configId={ConfigId}, membershipSize={MembershipSize}")]
     private partial void LogFastPaxosInitialized(LoggableEndpoint MyAddr, long ConfigId, long MembershipSize);
 
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Propose: broadcasting fast round proposal={Proposal}, recoveryDelay={RecoveryDelay}")]
-    private partial void LogPropose(LoggableEndpoints Proposal, TimeSpan RecoveryDelay);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Propose: registered fast round vote for proposal")]
-    private partial void LogProposeRegisteredVote();
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "ScheduleClassicRoundAsync: starting classic Paxos round 2 after delay")]
-    private partial void LogStartingClassicRound();
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "ScheduleClassicRoundAsync: skipped, already decided or cancelled")]
-    private partial void LogClassicRoundSkipped();
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Propose: broadcasting fast round proposal={Proposal}")]
+    private partial void LogPropose(LoggableEndpoints Proposal);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "HandleFastRoundProposal: received from {Sender}, endpoints={Endpoints}, configId={ConfigId}")]
     private partial void LogHandleFastRoundProposalReceived(LoggableEndpoint Sender, LoggableEndpoints Endpoints, long ConfigId);
@@ -79,85 +86,44 @@ internal sealed partial class FastPaxos : IAsyncDisposable
     [LoggerMessage(Level = LogLevel.Debug, Message = "HandleFastRoundProposal: vote count for proposal={Count}, total votes received={TotalVotes}, threshold={Threshold}, f={F}")]
     private partial void LogFastRoundVoteCount(int Count, int TotalVotes, long Threshold, int F);
 
-    [LoggerMessage(Level = LogLevel.Debug, Message = "HandleFastRoundProposal: fast round succeeded, cancelling classic round")]
+    [LoggerMessage(Level = LogLevel.Debug, Message = "HandleFastRoundProposal: fast round succeeded")]
     private partial void LogFastRoundSucceeded();
 
-    [LoggerMessage(Level = LogLevel.Debug, Message = "HandleMessages: received {MessageType}")]
-    private partial void LogHandleMessages(RapidRequest.ContentOneofCase MessageType);
+    [LoggerMessage(Level = LogLevel.Information, Message = "Early fallback needed: {FailureCount} delivery failures (f={F}, need at least {Threshold} for Fast Paxos)")]
+    private partial void LogEarlyFallbackNeeded(int FailureCount, int F, long Threshold);
 
-    [LoggerMessage(Level = LogLevel.Debug, Message = "HandleMessages: unexpected message case {MessageCase}")]
-    private partial void LogUnexpectedMessageCase(RapidRequest.ContentOneofCase MessageCase);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "GetRandomDelay: computed jitter={Jitter}ms, total delay={TotalDelay}")]
-    private partial void LogRandomDelay(long Jitter, TimeSpan TotalDelay);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Dispose: cleaning up FastPaxos resources")]
-    private partial void LogDispose();
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "Early fallback to Classic Paxos: {FailureCount} delivery failures (f={F}, need at least {Threshold} for Fast Paxos)")]
-    private partial void LogEarlyFallbackTriggered(int FailureCount, int F, long Threshold);
-
-    private readonly struct LoggableEndpoint(Endpoint endpoint)
-    {
-        private readonly Endpoint _endpoint = endpoint;
-        public override readonly string ToString() => RapidUtils.Loggable(_endpoint);
-    }
-
-    private readonly TaskCompletionSource<List<Endpoint>> _onDecidedTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    public Task<List<Endpoint>> Decided => _onDecidedTcs.Task;
+    private readonly TaskCompletionSource<FastRoundResult> _resultTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    
+    /// <summary>
+    /// Task that completes when fast round finishes (either success or failure).
+    /// </summary>
+    public Task<FastRoundResult> Result => _resultTcs.Task;
 
     public FastPaxos(
             Endpoint myAddr,
             long configurationId,
             int membershipSize,
-            IMessagingClient client,
             IBroadcaster broadcaster,
-            IOptions<RapidProtocolOptions> options,
-            SharedResources sharedResources,
-            ILogger<FastPaxos> logger,
-            ILogger<Paxos> paxosLogger)
+            ILogger<FastPaxos> logger)
     {
         _myAddr = myAddr;
         _configurationId = configurationId;
         _membershipSize = membershipSize;
         _broadcaster = broadcaster;
-        _options = options.Value;
-        _sharedResources = sharedResources;
         _logger = logger;
-
-        // The rate of a random expovariate variable, used to determine a jitter over a base delay to start classic
-        // rounds. This determines how many classic rounds we want to start per second on average. Does not
-        // affect correctness of the protocol, but having too many nodes starting rounds will increase messaging load,
-        // especially for very large clusters.
-        _jitterRate = 1 / (double)membershipSize;
-
-        _paxos = new Paxos(myAddr, configurationId, membershipSize, client, broadcaster, _onDecidedTcs, paxosLogger);
 
         LogFastPaxosInitialized(new LoggableEndpoint(myAddr), configurationId, membershipSize);
     }
 
     /// <summary>
-    /// Propose a value for a fast round.
+    /// Propose a value for a fast round. Only broadcasts the fast round message.
+    /// The coordinator is responsible for scheduling classic round fallback.
     /// </summary>
     /// <param name="proposal">the membership change proposal towards a configuration change.</param>
     /// <param name="cancellationToken">Cancellation token</param>
-    public void Propose(List<Endpoint> proposal, CancellationToken cancellationToken = default) => Propose(proposal, GetRandomDelay(), cancellationToken);
-
-    /// <summary>
-    /// Propose a value for a fast round with a delay to trigger the recovery protocol.
-    /// </summary>
-    /// <param name="proposal">the membership change proposal towards a configuration change.</param>
-    /// <param name="recoveryDelay">Delay before starting classic Paxos round</param>
-    /// <param name="cancellationToken">Cancellation token</param>
-    private void Propose(List<Endpoint> proposal, TimeSpan recoveryDelay, CancellationToken cancellationToken = default)
+    public void Propose(List<Endpoint> proposal, CancellationToken cancellationToken = default)
     {
-        LogPropose(new LoggableEndpoints(proposal), recoveryDelay);
-
-        lock (_paxosLock)
-        {
-            _paxos.RegisterFastRoundVote(proposal);
-            LogProposeRegisteredVote();
-        }
+        LogPropose(new LoggableEndpoints(proposal));
 
         var consensusMessage = new FastRoundPhase2bMessage
         {
@@ -168,90 +134,36 @@ internal sealed partial class FastPaxos : IAsyncDisposable
 
         var proposalMessage = RapidUtils.ToRapidRequest(consensusMessage);
 
-        // Always schedule the timeout-based fallback as a safety net
-        LogSchedulingClassicRound(recoveryDelay);
-        _classicRoundTask = ScheduleClassicRoundAsync(recoveryDelay, _sharedResources.ShuttingDownToken);
-
-        // Calculate threshold for early fallback
+        // Calculate threshold for early fallback detection
         // Fast Paxos requires N - f votes, where f = floor((N-1)/4)
         var f = (int)Math.Floor((_membershipSize - 1) / 4.0);
         var fastPaxosThreshold = _membershipSize - f;
 
-        // Track delivery failures to trigger early fallback
+        // Track delivery failures to notify coordinator
         int failureCount = 0;
 
-        // Use callback-based broadcast to detect delivery failures
+        // Broadcast with failure callback to detect when fast round cannot succeed
         _broadcaster.Broadcast(proposalMessage, failedEndpoint =>
         {
             var newFailureCount = Interlocked.Increment(ref failureCount);
 
-            // Calculate max possible votes: membership - failures + our own vote (already counted in membership)
+            // Calculate max possible votes: membership - failures
             var maxPossibleVotes = _membershipSize - newFailureCount;
 
-            // If we can't reach the threshold due to delivery failures, trigger Classic Paxos early
-            if (maxPossibleVotes < fastPaxosThreshold && !_onDecidedTcs.Task.IsCompleted)
+            // If we can't reach the threshold due to delivery failures, complete with failure
+            if (maxPossibleVotes < fastPaxosThreshold && !_resultTcs.Task.IsCompleted)
             {
-                LogEarlyFallbackTriggered(newFailureCount, f, fastPaxosThreshold);
-                TriggerClassicPaxosEarly(cancellationToken);
+                LogEarlyFallbackNeeded(newFailureCount, f, fastPaxosThreshold);
+                _resultTcs.TrySetResult(new FastRoundResult(FastRoundStatus.DeliveryFailure));
             }
         }, cancellationToken);
-
-        async Task ScheduleClassicRoundAsync(TimeSpan recoveryDelay, CancellationToken cancellationToken)
-        {
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _scheduledClassicRoundCts.Token);
-            await Task.Delay(recoveryDelay, _sharedResources.TimeProvider, cts.Token).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
-            if (_onDecidedTcs.Task.IsCompleted || cts.IsCancellationRequested)
-            {
-                LogClassicRoundSkipped();
-                return;
-            }
-
-            // Use Interlocked to ensure we only trigger once (either here or via early fallback)
-            if (Interlocked.CompareExchange(ref _classicRoundTriggered, 1, 0) != 0)
-            {
-                return; // Already triggered by early fallback
-            }
-
-            LogStartingClassicRound();
-
-            // Start classic Paxos round with round number 2
-            lock (_paxosLock)
-            {
-                _paxos.StartPhase1a(2, cts.Token);
-            }
-        }
-
-        // Triggers Classic Paxos immediately, bypassing the scheduled delay.
-        // This is called when delivery failures indicate Fast Paxos cannot succeed.
-        void TriggerClassicPaxosEarly(CancellationToken cancellationToken)
-        {
-            // Use Interlocked to ensure we only trigger once
-            if (Interlocked.CompareExchange(ref _classicRoundTriggered, 1, 0) != 0)
-            {
-                return; // Already triggered
-            }
-
-            if (_onDecidedTcs.Task.IsCompleted)
-            {
-                return; // Already decided
-            }
-
-            lock (_paxosLock)
-            {
-                // Cancel the scheduled timeout since we're triggering early
-                _scheduledClassicRoundCts.Cancel();
-
-                // Start Classic Paxos round 2 immediately
-                _paxos.StartPhase1a(2, cancellationToken);
-            }
-        }
     }
 
     /// <summary>
-    /// Invoked by the membership service when it receives a proposal for a fast round.
+    /// Handle a fast round proposal (Phase 2b of Fast Paxos).
     /// </summary>
     /// <param name="proposalMessage">the membership change proposal towards a configuration change.</param>
-    private void HandleFastRoundProposal(FastRoundPhase2bMessage proposalMessage)
+    public void HandleFastRoundProposal(FastRoundPhase2bMessage proposalMessage)
     {
         LogHandleFastRoundProposalReceived(new LoggableEndpoint(proposalMessage.Sender), new LoggableEndpoints(proposalMessage.Endpoints), proposalMessage.ConfigurationId);
 
@@ -267,7 +179,7 @@ internal sealed partial class FastPaxos : IAsyncDisposable
             return;
         }
 
-        if (_onDecidedTcs.Task.IsCompleted)
+        if (_resultTcs.Task.IsCompleted)
         {
             LogFastRoundAlreadyDecided();
             return;
@@ -292,82 +204,25 @@ internal sealed partial class FastPaxos : IAsyncDisposable
                 LogDecidedViewChange(new LoggableEndpoints(proposalList));
 
                 // We have a successful proposal. Consume it.
-                if (_onDecidedTcs.TrySetResult(proposalList))
+                if (_resultTcs.TrySetResult(new FastRoundResult(FastRoundStatus.Decided, proposalList)))
                 {
                     LogFastRoundSucceeded();
-                    // Cancel the classic round.
-                    _scheduledClassicRoundCts?.Cancel();
                 }
             }
             else
             {
-                // fallback protocol here
+                // Fast round cannot succeed due to vote split, complete with failure
                 LogFastRoundMayNotSucceed();
+                _resultTcs.TrySetResult(new FastRoundResult(FastRoundStatus.VoteSplit));
             }
         }
     }
 
     /// <summary>
-    /// Invoked by the membership service when it receives a consensus proposal.
+    /// Cancel the fast round (e.g., when coordinator decides to move to classic rounds).
     /// </summary>
-    /// <param name="request">the membership change proposal towards a configuration change.</param>
-    /// <param name="cancellationToken">Cancellation token</param>
-    /// <returns>Response message</returns>
-    public RapidResponse HandleMessages(RapidRequest request, CancellationToken cancellationToken = default)
+    public void Cancel()
     {
-        LogHandleMessages(request.ContentCase);
-
-        switch (request.ContentCase)
-        {
-            case RapidRequest.ContentOneofCase.FastRoundPhase2BMessage:
-                HandleFastRoundProposal(request.FastRoundPhase2BMessage);
-                break;
-            case RapidRequest.ContentOneofCase.Phase1AMessage:
-                _paxos.HandlePhase1aMessage(request.Phase1AMessage, cancellationToken);
-                break;
-            case RapidRequest.ContentOneofCase.Phase1BMessage:
-                _paxos.HandlePhase1bMessage(request.Phase1BMessage, cancellationToken);
-                break;
-            case RapidRequest.ContentOneofCase.Phase2AMessage:
-                _paxos.HandlePhase2aMessage(request.Phase2AMessage, cancellationToken);
-                break;
-            case RapidRequest.ContentOneofCase.Phase2BMessage:
-                _paxos.HandlePhase2bMessage(request.Phase2BMessage);
-                break;
-            default:
-                LogUnexpectedMessageCase(request.ContentCase);
-                throw new ArgumentException($"Unexpected message case: {request.ContentCase}");
-        }
-
-        return RapidUtils.ToRapidResponse(new ConsensusResponse());
-    }
-
-    /// <summary>
-    /// Random expovariate variable plus a base delay.
-    /// </summary>
-    private TimeSpan GetRandomDelay()
-    {
-        var jitter = (long)(-1000 * Math.Log(1 - _sharedResources.NextRandomDouble()) / _jitterRate);
-        var totalDelay = TimeSpan.FromMilliseconds(jitter + (long)_options.ConsensusFallbackTimeoutBaseDelay.TotalMilliseconds);
-        LogRandomDelay(jitter, totalDelay);
-        return totalDelay;
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0)
-        {
-            return; // Already disposed
-        }
-
-        LogDispose();
-        await _scheduledClassicRoundCts.CancelAsync();
-        _scheduledClassicRoundCts.Dispose();
-        if (_classicRoundTask is { } task)
-        {
-            await task.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
-        }
-
-        _onDecidedTcs.TrySetCanceled();
+        _resultTcs.TrySetResult(new FastRoundResult(FastRoundStatus.Cancelled));
     }
 }

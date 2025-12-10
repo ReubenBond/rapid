@@ -27,7 +27,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     private readonly Dictionary<Endpoint, Metadata> _joinerMetadata = [];
     private readonly IMessagingClient _messagingClient;
     private readonly MetadataManager _metadataManager;
-    private readonly IFastPaxosFactory _fastPaxosFactory;
+    private readonly IConsensusCoordinatorFactory _consensusCoordinatorFactory;
     private MembershipView _membershipView;
 
     // Event subscriptions (IAsyncEnumerable-based using Orleans pattern)
@@ -46,7 +46,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     private readonly Lock _membershipUpdateLock = new();
     private readonly RapidProtocolOptions _options;
     private bool _announcedProposal;
-    private FastPaxos _fastPaxosInstance;
+    private ConsensusCoordinator _consensusInstance;
 
     // View change accessor for publishing updates
     private readonly MembershipViewAccessor _viewAccessor;
@@ -153,7 +153,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     [LoggerMessage(Level = LogLevel.Debug, Message = "HandleBatchedAlertMessage: implicit edge invalidation returned {Count} proposals")]
     private partial void LogImplicitEdgeInvalidation(int Count);
 
-    [LoggerMessage(Level = LogLevel.Debug, Message = "HandleConsensusMessages: forwarding to FastPaxos instance")]
+    [LoggerMessage(Level = LogLevel.Debug, Message = "HandleConsensusMessages: forwarding to ConsensusCoordinator instance")]
     private partial void LogHandleConsensusMessages();
 
     [LoggerMessage(Level = LogLevel.Trace, Message = "HandleProbeMessage: responding to probe")]
@@ -195,8 +195,8 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     [LoggerMessage(Level = LogLevel.Debug, Message = "CreateFailureDetectorsForCurrentConfiguration: skipping, this node is no longer in the ring")]
     private partial void LogSkippingFailureDetectorsNotInRing();
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "FastPaxos Decided task faulted")]
-    private partial void LogFastPaxosDecidedFaulted(Exception ex);
+    [LoggerMessage(Level = LogLevel.Warning, Message = "ConsensusCoordinator Decided task faulted")]
+    private partial void LogConsensusDecidedFaulted(Exception ex);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "EdgeFailureNotification: scheduling callback for subject {Subject}, configId={ConfigId}")]
     private partial void LogEdgeFailureNotificationScheduled(LoggableEndpoint Subject, long ConfigId);
@@ -207,8 +207,8 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     [LoggerMessage(Level = LogLevel.Debug, Message = "Dispose: disposing MembershipService resources")]
     private partial void LogDispose();
 
-    [LoggerMessage(Level = LogLevel.Debug, Message = "FastPaxos decided continuation skipped due to shutdown")]
-    private partial void LogFastPaxosDecidedSkippedShutdown();
+    [LoggerMessage(Level = LogLevel.Debug, Message = "ConsensusCoordinator decided continuation skipped due to shutdown")]
+    private partial void LogConsensusDecidedSkippedShutdown();
 
     private readonly struct LoggableRingNumbers(IEnumerable<int> ringNumbers)
     {
@@ -225,12 +225,12 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
         IMessagingClient messagingClient,
         IBroadcaster broadcaster,
         IEdgeFailureDetectorFactory edgeFailureDetector,
-        IFastPaxosFactory fastPaxosFactory,
+        IConsensusCoordinatorFactory consensusCoordinatorFactory,
         ICutDetectorFactory cutDetectorFactory,
         MembershipViewAccessor viewAccessor,
         ILogger<MembershipService> logger)
         : this(myAddr, cutDetection, membershipView, sharedResources, options, messagingClient,
-              broadcaster, edgeFailureDetector, fastPaxosFactory, cutDetectorFactory, viewAccessor, [], logger)
+              broadcaster, edgeFailureDetector, consensusCoordinatorFactory, cutDetectorFactory, viewAccessor, [], logger)
     {
     }
 
@@ -239,7 +239,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
                             IOptions<RapidProtocolOptions> options, IMessagingClient messagingClient,
                             IBroadcaster broadcaster,
                             IEdgeFailureDetectorFactory edgeFailureDetector,
-                            IFastPaxosFactory fastPaxosFactory,
+                            IConsensusCoordinatorFactory consensusCoordinatorFactory,
                             ICutDetectorFactory cutDetectorFactory,
                             MembershipViewAccessor viewAccessor,
                             Dictionary<Endpoint, Metadata> metadataMap,
@@ -256,7 +256,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
         _messagingClient = messagingClient;
         _broadcaster = broadcaster;
         _fdFactory = edgeFailureDetector;
-        _fastPaxosFactory = fastPaxosFactory;
+        _consensusCoordinatorFactory = consensusCoordinatorFactory;
         _viewAccessor = viewAccessor;
         _logger = logger;
         _sendQueue = Channel.CreateUnbounded<AlertMessage>();
@@ -270,8 +270,8 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
         // to an observer is marked faulty.
 
         // Prepare consensus instance
-        _fastPaxosInstance = _fastPaxosFactory.Create(_myAddr, _membershipView.ConfigurationId, _membershipView.Size, _broadcaster);
-        RegisterFastPaxosDecidedContinuation(_fastPaxosInstance);
+        _consensusInstance = _consensusCoordinatorFactory.Create(_myAddr, _membershipView.ConfigurationId, _membershipView.Size, _broadcaster);
+        RegisterConsensusDecidedContinuation(_consensusInstance);
 
         CreateFailureDetectorsForCurrentConfiguration();
 
@@ -500,7 +500,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
 
                     PublishEvent(ClusterEvents.ViewChangeProposal, clusterStatusChange);
 
-                    _fastPaxosInstance.Propose(proposalList, cancellationToken);
+                    _consensusInstance.Propose(proposalList, cancellationToken);
                 }
             }
 
@@ -516,7 +516,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     private RapidResponse HandleConsensusMessages(RapidRequest request, CancellationToken cancellationToken)
     {
         LogHandleConsensusMessages();
-        _fastPaxosInstance.HandleMessages(request, cancellationToken);
+        _consensusInstance.HandleMessages(request, cancellationToken);
         return RapidUtils.ToRapidResponse(new ConsensusResponse());
     }
 
@@ -550,10 +550,10 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     {
         LogDecideViewChange(proposal.Count);
 
-        FastPaxos previousPaxosInstance;
+        ConsensusCoordinator previousConsensusInstance;
         lock (_membershipUpdateLock)
         {
-            previousPaxosInstance = _fastPaxosInstance;
+            previousConsensusInstance = _consensusInstance;
             _announcedProposal = false;
 
             // Track nodes that were added so we can notify their joiners after ALL nodes are processed
@@ -653,8 +653,8 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
             _failureDetectors.Clear();
 
             LogDecideViewChangeCleanup();
-            _fastPaxosInstance = _fastPaxosFactory.Create(_myAddr, _membershipView.ConfigurationId, _membershipView.Size, _broadcaster);
-            RegisterFastPaxosDecidedContinuation(_fastPaxosInstance);
+            _consensusInstance = _consensusCoordinatorFactory.Create(_myAddr, _membershipView.ConfigurationId, _membershipView.Size, _broadcaster);
+            RegisterConsensusDecidedContinuation(_consensusInstance);
 
             // Inform EdgeFailureDetector about membership change
             CreateFailureDetectorsForCurrentConfiguration();
@@ -669,7 +669,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
             PublishEvent(ClusterEvents.ViewChange, clusterStatusChange);
         }
 
-        await previousPaxosInstance.DisposeAsync();
+        await previousConsensusInstance.DisposeAsync();
     }
 
     /// <summary>
@@ -954,16 +954,16 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     }
 
     /// <summary>
-    /// Registers a continuation on FastPaxos.Decided that handles the result and checks for shutdown.
+    /// Registers a continuation on ConsensusCoordinator.Decided that handles the result and checks for shutdown.
     /// The continuation is tracked as a background task to ensure proper cleanup during shutdown.
     /// </summary>
-    private void RegisterFastPaxosDecidedContinuation(FastPaxos fastPaxosInstance)
+    private void RegisterConsensusDecidedContinuation(ConsensusCoordinator consensusInstance)
     {
-        var continuationTask = fastPaxosInstance.Decided.ContinueWith(async decision =>
+        var continuationTask = consensusInstance.Decided.ContinueWith(async decision =>
         {
             if (decision.IsFaulted)
             {
-                LogFastPaxosDecidedFaulted(decision.Exception!);
+                LogConsensusDecidedFaulted(decision.Exception!);
                 return;
             }
 
@@ -989,7 +989,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
         // The SharedResources.WaitForBackgroundTasksAsync handles this
         await Task.CompletedTask.ConfigureAwait(false);
 
-        await _fastPaxosInstance.DisposeAsync();
+        await _consensusInstance.DisposeAsync();
     }
 
     /// <summary>
@@ -1004,6 +1004,6 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
 
         LogDispose();
         Shutdown();
-        _fastPaxosInstance.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        _consensusInstance.DisposeAsync().AsTask().GetAwaiter().GetResult();
     }
 }

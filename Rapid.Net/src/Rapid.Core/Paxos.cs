@@ -119,7 +119,12 @@ internal sealed partial class Paxos
     private Rank _crnd;
     private List<Endpoint> _cval = [];
 
-    private readonly TaskCompletionSource<List<Endpoint>> _completion;
+    private readonly TaskCompletionSource<List<Endpoint>> _decidedTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>
+    /// Task that completes when classic Paxos consensus is reached.
+    /// </summary>
+    public Task<List<Endpoint>> Decided => _decidedTcs.Task;
 
     // Fast round votes tracking
     private readonly Dictionary<List<Endpoint>, int> _fastRoundVotes = new(ListEndpointComparer.Instance);
@@ -130,7 +135,6 @@ internal sealed partial class Paxos
         int membershipSize,
         IMessagingClient client,
         IBroadcaster broadcaster,
-        TaskCompletionSource<List<Endpoint>> completion,
         ILogger<Paxos> logger)
     {
         _myAddr = myAddr;
@@ -138,7 +142,6 @@ internal sealed partial class Paxos
         _membershipSize = membershipSize;
         _broadcaster = broadcaster;
         _client = client;
-        _completion = completion;
         _logger = logger;
 
         _crnd = new Rank { Round = 0, NodeIndex = 0 };
@@ -195,7 +198,7 @@ internal sealed partial class Paxos
             return;
         }
 
-        if (_completion.Task.IsCompleted)
+        if (_decidedTcs.Task.IsCompleted)
         {
             return; // Already decided
         }
@@ -390,7 +393,7 @@ internal sealed partial class Paxos
         if (acceptResponses.Count >= majorityThreshold)
         {
             var endpoints = new List<Endpoint>(phase2bMessage.Endpoints);
-            if (_completion.TrySetResult(endpoints))
+            if (_decidedTcs.TrySetResult(endpoints))
             {
                 LogDecidedValue(new LoggableEndpoints(endpoints));
             }
@@ -466,5 +469,13 @@ internal sealed partial class Paxos
             .Where(m => m.Vval.Count > 0)
             .Select(m => m.Vval.ToList())
             .FirstOrDefault() ?? [];
+    }
+
+    /// <summary>
+    /// Cancel classic Paxos (e.g., when coordinator is disposed).
+    /// </summary>
+    public void Cancel()
+    {
+        _decidedTcs.TrySetCanceled();
     }
 }

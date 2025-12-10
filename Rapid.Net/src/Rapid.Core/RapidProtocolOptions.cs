@@ -79,6 +79,12 @@ public sealed class RapidProtocolOptions
     public TimeSpan ConsensusFallbackTimeoutBaseDelay { get; set; } = TimeSpan.FromMilliseconds(500);
 
     /// <summary>
+    /// Maximum number of consensus rounds to attempt before giving up. Default: 10.
+    /// Each round uses exponential backoff with jitter.
+    /// </summary>
+    public int MaxConsensusRounds { get; set; } = 10;
+
+    /// <summary>
     /// Timeout for leave messages. Default: 1.5 seconds
     /// </summary>
     public TimeSpan LeaveMessageTimeout { get; set; } = TimeSpan.FromMilliseconds(1500);

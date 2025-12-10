@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Rapid.Pb;
 
 namespace Rapid;
@@ -16,10 +18,11 @@ namespace Rapid;
 /// 
 /// A new instance is created for each view, so no Clear() method is needed.
 /// </summary>
-internal sealed class SimpleCutDetector : ICutDetector
+internal sealed partial class SimpleCutDetector : ICutDetector
 {
     private readonly int _requiredVotes;
     private readonly MembershipView _membershipView;
+    private readonly ILogger<SimpleCutDetector> _logger;
     private readonly Lock _lock = new();
     private int _proposalCount;
     private readonly Dictionary<Endpoint, Dictionary<int, Endpoint>> _reportsPerHost = [];
@@ -27,13 +30,47 @@ internal sealed class SimpleCutDetector : ICutDetector
     private readonly HashSet<Endpoint> _alreadyProposed = [];
     private bool _seenLinkDownEvents;
 
+    private readonly struct LoggableEndpoint(Endpoint endpoint)
+    {
+        private readonly Endpoint _endpoint = endpoint;
+        public override readonly string ToString() => RapidUtils.Loggable(_endpoint);
+    }
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "SimpleCutDetector created: requiredVotes={RequiredVotes}, membershipSize={MembershipSize}")]
+    private partial void LogCreated(int RequiredVotes, int MembershipSize);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "AggregateForProposal: src={Src}, dst={Dst}, status={Status}, ringNumber={RingNumber}")]
+    private partial void LogAggregate(LoggableEndpoint Src, LoggableEndpoint Dst, EdgeStatus Status, int RingNumber);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "AggregateForProposal: duplicate report for dst={Dst}, ringNumber={RingNumber}, ignoring")]
+    private partial void LogDuplicateReport(LoggableEndpoint Dst, int RingNumber);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "AggregateForProposal: dst={Dst} now has {NumReports}/{RequiredVotes} reports")]
+    private partial void LogReportCount(LoggableEndpoint Dst, int NumReports, int RequiredVotes);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "AggregateForProposal: dst={Dst} reached threshold, adding to pending proposals")]
+    private partial void LogAddedToPending(LoggableEndpoint Dst);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "AggregateForProposal: proposing view change for dst={Dst} (reports={NumReports})")]
+    private partial void LogProposal(LoggableEndpoint Dst, int NumReports);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "AggregateForProposal: dst={Dst} already proposed, skipping")]
+    private partial void LogAlreadyProposed(LoggableEndpoint Dst);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "InvalidateFailingEdges: checking {Count} pending proposals, seenLinkDownEvents={SeenDown}")]
+    private partial void LogInvalidateStart(int Count, bool SeenDown);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "InvalidateFailingEdges: implicit edge between observer={Observer} and nodeInFlux={NodeInFlux}")]
+    private partial void LogImplicitEdge(LoggableEndpoint Observer, LoggableEndpoint NodeInFlux);
+
     /// <summary>
     /// Creates a SimpleCutDetector for small clusters.
     /// </summary>
     /// <param name="observersPerSubject">Number of observers per subject (1 or 2)</param>
     /// <param name="membershipView">The current membership view for observer lookups</param>
+    /// <param name="logger">Optional logger for diagnostic output</param>
     /// <exception cref="ArgumentException">If observersPerSubject is not 1 or 2</exception>
-    public SimpleCutDetector(int observersPerSubject, MembershipView membershipView)
+    public SimpleCutDetector(int observersPerSubject, MembershipView membershipView, ILogger<SimpleCutDetector>? logger = null)
     {
         if (observersPerSubject < 1 || observersPerSubject > 2)
         {
@@ -45,9 +82,12 @@ internal sealed class SimpleCutDetector : ICutDetector
         ArgumentNullException.ThrowIfNull(membershipView);
 
         _membershipView = membershipView;
+        _logger = logger ?? NullLogger<SimpleCutDetector>.Instance;
         // For K=1: require 1 vote (the only observer)
         // For K=2: require 2 votes (both observers must agree)
         _requiredVotes = observersPerSubject;
+
+        LogCreated(_requiredVotes, membershipView.Size);
     }
 
     public int GetNumProposals()
@@ -78,6 +118,8 @@ internal sealed class SimpleCutDetector : ICutDetector
         // while this detector may be using effectiveK (1 or 2) for small clusters.
         // We just count unique votes per ring number.
 
+        LogAggregate(new LoggableEndpoint(linkSrc), new LoggableEndpoint(linkDst), edgeStatus, ringNumber);
+
         lock (_lock)
         {
             if (edgeStatus == EdgeStatus.Down)
@@ -93,15 +135,18 @@ internal sealed class SimpleCutDetector : ICutDetector
 
             if (!reportsForHost.TryAdd(ringNumber, linkSrc))
             {
+                LogDuplicateReport(new LoggableEndpoint(linkDst), ringNumber);
                 return []; // duplicate announcement, ignore.
             }
 
             var numReportsForHost = reportsForHost.Count;
+            LogReportCount(new LoggableEndpoint(linkDst), numReportsForHost, _requiredVotes);
 
             // Track nodes that have at least one report (for edge invalidation)
             if (numReportsForHost == 1 && _requiredVotes > 1)
             {
                 _pendingProposals.Add(linkDst);
+                LogAddedToPending(new LoggableEndpoint(linkDst));
             }
 
             if (numReportsForHost >= _requiredVotes)
@@ -111,7 +156,12 @@ internal sealed class SimpleCutDetector : ICutDetector
                 if (_alreadyProposed.Add(linkDst))
                 {
                     _proposalCount++;
+                    LogProposal(new LoggableEndpoint(linkDst), numReportsForHost);
                     return [linkDst];
+                }
+                else
+                {
+                    LogAlreadyProposed(new LoggableEndpoint(linkDst));
                 }
             }
 
@@ -123,6 +173,8 @@ internal sealed class SimpleCutDetector : ICutDetector
     {
         lock (_lock)
         {
+            LogInvalidateStart(_pendingProposals.Count, _seenLinkDownEvents);
+
             // Link invalidation is only required when we have failing nodes
             if (!_seenLinkDownEvents)
             {
@@ -145,6 +197,7 @@ internal sealed class SimpleCutDetector : ICutDetector
                     // Check if the observer itself has reports (meaning it may be failing)
                     if (_reportsPerHost.ContainsKey(observer))
                     {
+                        LogImplicitEdge(new LoggableEndpoint(observer), new LoggableEndpoint(nodeInFlux));
                         // Implicit detection of edges between observer and nodeInFlux
                         var edgeStatus = _membershipView.IsHostPresent(nodeInFlux) ? EdgeStatus.Down : EdgeStatus.Up;
                         proposalsToReturn.AddRange(AggregateForProposal(observer, nodeInFlux, edgeStatus, ringNumber));

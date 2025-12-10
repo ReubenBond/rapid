@@ -6,20 +6,20 @@ using Rapid.Pb;
 namespace Rapid;
 
 /// <summary>
-/// Factory for creating FastPaxos instances.
-/// This exists because FastPaxos instances are created per consensus round and need runtime configuration.
+/// Factory for creating ConsensusCoordinator instances.
+/// This exists because ConsensusCoordinator instances are created per consensus round and need runtime configuration.
 /// </summary>
-internal interface IFastPaxosFactory
+internal interface IConsensusCoordinatorFactory
 {
     /// <summary>
-    /// Creates a new FastPaxos instance for a consensus round.
+    /// Creates a new ConsensusCoordinator instance for a consensus round.
     /// </summary>
     /// <param name="myAddr">The local endpoint.</param>
     /// <param name="configurationId">The current configuration ID.</param>
     /// <param name="membershipSize">The current membership size.</param>
     /// <param name="broadcaster">The broadcaster to use for message distribution.</param>
-    /// <returns>A new FastPaxos instance.</returns>
-    FastPaxos Create(
+    /// <returns>A new ConsensusCoordinator instance.</returns>
+    ConsensusCoordinator Create(
         Endpoint myAddr,
         long configurationId,
         int membershipSize,
@@ -27,22 +27,23 @@ internal interface IFastPaxosFactory
 }
 
 /// <summary>
-/// Default implementation of IFastPaxosFactory.
+/// Default implementation of IConsensusCoordinatorFactory.
 /// </summary>
-internal sealed class FastPaxosFactory(
+internal sealed class ConsensusCoordinatorFactory(
     IMessagingClient messagingClient,
     IOptions<RapidProtocolOptions> protocolOptions,
     SharedResources sharedResources,
+    ILogger<ConsensusCoordinator> coordinatorLogger,
     ILogger<FastPaxos> fastPaxosLogger,
-    ILogger<Paxos> paxosLogger) : IFastPaxosFactory
+    ILogger<Paxos> paxosLogger) : IConsensusCoordinatorFactory
 {
-    public FastPaxos Create(
+    public ConsensusCoordinator Create(
         Endpoint myAddr,
         long configurationId,
         int membershipSize,
         IBroadcaster broadcaster)
     {
-        return new FastPaxos(
+        return new ConsensusCoordinator(
             myAddr,
             configurationId,
             membershipSize,
@@ -50,6 +51,7 @@ internal sealed class FastPaxosFactory(
             broadcaster,
             protocolOptions,
             sharedResources,
+            coordinatorLogger,
             fastPaxosLogger,
             paxosLogger);
     }

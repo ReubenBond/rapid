@@ -158,6 +158,13 @@ internal sealed class SimulationNetwork
     /// </summary>
     internal DeliveryStatus CheckDelivery(string sourceAddress, string targetAddress)
     {
+        // Self-messages (loopback) are always delivered reliably.
+        // In real networks, loopback communication doesn't go through the network.
+        if (string.Equals(sourceAddress, targetAddress, StringComparison.Ordinal))
+        {
+            return DeliveryStatus.Success;
+        }
+
         // Check for network partition first (persistent)
         lock (_partitionLock)
         {
