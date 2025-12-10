@@ -64,4 +64,9 @@ public sealed class RapidProtocolOptions
     /// Low watermark threshold for multi-node cut detection. Default: 4
     /// </summary>
     public int LowWaterMark { get; set; } = 4;
+
+    /// <summary>
+    /// Number of consecutive probe failures required before declaring a node down. Default: 3
+    /// </summary>
+    public int FailureDetectorConsecutiveFailures { get; set; } = 3;
 }

@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Rapid.Messaging;
+using Rapid.Monitoring;
 using Rapid.Pb;
 
 namespace Rapid.Tests.Simulation;
@@ -15,7 +16,7 @@ internal sealed class SimulationNode : IDisposable
     private readonly SimulationHarness _harness;
     private readonly NodeSimulationContext _context;
     private readonly SharedResources _sharedResources;
-    private readonly SimulationFailureDetectorFactory _failureDetectorFactory;
+    private readonly PingPongFailureDetectorFactory _failureDetectorFactory;
     private readonly IFastPaxosFactory _fastPaxosFactory;
     private readonly MembershipViewAccessor _viewAccessor;
     private readonly IOptions<RapidProtocolOptions> _protocolOptions;
@@ -99,12 +100,13 @@ internal sealed class SimulationNode : IDisposable
         _viewAccessor = new MembershipViewAccessor();
 
         // Create failure detector factory
-        var failureDetectorLogger = factory?.CreateLogger<SimulationFailureDetector>()
-            ?? NullLogger<SimulationFailureDetector>.Instance;
-        _failureDetectorFactory = new SimulationFailureDetectorFactory(
+        var failureDetectorLogger = factory?.CreateLogger<PingPongFailureDetector>()
+            ?? NullLogger<PingPongFailureDetector>.Instance;
+        _failureDetectorFactory = new PingPongFailureDetectorFactory(
             address,
             MessagingClient,
             _sharedResources,
+            _protocolOptions,
             failureDetectorLogger);
 
         // Create fast paxos factory

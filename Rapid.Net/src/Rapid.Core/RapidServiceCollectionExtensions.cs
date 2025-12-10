@@ -66,10 +66,11 @@ public static class RapidServiceCollectionExtensions
         services.AddSingleton<IEdgeFailureDetectorFactory>(sp =>
         {
             var options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<RapidOptions>>().Value;
+            var protocolOptions = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<RapidProtocolOptions>>();
             var client = sp.GetRequiredService<IMessagingClient>();
             var sharedResources = sp.GetRequiredService<SharedResources>();
             var logger = sp.GetRequiredService<ILogger<PingPongFailureDetector>>();
-            return new PingPongFailureDetectorFactory(options.ListenAddress, client, sharedResources, logger);
+            return new PingPongFailureDetectorFactory(options.ListenAddress, client, sharedResources, protocolOptions, logger);
         });
 
         // Register FastPaxos factory

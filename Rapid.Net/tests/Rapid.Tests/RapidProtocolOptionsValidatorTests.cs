@@ -385,6 +385,57 @@ public class RapidProtocolOptionsValidatorTests
 
     #endregion
 
+    #region FailureDetectorConsecutiveFailures Validation
+
+    [Fact]
+    public void ValidateFailureDetectorConsecutiveFailuresZeroFails()
+    {
+        var options = CreateValidOptions();
+        options.FailureDetectorConsecutiveFailures = 0;
+
+        var result = _validator.Validate(null, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains("FailureDetectorConsecutiveFailures", result.FailureMessage, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ValidateFailureDetectorConsecutiveFailuresNegativeFails()
+    {
+        var options = CreateValidOptions();
+        options.FailureDetectorConsecutiveFailures = -1;
+
+        var result = _validator.Validate(null, options);
+
+        Assert.True(result.Failed);
+        Assert.Contains("FailureDetectorConsecutiveFailures", result.FailureMessage, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ValidateFailureDetectorConsecutiveFailuresOneSucceeds()
+    {
+        var options = CreateValidOptions();
+        options.FailureDetectorConsecutiveFailures = 1;
+
+        var result = _validator.Validate(null, options);
+
+        Assert.True(result.Succeeded);
+    }
+
+    [Fact]
+    public void ValidateFailureDetectorConsecutiveFailuresDefaultSucceeds()
+    {
+        var options = CreateValidOptions();
+        // Default is 3
+
+        var result = _validator.Validate(null, options);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(3, options.FailureDetectorConsecutiveFailures);
+    }
+
+    #endregion
+
     #region Combined Validation
 
     [Fact]

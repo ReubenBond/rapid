@@ -69,6 +69,11 @@ internal sealed class RapidProtocolOptionsValidator : IValidateOptions<RapidProt
             return ValidateOptionsResult.Fail("LowWaterMark must be less than HighWaterMark");
         }
 
+        if (options.FailureDetectorConsecutiveFailures <= 0)
+        {
+            return ValidateOptionsResult.Fail("FailureDetectorConsecutiveFailures must be positive");
+        }
+
         return ValidateOptionsResult.Success;
     }
 }
