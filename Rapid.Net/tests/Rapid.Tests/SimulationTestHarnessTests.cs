@@ -139,35 +139,25 @@ public sealed class SimulationTestHarnessTests : IAsyncLifetime
         var seedNode = _harness.CreateSeedNode();
 
         // Start listening for view changes on the seed node
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        var startTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var listenTask = Task.Run(async () =>
         {
-            await foreach (var view in seedNode.ViewAccessor.ListenForViewUpdatesAsync(cts.Token))
+            await foreach (var view in seedNode.ViewAccessor.ListenForViewUpdatesAsync(TestContext.Current.CancellationToken))
             {
+                startTcs.TrySetResult();
                 viewChanges.Add(view);
                 if (viewChanges.Count >= 2)
                 {
                     break;
                 }
             }
-        }, cts.Token);
+
+        }, TestContext.Current.CancellationToken);
 
         // Join a new node
         var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
-
-        // Wait a bit for the view change to propagate
-        await Task.Delay(100, TestContext.Current.CancellationToken);
-
-        // Cancel and wait for listen task
-        await cts.CancelAsync();
-        try
-        {
-            await listenTask;
-        }
-        catch (OperationCanceledException)
-        {
-            // Expected
-        }
+        await startTcs.Task.WaitAsync(TestContext.Current.CancellationToken);
+        await listenTask.WaitAsync(TestContext.Current.CancellationToken);
 
         // Should have received at least one view change (the join)
         Assert.NotEmpty(viewChanges);

@@ -234,7 +234,7 @@ internal sealed class SimulationNode : IDisposable
                     break;
                 }
             }
-            catch (InvalidOperationException ex) when (attempt < maxRetries && IsRetryableJoinError(ex))
+            catch (Exception ex) when (attempt < maxRetries && (ex is TimeoutException || (ex is InvalidOperationException && IsRetryableJoinError(ex))))
             {
                 _logger.LogWarning("Node {Address} join attempt {Attempt} failed: {Message}. Retrying in {Delay}ms",
                     RapidUtils.Loggable(Address), attempt + 1, ex.Message, retryDelay.TotalMilliseconds);

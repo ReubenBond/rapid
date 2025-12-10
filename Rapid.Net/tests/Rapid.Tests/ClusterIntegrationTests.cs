@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Microsoft.AspNetCore.Builder;
+using Rapid.Tests.Simulation;
 
 namespace Rapid.Tests;
 
@@ -9,74 +10,40 @@ namespace Rapid.Tests;
 public sealed class ClusterIntegrationTests(ITestOutputHelper outputHelper) : IAsyncDisposable
 {
     private readonly TestCluster _cluster = new(outputHelper);
-    private readonly List<CancellationTokenSource> _subscriptionCts = [];
+    private readonly List<AsyncEnumerablePoller<ClusterEventNotification>> _pollers = [];
 
     public async ValueTask DisposeAsync()
     {
-        // Cancel all subscriptions
-        foreach (var cts in _subscriptionCts)
+        foreach (var poller in _pollers)
         {
-            await cts.CancelAsync();
-            cts.Dispose();
+            await poller.DisposeAsync();
         }
-        _subscriptionCts.Clear();
+        _pollers.Clear();
 
         await _cluster.DisposeAsync().ConfigureAwait(true);
         GC.SuppressFinalize(this);
     }
 
     /// <summary>
-    /// Starts consuming events from a cluster's EventStream and adds matching events to the bag.
+    /// Creates an event poller for the cluster's EventStream.
+    /// Use ConsumeCompleted() after waiting for convergence to drain all available events.
     /// </summary>
-    private void StartEventConsumer(IRapidCluster cluster, ClusterEvents eventType, ConcurrentBag<ClusterStatusChange> bag)
+    private AsyncEnumerablePoller<ClusterEventNotification> CreateEventPoller(IRapidCluster cluster)
     {
-        var cts = new CancellationTokenSource();
-        _subscriptionCts.Add(cts);
-
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await foreach (var notification in cluster.EventStream.WithCancellation(cts.Token))
-                {
-                    if (notification.Event == eventType)
-                    {
-                        bag.Add(notification.Change);
-                    }
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                // Expected during cleanup
-            }
-        }, cts.Token);
+        var poller = new AsyncEnumerablePoller<ClusterEventNotification>(cluster.EventStream);
+        _pollers.Add(poller);
+        return poller;
     }
 
     /// <summary>
-    /// Starts consuming events and invokes an action for each matching event.
+    /// Drains all available events from the poller and collects matching events into the bag.
     /// </summary>
-    private void StartEventConsumer(IRapidCluster cluster, ClusterEvents eventType, Action<ClusterStatusChange> action)
+    private static void CollectEvents(AsyncEnumerablePoller<ClusterEventNotification> poller, ClusterEvents eventType, ConcurrentBag<ClusterStatusChange> bag)
     {
-        var cts = new CancellationTokenSource();
-        _subscriptionCts.Add(cts);
-
-        _ = Task.Run(async () =>
+        foreach (var notification in poller.ConsumeCompleted().Where(n => n.Event == eventType))
         {
-            try
-            {
-                await foreach (var notification in cluster.EventStream.WithCancellation(cts.Token))
-                {
-                    if (notification.Event == eventType)
-                    {
-                        action(notification.Change);
-                    }
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                // Expected during cleanup
-            }
-        }, cts.Token);
+            bag.Add(notification.Change);
+        }
     }
 
     /// <summary>
@@ -153,14 +120,17 @@ public sealed class ClusterIntegrationTests(ITestOutputHelper outputHelper) : IA
 
         var viewChanges = new ConcurrentBag<ClusterStatusChange>();
 
-        // Create seed and start consuming events
+        // Create seed and start polling events
         var (seedApp, seed) = await _cluster.CreateSeedNodeAsync(seedAddress, TestContext.Current.CancellationToken);
-        StartEventConsumer(seed, ClusterEvents.ViewChange, viewChanges);
+        var poller = CreateEventPoller(seed);
 
         var (joinerApp, joiner) = await _cluster.CreateJoinerNodeAsync(joinerAddress, seedAddress, TestContext.Current.CancellationToken);
 
         // Wait for cluster convergence
         await TestCluster.WaitForClusterSizeAsync(seed, 2, TimeSpan.FromSeconds(10)).ConfigureAwait(true);
+
+        // Drain events and collect view changes
+        CollectEvents(poller, ClusterEvents.ViewChange, viewChanges);
 
         // Should have received at least one view change event
         Assert.True(viewChanges.Count > 0);
@@ -288,14 +258,17 @@ public sealed class ClusterIntegrationTests(ITestOutputHelper outputHelper) : IA
 
         var proposals = new ConcurrentBag<ClusterStatusChange>();
 
-        // Create seed and start consuming proposal events
+        // Create seed and start polling proposal events
         var (seedApp, seed) = await _cluster.CreateSeedNodeAsync(seedAddress, TestContext.Current.CancellationToken);
-        StartEventConsumer(seed, ClusterEvents.ViewChangeProposal, proposals);
+        var poller = CreateEventPoller(seed);
 
         var (joinerApp, joiner) = await _cluster.CreateJoinerNodeAsync(joinerAddress, seedAddress, TestContext.Current.CancellationToken);
 
         // Wait for cluster convergence
         await TestCluster.WaitForClusterSizeAsync(seed, 2, TimeSpan.FromSeconds(10)).ConfigureAwait(true);
+
+        // Drain events and collect proposals
+        CollectEvents(poller, ClusterEvents.ViewChangeProposal, proposals);
 
         // Should have received proposal events
         Assert.True(proposals.Count > 0);
@@ -474,26 +447,25 @@ public sealed class ClusterIntegrationTests(ITestOutputHelper outputHelper) : IA
         var seedAddress = Utils.HostFromParts("127.0.0.1", _cluster.GetNextPort());
         var joinerAddress = Utils.HostFromParts("127.0.0.1", _cluster.GetNextPort());
 
-        var callbackCount1 = 0;
-        var callbackCount2 = 0;
-        var callbackCount3 = 0;
-
         var (seedApp, seed) = await _cluster.CreateSeedNodeAsync(seedAddress, TestContext.Current.CancellationToken);
 
-        // Start three separate consumers
-        StartEventConsumer(seed, ClusterEvents.ViewChange, _ => Interlocked.Increment(ref callbackCount1));
-        StartEventConsumer(seed, ClusterEvents.ViewChange, _ => Interlocked.Increment(ref callbackCount2));
-        StartEventConsumer(seed, ClusterEvents.ViewChange, _ => Interlocked.Increment(ref callbackCount3));
+        // Start three separate pollers
+        var poller1 = CreateEventPoller(seed);
+        var poller2 = CreateEventPoller(seed);
+        var poller3 = CreateEventPoller(seed);
 
         var (joinerApp, joiner) = await _cluster.CreateJoinerNodeAsync(joinerAddress, seedAddress, TestContext.Current.CancellationToken);
 
         await TestCluster.WaitForClusterSizeAsync(seed, 2, TimeSpan.FromSeconds(10)).ConfigureAwait(true);
 
-        await Task.Delay(500, TestContext.Current.CancellationToken);
+        // Drain events from all pollers
+        var count1 = poller1.ConsumeCompleted().Count(n => n.Event == ClusterEvents.ViewChange);
+        var count2 = poller2.ConsumeCompleted().Count(n => n.Event == ClusterEvents.ViewChange);
+        var count3 = poller3.ConsumeCompleted().Count(n => n.Event == ClusterEvents.ViewChange);
 
-        Assert.True(callbackCount1 > 0);
-        Assert.True(callbackCount2 > 0);
-        Assert.True(callbackCount3 > 0);
+        Assert.True(count1 > 0);
+        Assert.True(count2 > 0);
+        Assert.True(count3 > 0);
     }
 
     [Fact]
@@ -502,18 +474,21 @@ public sealed class ClusterIntegrationTests(ITestOutputHelper outputHelper) : IA
         var seedAddress = Utils.HostFromParts("127.0.0.1", _cluster.GetNextPort());
         var joinerAddress = Utils.HostFromParts("127.0.0.1", _cluster.GetNextPort());
 
-        ClusterStatusChange? lastChange = null;
-
         var (seedApp, seed) = await _cluster.CreateSeedNodeAsync(seedAddress, TestContext.Current.CancellationToken);
-        StartEventConsumer(seed, ClusterEvents.ViewChange, change => lastChange = change);
+        var poller = CreateEventPoller(seed);
 
         var (joinerApp, joiner) = await _cluster.CreateJoinerNodeAsync(joinerAddress, seedAddress, TestContext.Current.CancellationToken);
 
         await TestCluster.WaitForClusterSizeAsync(seed, 2, TimeSpan.FromSeconds(10)).ConfigureAwait(true);
 
-        await Task.Delay(500, TestContext.Current.CancellationToken);
+        // Drain events and find view changes
+        var viewChanges = poller.ConsumeCompleted()
+            .Where(n => n.Event == ClusterEvents.ViewChange)
+            .Select(n => n.Change)
+            .ToList();
 
-        Assert.NotNull(lastChange);
+        Assert.NotEmpty(viewChanges);
+        var lastChange = viewChanges.Last();
         Assert.True(lastChange.Membership.Count >= 2);
     }
 
@@ -527,16 +502,18 @@ public sealed class ClusterIntegrationTests(ITestOutputHelper outputHelper) : IA
         var seedAddress = Utils.HostFromParts("127.0.0.1", _cluster.GetNextPort());
         var joinerAddress = Utils.HostFromParts("127.0.0.1", _cluster.GetNextPort());
 
-        var configIds = new ConcurrentBag<long>();
-
         var (seedApp, seed) = await _cluster.CreateSeedNodeAsync(seedAddress, TestContext.Current.CancellationToken);
-        StartEventConsumer(seed, ClusterEvents.ViewChange, change => configIds.Add(change.ConfigurationId));
+        var poller = CreateEventPoller(seed);
 
         var (joinerApp, joiner) = await _cluster.CreateJoinerNodeAsync(joinerAddress, seedAddress, TestContext.Current.CancellationToken);
 
         await TestCluster.WaitForClusterSizeAsync(seed, 2, TimeSpan.FromSeconds(10)).ConfigureAwait(true);
 
-        await Task.Delay(500, TestContext.Current.CancellationToken);
+        // Drain events and collect config IDs from view changes
+        var configIds = poller.ConsumeCompleted()
+            .Where(n => n.Event == ClusterEvents.ViewChange)
+            .Select(n => n.Change.ConfigurationId)
+            .ToList();
 
         Assert.NotEmpty(configIds);
     }
@@ -579,16 +556,15 @@ public sealed class ClusterIntegrationTests(ITestOutputHelper outputHelper) : IA
         var seedAddress = Utils.HostFromParts("127.0.0.1", _cluster.GetNextPort());
         var joinerAddress = Utils.HostFromParts("127.0.0.1", _cluster.GetNextPort());
 
-        var viewChangeCount = 0;
-
         var (seedApp, seed) = await _cluster.CreateSeedNodeAsync(seedAddress, TestContext.Current.CancellationToken);
-        StartEventConsumer(seed, ClusterEvents.ViewChange, _ => Interlocked.Increment(ref viewChangeCount));
+        var poller = CreateEventPoller(seed);
 
         var (joinerApp, joiner) = await _cluster.CreateJoinerNodeAsync(joinerAddress, seedAddress, TestContext.Current.CancellationToken);
 
         await TestCluster.WaitForClusterSizeAsync(seed, 2, TimeSpan.FromSeconds(10)).ConfigureAwait(true);
 
-        await Task.Delay(500, TestContext.Current.CancellationToken);
+        // Drain events and count view changes
+        var viewChangeCount = poller.ConsumeCompleted().Count(n => n.Event == ClusterEvents.ViewChange);
 
         Assert.True(viewChangeCount > 0);
     }
