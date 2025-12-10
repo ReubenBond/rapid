@@ -30,4 +30,27 @@ internal static class Utils
         var low = BitConverter.ToInt64(bytes, 8);
         return new NodeId { High = high, Low = low };
     }
+
+    /// <summary>
+    /// Creates a MembershipView with the specified number of nodes and K value.
+    /// Useful for cut detector tests that need a view for InvalidateFailingEdges.
+    /// </summary>
+    public static MembershipView CreateMembershipView(int numNodes, int k = 10)
+    {
+        var builder = new MembershipViewBuilder(k);
+        for (var i = 0; i < numNodes; i++)
+        {
+            var node = HostFromParts("127.0.0." + (i + 1), 1000 + i);
+            builder.RingAdd(node, NodeIdFromUuid(Guid.NewGuid()));
+        }
+        return builder.Build();
+    }
+
+    /// <summary>
+    /// Creates an empty MembershipView with the specified K value.
+    /// </summary>
+    public static MembershipView CreateEmptyMembershipView(int k = 10)
+    {
+        return new MembershipViewBuilder(k).Build();
+    }
 }

@@ -92,6 +92,25 @@ public sealed class AsyncEnumerablePoller<T> : IAsyncDisposable
         _stopped = true;
 
         await _cts.CancelAsync().ConfigureAwait(false);
+        
+        // Observe any pending MoveNextAsync to prevent unobserved task exceptions.
+        // The task may complete with cancellation or other exceptions after we cancel.
+        if (_pendingMoveNext is not null)
+        {
+            try
+            {
+                await _pendingMoveNext.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected when cancellation token is triggered
+            }
+            catch (ObjectDisposedException)
+            {
+                // Expected when the underlying enumerable is disposed
+            }
+        }
+        
         await _enumerator.DisposeAsync().ConfigureAwait(false);
         _cts.Dispose();
     }

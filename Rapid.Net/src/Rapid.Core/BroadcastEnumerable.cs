@@ -157,9 +157,14 @@ internal sealed class BroadcastEnumerable<T> : IAsyncEnumerable<T>, IDisposable
 
         public static Element CreateDisposed()
         {
+            // Use a self-referential completed task instead of an exception.
+            // This avoids unobserved task exceptions when no one awaits NextAsync()
+            // on the disposed element. The IsDisposed check in MoveNextAsync prevents
+            // any subscriber from actually calling NextAsync() on a disposed element.
             var tcs = new TaskCompletionSource<Element>(TaskCreationOptions.RunContinuationsAsynchronously);
-            tcs.SetException(new ObjectDisposedException(nameof(BroadcastEnumerable<T>)));
-            return new Element(DisposedValue, tcs);
+            var disposed = new Element(DisposedValue, tcs);
+            tcs.SetResult(disposed); // Self-referential: NextAsync returns itself
+            return disposed;
         }
 
         public bool IsValid => !IsInitial && !IsDisposed;

@@ -2,6 +2,25 @@ using Rapid.Pb;
 
 namespace Rapid;
 
+/// <summary>
+/// Comparer for individual Endpoint instances that delegates to Endpoint.CompareTo.
+/// Used with SortedSet to ensure consistent ordering across nodes.
+/// </summary>
+internal sealed class EndpointComparer : IComparer<Endpoint>
+{
+    public static readonly EndpointComparer Instance = new();
+
+    private EndpointComparer() { }
+
+    public int Compare(Endpoint? x, Endpoint? y)
+    {
+        if (ReferenceEquals(x, y)) return 0;
+        if (x is null) return -1;
+        if (y is null) return 1;
+        return x.CompareTo(y);
+    }
+}
+
 internal sealed class ListEndpointComparer : IEqualityComparer<List<Endpoint>>
 {
     public static readonly ListEndpointComparer Instance = new();
