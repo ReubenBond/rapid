@@ -14,7 +14,7 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
 {
     private SimulationHarness _harness = null!;
     private const int TestSeed = 67890;
-    private readonly List<AsyncEnumerablePoller<ClusterEventNotification>> _consumers = [];
+    private readonly List<BroadcastEnumerable<ClusterEventNotification>.PollableEnumerator> _consumers = [];
 
     public ValueTask InitializeAsync()
     {
@@ -22,23 +22,23 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         return ValueTask.CompletedTask;
     }
 
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         foreach (var consumer in _consumers)
         {
-            await consumer.DisposeAsync().ConfigureAwait(false);
+            consumer.Dispose();
         }
         _consumers.Clear();
 
-        await _harness.DisposeAsync();
+        return _harness.DisposeAsync();
     }
 
     /// <summary>
     /// Creates an event consumer for the node and registers it for cleanup during disposal.
     /// </summary>
-    private AsyncEnumerablePoller<ClusterEventNotification> CreateEventConsumer(SimulationNode node)
+    private BroadcastEnumerable<ClusterEventNotification>.PollableEnumerator CreateEventConsumer(SimulationNode node)
     {
-        var consumer = new AsyncEnumerablePoller<ClusterEventNotification>(node.EventStream);
+        var consumer = node.GetPollableEventEnumerator();
         _consumers.Add(consumer);
         return consumer;
     }
@@ -46,10 +46,10 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
     /// <summary>
     /// Drains all available events from the consumer and counts ViewChange events.
     /// </summary>
-    private static int CountViewChangeEvents(AsyncEnumerablePoller<ClusterEventNotification> consumer)
+    private static int CountViewChangeEvents(BroadcastEnumerable<ClusterEventNotification>.PollableEnumerator consumer)
     {
         var count = 0;
-        while (consumer.Poll() is { } notification)
+        while (consumer.TryGetNext(out var notification))
         {
             if (notification.Event == ClusterEvents.ViewChange)
             {
@@ -62,10 +62,10 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
     /// <summary>
     /// Drains all available events from the consumer and collects membership sizes from ViewChange events.
     /// </summary>
-    private static List<int> CollectViewChangeMembershipSizes(AsyncEnumerablePoller<ClusterEventNotification> consumer)
+    private static List<int> CollectViewChangeMembershipSizes(BroadcastEnumerable<ClusterEventNotification>.PollableEnumerator consumer)
     {
         var sizes = new List<int>();
-        while (consumer.Poll() is { } notification)
+        while (consumer.TryGetNext(out var notification))
         {
             if (notification.Event == ClusterEvents.ViewChange)
             {

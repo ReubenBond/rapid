@@ -424,6 +424,23 @@ internal sealed class SimulationNode : IDisposable
         _membershipService?.EventStream ?? throw new InvalidOperationException("Membership service has not been initialized.");
 
     /// <summary>
+    /// Gets a pollable enumerator for synchronously consuming events in simulation tests.
+    /// Unlike <see cref="EventStream"/>, this enumerator never awaits asynchronously.
+    /// It only advances when the next item is immediately available.
+    /// </summary>
+    /// <param name="cancellationToken">Optional cancellation token.</param>
+    /// <returns>A pollable enumerator.</returns>
+    public BroadcastEnumerable<ClusterEventNotification>.PollableEnumerator GetPollableEventEnumerator(
+        CancellationToken cancellationToken = default)
+    {
+        if (_membershipService is null)
+        {
+            throw new InvalidOperationException("Membership service has not been initialized.");
+        }
+        return _membershipService.GetPollableEventEnumerator(cancellationToken);
+    }
+
+    /// <summary>
     /// Gracefully leaves the cluster.
     /// </summary>
     public async Task LeaveAsync()
