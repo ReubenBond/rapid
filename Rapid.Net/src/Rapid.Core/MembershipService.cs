@@ -30,8 +30,8 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     private readonly IConsensusCoordinatorFactory _consensusCoordinatorFactory;
     private MembershipView _membershipView;
 
-    // Event subscriptions (IAsyncEnumerable-based using Orleans pattern)
-    private readonly BroadcastEnumerable<ClusterEventNotification> _eventBroadcaster = new();
+    // Event subscriptions (IAsyncEnumerable and IObservable-based using BroadcastChannel)
+    private readonly BroadcastChannel<ClusterEventNotification> _eventChannel;
 
     // Fields used by batching logic.
     private readonly Channel<AlertMessage> _sendQueue;
@@ -300,6 +300,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
         _viewAccessor = viewAccessor;
         _logger = logger;
         _sendQueue = Channel.CreateUnbounded<AlertMessage>();
+        _eventChannel = new BroadcastChannel<ClusterEventNotification>();
 
         // Configure the failure detector factory to detect when this node has been kicked
         if (edgeFailureDetector is PingPongFailureDetectorFactory pingPongFactory)
@@ -791,7 +792,13 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     /// Gets the async enumerable for subscribing to cluster events.
     /// Each subscriber receives all events published after they start iterating.
     /// </summary>
-    public IAsyncEnumerable<ClusterEventNotification> EventStream => _eventBroadcaster;
+    public IAsyncEnumerable<ClusterEventNotification> EventStream => _eventChannel.Reader;
+
+    /// <summary>
+    /// Gets the observable for subscribing to cluster events.
+    /// Multiple subscribers receive the same events through multicast.
+    /// </summary>
+    public IObservable<ClusterEventNotification> Events => _eventChannel.Reader;
 
     /// <summary>
     /// Gets the list of endpoints currently in the membership view.
@@ -819,8 +826,8 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
         LogShutdown();
         _viewAccessor.Complete();
 
-        // Dispose the event broadcaster to signal completion to all subscribers
-        _eventBroadcaster.Dispose();
+        // Dispose the event channel to signal completion to all subscribers
+        _eventChannel.Dispose();
 
         foreach (var fd in _failureDetectors)
         {
@@ -986,14 +993,14 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     }
 
     /// <summary>
-    /// Publishes a cluster event to all subscribers via the broadcaster.
+    /// Publishes a cluster event to all subscribers via the channel.
     /// </summary>
     /// <param name="evt">The cluster event type.</param>
     /// <param name="statusChange">The cluster status change details.</param>
     private void PublishEvent(ClusterEvents evt, ClusterStatusChange statusChange)
     {
         var notification = new ClusterEventNotification(evt, statusChange);
-        _eventBroadcaster.TryPublish(notification);
+        _eventChannel.Writer.TryPublish(notification);
     }
 
     /// <summary>

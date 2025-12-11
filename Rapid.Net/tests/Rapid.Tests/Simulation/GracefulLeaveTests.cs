@@ -14,7 +14,7 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
 {
     private SimulationHarness _harness = null!;
     private const int TestSeed = 67890;
-    private readonly List<AsyncEnumerablePoller<ClusterEventNotification>> _consumers = [];
+    private readonly List<ObservableCollector<ClusterEventNotification>> _collectors = [];
 
     public ValueTask InitializeAsync()
     {
@@ -24,35 +24,35 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
 
     public async ValueTask DisposeAsync()
     {
-        foreach (var consumer in _consumers)
+        foreach (var collector in _collectors)
         {
-            await consumer.DisposeAsync().ConfigureAwait(true);
+            collector.Dispose();
         }
-        _consumers.Clear();
+        _collectors.Clear();
 
         await _harness.DisposeAsync().ConfigureAwait(true);
     }
 
     /// <summary>
-    /// Creates an event consumer for the node and registers it for cleanup during disposal.
+    /// Creates an event collector for the node and registers it for cleanup during disposal.
     /// </summary>
-    private AsyncEnumerablePoller<ClusterEventNotification> CreateEventConsumer(SimulationNode node)
+    private ObservableCollector<ClusterEventNotification> CreateEventCollector(SimulationNode node)
     {
-        var consumer = new AsyncEnumerablePoller<ClusterEventNotification>(node.EventStream);
-        _consumers.Add(consumer);
-        return consumer;
+        var collector = new ObservableCollector<ClusterEventNotification>(node.Events);
+        _collectors.Add(collector);
+        return collector;
     }
 
     /// <summary>
-    /// Drains all available events from the consumer and counts ViewChange events.
+    /// Counts ViewChange events in the collector.
     /// </summary>
-    private static int CountViewChangeEvents(AsyncEnumerablePoller<ClusterEventNotification> consumer) => consumer.ConsumeCompleted().Where(n => n.Event == ClusterEvents.ViewChange).Count();
+    private static int CountViewChangeEvents(ObservableCollector<ClusterEventNotification> collector) => collector.Items.Where(n => n.Event == ClusterEvents.ViewChange).Count();
 
     /// <summary>
-    /// Drains all available events from the consumer and collects membership sizes from ViewChange events.
+    /// Collects membership sizes from ViewChange events in the collector.
     /// </summary>
-    private static List<int> CollectViewChangeMembershipSizes(AsyncEnumerablePoller<ClusterEventNotification> consumer)
-        => [.. consumer.ConsumeCompleted().Where(n => n.Event == ClusterEvents.ViewChange).Select(n => n.Change.Membership.Count)];
+    private static List<int> CollectViewChangeMembershipSizes(ObservableCollector<ClusterEventNotification> collector)
+        => [.. collector.Items.Where(n => n.Event == ClusterEvents.ViewChange).Select(n => n.Change.Membership.Count)];
 
     #region Basic Graceful Leave (LEAVE-001 to LEAVE-005)
 
@@ -264,14 +264,14 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         var nodes = _harness.CreateCluster(size: 3);
         _harness.WaitForConvergence(expectedSize: 3);
 
-        var consumer = CreateEventConsumer(nodes[0]);
+        var collector = CreateEventCollector(nodes[0]);
 
         // Act: One node gracefully leaves
         _harness.RemoveNodeGracefully(nodes[2]);
         _harness.WaitForConvergence(expectedSize: 2);
 
         // Assert: ViewChange events were emitted
-        var viewChangeCount = CountViewChangeEvents(consumer);
+        var viewChangeCount = CountViewChangeEvents(collector);
         Assert.True(viewChangeCount >= 1, "Membership changed callback should be invoked");
     }
 
@@ -282,11 +282,11 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         var nodes = _harness.CreateCluster(size: 4);
         _harness.WaitForConvergence(expectedSize: 4);
 
-        var consumers = new[]
+        var collectors = new[]
         {
-            CreateEventConsumer(nodes[0]),
-            CreateEventConsumer(nodes[1]),
-            CreateEventConsumer(nodes[2])
+            CreateEventCollector(nodes[0]),
+            CreateEventCollector(nodes[1]),
+            CreateEventCollector(nodes[2])
         };
 
         // Act: Node 3 gracefully leaves
@@ -294,7 +294,7 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 3);
 
         // Assert: All remaining nodes received notification
-        var viewChangeCounts = consumers.Select(CountViewChangeEvents).ToArray();
+        var viewChangeCounts = collectors.Select(CountViewChangeEvents).ToArray();
         Assert.All(viewChangeCounts, count => Assert.True(count >= 1));
     }
 
@@ -305,7 +305,7 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         var nodes = _harness.CreateCluster(size: 4);
         _harness.WaitForConvergence(expectedSize: 4);
 
-        var consumer = CreateEventConsumer(nodes[0]);
+        var collector = CreateEventCollector(nodes[0]);
 
         // Act: Two nodes leave
         _harness.RemoveNodeGracefully(nodes[3]);
@@ -315,7 +315,7 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 2);
 
         // Assert: Observed sizes should include 3 and 2
-        var observedSizes = CollectViewChangeMembershipSizes(consumer);
+        var observedSizes = CollectViewChangeMembershipSizes(collector);
         Assert.Contains(3, observedSizes);
         Assert.Contains(2, observedSizes);
     }

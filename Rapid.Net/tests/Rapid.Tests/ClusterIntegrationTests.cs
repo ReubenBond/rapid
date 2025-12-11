@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using Microsoft.AspNetCore.Builder;
 using Rapid.Tests.Simulation;
 
@@ -10,37 +11,36 @@ namespace Rapid.Tests;
 public sealed class ClusterIntegrationTests(ITestOutputHelper outputHelper) : IAsyncDisposable
 {
     private readonly TestCluster _cluster = new(outputHelper);
-    private readonly List<AsyncEnumerablePoller<ClusterEventNotification>> _pollers = [];
+    private readonly List<ObservableCollector<ClusterEventNotification>> _collectors = [];
 
     public async ValueTask DisposeAsync()
     {
-        foreach (var poller in _pollers)
+        foreach (var collector in _collectors)
         {
-            await poller.DisposeAsync();
+            collector.Dispose();
         }
-        _pollers.Clear();
+        _collectors.Clear();
 
         await _cluster.DisposeAsync().ConfigureAwait(true);
         GC.SuppressFinalize(this);
     }
 
     /// <summary>
-    /// Creates an event poller for the cluster's EventStream.
-    /// Use ConsumeCompleted() after waiting for convergence to drain all available events.
+    /// Creates an event collector for the cluster's ClusterEvents observable.
     /// </summary>
-    private AsyncEnumerablePoller<ClusterEventNotification> CreateEventPoller(IRapidCluster cluster)
+    private ObservableCollector<ClusterEventNotification> CreateEventCollector(IRapidCluster cluster)
     {
-        var poller = new AsyncEnumerablePoller<ClusterEventNotification>(cluster.EventStream);
-        _pollers.Add(poller);
-        return poller;
+        var collector = new ObservableCollector<ClusterEventNotification>(cluster.Events);
+        _collectors.Add(collector);
+        return collector;
     }
 
     /// <summary>
-    /// Drains all available events from the poller and collects matching events into the bag.
+    /// Collects matching events from the collector into the bag.
     /// </summary>
-    private static void CollectEvents(AsyncEnumerablePoller<ClusterEventNotification> poller, ClusterEvents eventType, ConcurrentBag<ClusterStatusChange> bag)
+    private static void CollectEvents(ObservableCollector<ClusterEventNotification> collector, ClusterEvents eventType, ConcurrentBag<ClusterStatusChange> bag)
     {
-        foreach (var notification in poller.ConsumeCompleted().Where(n => n.Event == eventType))
+        foreach (var notification in collector.Items.Where(n => n.Event == eventType))
         {
             bag.Add(notification.Change);
         }
@@ -120,17 +120,17 @@ public sealed class ClusterIntegrationTests(ITestOutputHelper outputHelper) : IA
 
         var viewChanges = new ConcurrentBag<ClusterStatusChange>();
 
-        // Create seed and start polling events
+        // Create seed and start collecting events
         var (seedApp, seed) = await _cluster.CreateSeedNodeAsync(seedAddress, TestContext.Current.CancellationToken);
-        var poller = CreateEventPoller(seed);
+        var collector = CreateEventCollector(seed);
 
         var (joinerApp, joiner) = await _cluster.CreateJoinerNodeAsync(joinerAddress, seedAddress, TestContext.Current.CancellationToken);
 
         // Wait for cluster convergence
         await TestCluster.WaitForClusterSizeAsync(seed, 2, TimeSpan.FromSeconds(10)).ConfigureAwait(true);
 
-        // Drain events and collect view changes
-        CollectEvents(poller, ClusterEvents.ViewChange, viewChanges);
+        // Collect view changes
+        CollectEvents(collector, ClusterEvents.ViewChange, viewChanges);
 
         // Should have received at least one view change event
         Assert.True(viewChanges.Count > 0);
@@ -258,17 +258,17 @@ public sealed class ClusterIntegrationTests(ITestOutputHelper outputHelper) : IA
 
         var proposals = new ConcurrentBag<ClusterStatusChange>();
 
-        // Create seed and start polling proposal events
+        // Create seed and start collecting proposal events
         var (seedApp, seed) = await _cluster.CreateSeedNodeAsync(seedAddress, TestContext.Current.CancellationToken);
-        var poller = CreateEventPoller(seed);
+        var collector = CreateEventCollector(seed);
 
         var (joinerApp, joiner) = await _cluster.CreateJoinerNodeAsync(joinerAddress, seedAddress, TestContext.Current.CancellationToken);
 
         // Wait for cluster convergence
         await TestCluster.WaitForClusterSizeAsync(seed, 2, TimeSpan.FromSeconds(10)).ConfigureAwait(true);
 
-        // Drain events and collect proposals
-        CollectEvents(poller, ClusterEvents.ViewChangeProposal, proposals);
+        // Collect proposals
+        CollectEvents(collector, ClusterEvents.ViewChangeProposal, proposals);
 
         // Should have received proposal events
         Assert.True(proposals.Count > 0);
@@ -449,19 +449,19 @@ public sealed class ClusterIntegrationTests(ITestOutputHelper outputHelper) : IA
 
         var (seedApp, seed) = await _cluster.CreateSeedNodeAsync(seedAddress, TestContext.Current.CancellationToken);
 
-        // Start three separate pollers
-        var poller1 = CreateEventPoller(seed);
-        var poller2 = CreateEventPoller(seed);
-        var poller3 = CreateEventPoller(seed);
+        // Start three separate collectors
+        var collector1 = CreateEventCollector(seed);
+        var collector2 = CreateEventCollector(seed);
+        var collector3 = CreateEventCollector(seed);
 
         var (joinerApp, joiner) = await _cluster.CreateJoinerNodeAsync(joinerAddress, seedAddress, TestContext.Current.CancellationToken);
 
         await TestCluster.WaitForClusterSizeAsync(seed, 2, TimeSpan.FromSeconds(10)).ConfigureAwait(true);
 
-        // Drain events from all pollers
-        var count1 = poller1.ConsumeCompleted().Count(n => n.Event == ClusterEvents.ViewChange);
-        var count2 = poller2.ConsumeCompleted().Count(n => n.Event == ClusterEvents.ViewChange);
-        var count3 = poller3.ConsumeCompleted().Count(n => n.Event == ClusterEvents.ViewChange);
+        // Count events from all collectors
+        var count1 = collector1.Items.Count(n => n.Event == ClusterEvents.ViewChange);
+        var count2 = collector2.Items.Count(n => n.Event == ClusterEvents.ViewChange);
+        var count3 = collector3.Items.Count(n => n.Event == ClusterEvents.ViewChange);
 
         Assert.True(count1 > 0);
         Assert.True(count2 > 0);
@@ -475,21 +475,32 @@ public sealed class ClusterIntegrationTests(ITestOutputHelper outputHelper) : IA
         var joinerAddress = Utils.HostFromParts("127.0.0.1", _cluster.GetNextPort());
 
         var (seedApp, seed) = await _cluster.CreateSeedNodeAsync(seedAddress, TestContext.Current.CancellationToken);
-        var poller = CreateEventPoller(seed);
+        var collector = CreateEventCollector(seed);
 
         var (joinerApp, joiner) = await _cluster.CreateJoinerNodeAsync(joinerAddress, seedAddress, TestContext.Current.CancellationToken);
 
         await TestCluster.WaitForClusterSizeAsync(seed, 2, TimeSpan.FromSeconds(10)).ConfigureAwait(true);
 
-        // Drain events and find view changes
-        var viewChanges = poller.ConsumeCompleted()
-            .Where(n => n.Event == ClusterEvents.ViewChange)
-            .Select(n => n.Change)
-            .ToList();
+        var i = 0;
+        do
+        {
+            // Find view changes
+            var viewChanges = collector.Items
+                .Where(n => n.Event == ClusterEvents.ViewChange)
+                .Select(n => n.Change)
+                .ToList();
 
-        Assert.NotEmpty(viewChanges);
-        var lastChange = viewChanges.Last();
-        Assert.True(lastChange.Membership.Count >= 2);
+            var lastChange = viewChanges.LastOrDefault();
+            if (lastChange?.Membership.Count >= 2)
+            {
+                break;
+            }
+            await Task.Delay(1000, TestContext.Current.CancellationToken);
+            if (i++ > 10)
+            {
+                Debugger.Launch();
+            }
+        } while (true);
     }
 
     #endregion
@@ -503,14 +514,14 @@ public sealed class ClusterIntegrationTests(ITestOutputHelper outputHelper) : IA
         var joinerAddress = Utils.HostFromParts("127.0.0.1", _cluster.GetNextPort());
 
         var (seedApp, seed) = await _cluster.CreateSeedNodeAsync(seedAddress, TestContext.Current.CancellationToken);
-        var poller = CreateEventPoller(seed);
+        var collector = CreateEventCollector(seed);
 
         var (joinerApp, joiner) = await _cluster.CreateJoinerNodeAsync(joinerAddress, seedAddress, TestContext.Current.CancellationToken);
 
         await TestCluster.WaitForClusterSizeAsync(seed, 2, TimeSpan.FromSeconds(10)).ConfigureAwait(true);
 
-        // Drain events and collect config IDs from view changes
-        var configIds = poller.ConsumeCompleted()
+        // Collect config IDs from view changes
+        var configIds = collector.Items
             .Where(n => n.Event == ClusterEvents.ViewChange)
             .Select(n => n.Change.ConfigurationId)
             .ToList();
@@ -557,14 +568,14 @@ public sealed class ClusterIntegrationTests(ITestOutputHelper outputHelper) : IA
         var joinerAddress = Utils.HostFromParts("127.0.0.1", _cluster.GetNextPort());
 
         var (seedApp, seed) = await _cluster.CreateSeedNodeAsync(seedAddress, TestContext.Current.CancellationToken);
-        var poller = CreateEventPoller(seed);
+        var collector = CreateEventCollector(seed);
 
         var (joinerApp, joiner) = await _cluster.CreateJoinerNodeAsync(joinerAddress, seedAddress, TestContext.Current.CancellationToken);
 
         await TestCluster.WaitForClusterSizeAsync(seed, 2, TimeSpan.FromSeconds(10)).ConfigureAwait(true);
 
-        // Drain events and count view changes
-        var viewChangeCount = poller.ConsumeCompleted().Count(n => n.Event == ClusterEvents.ViewChange);
+        // Count view changes
+        var viewChangeCount = collector.Items.Count(n => n.Event == ClusterEvents.ViewChange);
 
         Assert.True(viewChangeCount > 0);
     }

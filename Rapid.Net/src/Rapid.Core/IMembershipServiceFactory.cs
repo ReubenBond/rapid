@@ -13,12 +13,10 @@ internal interface IMembershipServiceFactory
     /// Creates a MembershipService instance for starting a new cluster.
     /// </summary>
     /// <param name="localEndpoint">The local endpoint for this node.</param>
-    /// <param name="nodeId">The unique node identifier.</param>
     /// <param name="metadata">The node's metadata.</param>
     /// <returns>A new MembershipService instance.</returns>
     MembershipService CreateForNewCluster(
         Endpoint localEndpoint,
-        NodeId nodeId,
         Metadata metadata);
 
     /// <summary>

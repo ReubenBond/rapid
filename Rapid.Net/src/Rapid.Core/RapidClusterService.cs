@@ -80,17 +80,13 @@ internal sealed partial class RapidClusterService(
 
     private void StartCluster()
     {
-        var currentIdentifier = RapidUtils.NodeIdFromUuid(sharedResources.NewGuid());
-
         MembershipService = membershipServiceFactory.CreateForNewCluster(
             _options.ListenAddress,
-            currentIdentifier,
             _options.Metadata);
     }
 
     private async Task JoinClusterAsync(CancellationToken cancellationToken)
     {
-        var currentIdentifier = RapidUtils.NodeIdFromUuid(sharedResources.NewGuid());
         var maxRetries = _protocolOptions.GrpcDefaultRetries;
         var retryDelay = _protocolOptions.JoinRetryBaseDelay;
         JoinResponse? successfulResponse = null;
@@ -99,7 +95,7 @@ internal sealed partial class RapidClusterService(
         {
             try
             {
-                successfulResponse = await TryJoinClusterAsync(currentIdentifier, cancellationToken).ConfigureAwait(true);
+                successfulResponse = await TryJoinClusterAsync(cancellationToken).ConfigureAwait(true);
                 if (successfulResponse != null)
                 {
                     break;
@@ -143,22 +139,37 @@ internal sealed partial class RapidClusterService(
     }
 
     /// <summary>
-    /// Attempts a single join operation. Returns the successful JoinResponse or null/throws if retry is needed.
+    /// Attempts a single join operation. Generates a new NodeId and handles UUID collisions internally.
     /// </summary>
-    private async Task<JoinResponse?> TryJoinClusterAsync(NodeId currentIdentifier, CancellationToken cancellationToken)
+    private async Task<JoinResponse?> TryJoinClusterAsync(CancellationToken cancellationToken)
     {
-        // Phase 1: Contact seed for observers
-        var preJoinMessage = new PreJoinMessage
-        {
-            Sender = _options.ListenAddress,
-            NodeId = currentIdentifier
-        };
+        var currentIdentifier = RapidUtils.NodeIdFromUuid(sharedResources.NewGuid());
 
-        var preJoinResponse = await messagingClient.SendMessageAsync(
-            _options.SeedAddress!,
-            RapidUtils.ToRapidRequest(preJoinMessage),
-            cancellationToken).ConfigureAwait(true);
-        var joinResponse = preJoinResponse.JoinResponse;
+        // Phase 1: Contact seed for observers (with retry on UUID collision)
+        JoinResponse joinResponse;
+        while (true)
+        {
+            var preJoinMessage = new PreJoinMessage
+            {
+                Sender = _options.ListenAddress,
+                NodeId = currentIdentifier
+            };
+
+            var preJoinResponse = await messagingClient.SendMessageAsync(
+                _options.SeedAddress!,
+                RapidUtils.ToRapidRequest(preJoinMessage),
+                cancellationToken).ConfigureAwait(true);
+            joinResponse = preJoinResponse.JoinResponse;
+
+            if (joinResponse.StatusCode == JoinStatusCode.UuidAlreadyInRing)
+            {
+                // UUID collision - generate a new identifier and retry (matches Java behavior)
+                currentIdentifier = RapidUtils.NodeIdFromUuid(sharedResources.NewGuid());
+                continue;
+            }
+
+            break;
+        }
 
         if (joinResponse.StatusCode != JoinStatusCode.SafeToJoin &&
             joinResponse.StatusCode != JoinStatusCode.HostnameAlreadyInRing)

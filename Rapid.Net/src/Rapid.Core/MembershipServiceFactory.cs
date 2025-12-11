@@ -23,10 +23,10 @@ internal sealed class MembershipServiceFactory(
 {
     public MembershipService CreateForNewCluster(
         Endpoint localEndpoint,
-        NodeId nodeId,
         Metadata metadata)
     {
         var opts = protocolOptions.Value;
+        var nodeId = RapidUtils.NodeIdFromUuid(sharedResources.NewGuid());
         
         // For a new cluster starting with 1 node, use configured K for rings
         // but cut detector needs effective values based on cluster size

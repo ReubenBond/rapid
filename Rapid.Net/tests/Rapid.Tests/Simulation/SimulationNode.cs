@@ -463,6 +463,13 @@ internal sealed class SimulationNode : IAsyncDisposable, IDisposable
         _membershipService?.EventStream ?? throw new InvalidOperationException("Membership service has not been initialized.");
 
     /// <summary>
+    /// Gets the observable for subscribing to cluster events.
+    /// Multiple subscribers receive the same events through multicast.
+    /// </summary>
+    public IObservable<ClusterEventNotification> Events =>
+        _membershipService?.Events ?? throw new InvalidOperationException("Membership service has not been initialized.");
+
+    /// <summary>
     /// Gracefully leaves the cluster.
     /// </summary>
     public async Task LeaveAsync()

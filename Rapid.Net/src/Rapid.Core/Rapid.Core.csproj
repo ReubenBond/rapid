@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
 		<Description>Rapid - A distributed membership service for .NET. Fast, scalable, and stable failure detection and membership tracking for cloud-native distributed systems. Port of VMware Research Rapid.</Description>
@@ -24,6 +24,7 @@
 		</PackageReference>
 		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
 		<PackageReference Include="System.IO.Hashing" />
+		<PackageReference Include="System.Reactive" />
 	</ItemGroup>
 
 	<ItemGroup>

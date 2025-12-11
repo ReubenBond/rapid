@@ -31,6 +31,26 @@ public interface IRapidCluster
     IAsyncEnumerable<ClusterEventNotification> EventStream { get; }
 
     /// <summary>
+    /// Gets the observable for subscribing to cluster events.
+    /// Multiple subscribers receive the same events through multicast.
+    /// This is equivalent to using <see cref="EventStream"/> with Rx.NET's Publish() operator,
+    /// but built-in to the channel implementation for convenience.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Unlike <see cref="EventStream"/>, observable subscribers receive notifications
+    /// synchronously when events are published (via OnNext), making it suitable for
+    /// reactive event processing patterns.
+    /// </para>
+    /// <para>
+    /// The observable inherently supports multiple observers without needing <c>Publish()</c>
+    /// from Rx.NET because the underlying <see cref="BroadcastChannel{T}"/> implementation
+    /// multicasts to all subscribers.
+    /// </para>
+    /// </remarks>
+    IObservable<ClusterEventNotification> Events { get; }
+
+    /// <summary>
     /// Gracefully leaves the cluster.
     /// </summary>
     /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
@@ -48,7 +68,7 @@ public interface IRapidCluster
 /// </summary>
 internal sealed class RapidCluster(RapidClusterService clusterService, IMembershipViewAccessor viewAccessor) : IRapidCluster
 {
-    private static readonly IAsyncEnumerable<ClusterEventNotification> EmptyEventStream = CreateEmpty();
+    private static readonly BroadcastChannel<ClusterEventNotification> EmptyChannel = new();
 
     public IReadOnlyList<Endpoint> GetMemberlist() => viewAccessor.CurrentView.Members;
 
@@ -57,7 +77,10 @@ internal sealed class RapidCluster(RapidClusterService clusterService, IMembersh
     public Dictionary<Endpoint, Metadata> GetClusterMetadata() => clusterService.MembershipService?.GetMetadata() ?? [];
 
     public IAsyncEnumerable<ClusterEventNotification> EventStream
-        => clusterService.MembershipService?.EventStream ?? EmptyEventStream;
+        => clusterService.MembershipService?.EventStream ?? EmptyChannel.Reader;
+
+    public IObservable<ClusterEventNotification> Events
+        => clusterService.MembershipService?.Events ?? EmptyChannel.Reader;
 
     public async Task LeaveGracefullyAsync(CancellationToken cancellationToken = default)
     {
@@ -68,10 +91,4 @@ internal sealed class RapidCluster(RapidClusterService clusterService, IMembersh
     }
 
     public IMembershipViewAccessor ViewAccessor => viewAccessor;
-
-    private static async IAsyncEnumerable<ClusterEventNotification> CreateEmpty()
-    {
-        await Task.CompletedTask.ConfigureAwait(true);
-        yield break;
-    }
 }
