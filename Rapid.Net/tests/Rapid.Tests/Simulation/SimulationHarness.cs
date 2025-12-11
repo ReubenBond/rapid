@@ -473,7 +473,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
 
                 // Start the join but don't wait - this allows batching
                 var joinTask = node.JoinClusterAsync(seedNode);
-                
+
                 batchNodes.Add(node);
                 joinTasks.Add(joinTask);
                 _nodes.Add(node);
@@ -611,7 +611,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
         var endingConfigVersion = remainingNodes[0].CurrentView.ConfigurationId.Version;
         var configChanges = (int)(endingConfigVersion - startingConfigVersion);
 
-        LogEvent(SimulationEventType.NodeLeft, 
+        LogEvent(SimulationEventType.NodeLeft,
             $"Parallel leave completed: {nodesToRemove.Count} nodes removed in {configChanges} configuration changes");
 
         return configChanges;
@@ -782,7 +782,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
         foreach (var node in _nodes)
         {
             if (_nodeContexts.TryGetValue(node, out var context) &&
-                context.State == NodeSimulationState.Running && 
+                context.State == NodeSimulationState.Running &&
                 context.Step())
             {
                 return true;

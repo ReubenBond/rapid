@@ -25,7 +25,7 @@ internal interface ICutDetector
     /// <param name="msg">An AlertMessage to apply against the detector</param>
     /// <returns>A list of endpoints about which a view change has been recorded. Empty list if there is no proposal.</returns>
     List<Endpoint> AggregateForProposal(AlertMessage msg);
-    
+
     /// <summary>
     /// Apply a single ring's report from an AlertMessage against the cut detector.
     /// This allows callers to control the order of ring processing across multiple

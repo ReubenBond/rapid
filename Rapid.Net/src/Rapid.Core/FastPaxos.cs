@@ -74,7 +74,7 @@ internal sealed partial class FastPaxos
 
     private readonly TaskCompletionSource<ConsensusResult> _resultTcs = new();
     private CancellationTokenRegistration _cancellationRegistration;
-    
+
     /// <summary>
     /// Task that completes when fast round finishes (either success or failure).
     /// </summary>
@@ -95,7 +95,7 @@ internal sealed partial class FastPaxos
 
         LogFastPaxosInitialized(new LoggableEndpoint(myAddr), configurationId, membershipSize);
     }
-    
+
     /// <summary>
     /// Register a timeout cancellation token that will complete the result task with Cancelled.
     /// This should be called when starting the fast round to set up the timeout.

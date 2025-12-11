@@ -97,13 +97,13 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
         Assert.Equal(clusterSize, nodes.Count);
         Assert.All(nodes, n => Assert.True(n.IsInitialized));
         Assert.All(nodes, n => Assert.Equal(clusterSize, n.MembershipSize));
-        
+
         // Verify batching occurred - should have significantly fewer config changes than nodes
         var finalConfigId = nodes[0].CurrentView.ConfigurationId;
         var configChanges = finalConfigId.Version - 1;
         var nodesJoined = clusterSize - 1;
         var avgNodesPerChange = (double)nodesJoined / configChanges;
-        
+
         Assert.True(configChanges <= maxExpectedChanges,
             $"Expected at most {maxExpectedChanges} configuration changes for {clusterSize} nodes, " +
             $"but got {configChanges}. Average nodes per change: {avgNodesPerChange:F1}. " +
@@ -162,16 +162,16 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
 
         // Get the final configuration ID which represents the number of view changes
         var finalConfigId = nodes[0].CurrentView.ConfigurationId;
-        
+
         // The configuration version starts at 1 for the seed node, so the number of
         // configuration changes (view changes) is version - 1
         var configChanges = finalConfigId.Version - 1;
         var nodesJoined = clusterSize - 1; // Excluding seed node
         var avgNodesPerChange = (double)nodesJoined / configChanges;
-        
+
         // Log membership transitions summary
         LogBatchingSummary("ParallelJoins", clusterSize, configChanges, nodesJoined, avgNodesPerChange);
-        
+
         Assert.True(configChanges <= maxExpectedChanges,
             $"Expected at most {maxExpectedChanges} configuration changes for {clusterSize} nodes, " +
             $"but got {configChanges}. Average nodes per change: {avgNodesPerChange:F1}. " +
@@ -192,7 +192,7 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
         var seedNode = _harness.CreateSeedNode();
         var viewHistory = new List<MembershipView> { seedNode.CurrentView };
         var cancellationToken = TestContext.Current.CancellationToken;
-        
+
         // Subscribe to view changes on the seed node
         var viewCollectionComplete = false;
         var viewCollectionTask = Task.Run(async () =>
@@ -220,7 +220,7 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
         var maxIterations = clusterSize >= 50 ? 500000 : 100000;
         _harness.DriveToCompletion(() => Task.WhenAll(joinTasks), maxIterations);
         _harness.WaitForConvergence(expectedSize: clusterSize, maxIterations: maxIterations);
-        
+
         // Signal view collection is complete and wait for it
         viewCollectionComplete = true;
         _harness.DriveToCompletion(() => viewCollectionTask);
@@ -233,7 +233,7 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
         var configChanges = transitions.Count;
         var nodesJoined = clusterSize - 1;
         var avgNodesPerChange = configChanges > 0 ? (double)nodesJoined / configChanges : 0;
-        
+
         LogBatchingSummary("ParallelJoins (detailed)", clusterSize, configChanges, nodesJoined, avgNodesPerChange);
 
         // Should have fewer config changes than nodes (indicating batching)
@@ -533,7 +533,7 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
 
         // Select nodes to remove (avoiding the seed node at index 0)
         var leavingNodes = nodes.Skip(clusterSize - nodesToRemove).Take(nodesToRemove).ToList();
-        
+
         // Remove nodes in parallel and measure configuration changes
         var configChanges = _harness.RemoveNodesGracefullyParallel(leavingNodes);
 
@@ -541,13 +541,13 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: expectedSize, maxIterations: maxIterationsPerBatch);
 
         Assert.All(_harness.Nodes, n => Assert.Equal(expectedSize, n.MembershipSize));
-        
+
         var avgNodesPerChange = (double)nodesToRemove / configChanges;
-        
+
         // Log membership transitions summary
-        LogBatchingSummary("ParallelLeaves", nodesToRemove, configChanges, nodesToRemove, avgNodesPerChange, 
+        LogBatchingSummary("ParallelLeaves", nodesToRemove, configChanges, nodesToRemove, avgNodesPerChange,
             $"(cluster: {clusterSize} -> {expectedSize})");
-        
+
         Assert.True(configChanges <= maxExpectedChanges,
             $"Expected at most {maxExpectedChanges} configuration changes for removing {nodesToRemove} nodes, " +
             $"but got {configChanges}. Average nodes per change: {avgNodesPerChange:F1}. " +
@@ -619,10 +619,10 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
     /// Logs a summary of batching statistics to the test output.
     /// </summary>
     private static void LogBatchingSummary(
-        string operationType, 
-        int totalNodes, 
-        long configChanges, 
-        int nodesChanged, 
+        string operationType,
+        int totalNodes,
+        long configChanges,
+        int nodesChanged,
         double avgNodesPerChange,
         string? suffix = null)
     {
@@ -638,7 +638,7 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
             sb.AppendLine($"  {suffix}");
         }
         sb.AppendLine($"================================");
-        
+
         TestContext.Current.TestOutputHelper?.WriteLine(sb.ToString());
     }
 
@@ -662,7 +662,7 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
         var sb = new StringBuilder();
         sb.AppendLine();
         sb.AppendLine($"=== {operationType} View Transitions ({transitions.Count} changes) ===");
-        
+
         foreach (var t in transitions)
         {
             sb.AppendLine($"  Version {t.Version}: {t.PreviousSize} -> {t.NewSize} members");
@@ -675,19 +675,19 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
                 sb.AppendLine($"    - Removed ({t.MembersRemoved}): {string.Join(", ", t.RemovedMembers.Take(5))}{(t.MembersRemoved > 5 ? $"... (+{t.MembersRemoved - 5} more)" : "")}");
             }
         }
-        
+
         // Summary statistics
         var totalAdded = transitions.Sum(t => t.MembersAdded);
         var totalRemoved = transitions.Sum(t => t.MembersRemoved);
         var avgAddedPerChange = transitions.Count > 0 ? (double)totalAdded / transitions.Count : 0;
         var avgRemovedPerChange = transitions.Count > 0 ? (double)totalRemoved / transitions.Count : 0;
-        
+
         sb.AppendLine();
         sb.AppendLine($"  Summary:");
         sb.AppendLine($"    Total members added: {totalAdded} (avg {avgAddedPerChange:F1} per change)");
         sb.AppendLine($"    Total members removed: {totalRemoved} (avg {avgRemovedPerChange:F1} per change)");
         sb.AppendLine($"================================");
-        
+
         TestContext.Current.TestOutputHelper?.WriteLine(sb.ToString());
     }
 
@@ -697,18 +697,18 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
     private static List<ViewTransition> ComputeViewTransitions(List<MembershipView> views)
     {
         var transitions = new List<ViewTransition>();
-        
+
         for (var i = 1; i < views.Count; i++)
         {
             var prev = views[i - 1];
             var curr = views[i];
-            
+
             var prevMembers = prev.Members.Select(m => $"{m.Hostname.ToStringUtf8()}:{m.Port}").ToHashSet();
             var currMembers = curr.Members.Select(m => $"{m.Hostname.ToStringUtf8()}:{m.Port}").ToHashSet();
-            
+
             var added = currMembers.Except(prevMembers).ToList();
             var removed = prevMembers.Except(currMembers).ToList();
-            
+
             transitions.Add(new ViewTransition(
                 curr.ConfigurationId.Version,
                 prev.Size,
@@ -718,7 +718,7 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
                 added,
                 removed));
         }
-        
+
         return transitions;
     }
 

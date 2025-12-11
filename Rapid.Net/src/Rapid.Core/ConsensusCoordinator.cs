@@ -33,12 +33,12 @@ internal sealed partial class ConsensusCoordinator : IAsyncDisposable
     // The FastPaxos instance for round 1
     // Created in constructor so it can receive votes before Propose() is called
     private readonly FastPaxos _fastPaxos;
-    
+
     // The Paxos instance for classic rounds (2, 3, ...)
     // Also holds acceptor state shared across all rounds
     // Created in constructor so it can receive messages before Propose() is called
     private readonly Paxos _paxos;
-    
+
     // Synchronization
     private readonly Lock _lock = new();
     private Task? _consensusLoopTask;
@@ -46,7 +46,7 @@ internal sealed partial class ConsensusCoordinator : IAsyncDisposable
 
     // Decision
     private readonly TaskCompletionSource<List<Endpoint>> _onDecidedTcs = new();
-    
+
     /// <summary>
     /// Task that completes when consensus is reached.
     /// </summary>
@@ -173,17 +173,17 @@ internal sealed partial class ConsensusCoordinator : IAsyncDisposable
         {
             // Phase 1: Fast round
             LogStartingFastRound(_coordinatorLogger);
-            
+
             var fastRoundTimeout = GetRandomDelay();
-            
+
             // Create a CancellationTokenSource that times out after the fast round delay.
             // When cancelled, FastPaxos.Result will complete with ConsensusResult.Cancelled.
             using var fastRoundTimeoutCts = new CancellationTokenSource(fastRoundTimeout, _sharedResources.TimeProvider);
             using var fastRoundCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, fastRoundTimeoutCts.Token);
-            
+
             // Register the timeout token with FastPaxos
             _fastPaxos.RegisterTimeoutToken(fastRoundCts.Token);
-            
+
             // Broadcast fast round proposal
             _fastPaxos.Propose(proposal, cancellationToken);
 
@@ -196,12 +196,12 @@ internal sealed partial class ConsensusCoordinator : IAsyncDisposable
                     LogFastRoundDecided(_coordinatorLogger, new LoggableEndpoints(decided.Value));
                     _onDecidedTcs.TrySetResult(decided.Value);
                     return;
-                    
+
                 case ConsensusResult.VoteSplit or ConsensusResult.DeliveryFailure:
                     LogFastRoundFailedEarly(_coordinatorLogger);
                     // Fall through to classic rounds
                     break;
-                    
+
                 case ConsensusResult.Cancelled:
                     if (cancellationToken.IsCancellationRequested)
                     {
@@ -212,7 +212,7 @@ internal sealed partial class ConsensusCoordinator : IAsyncDisposable
                     // Otherwise it was a timeout - fall through to classic rounds
                     LogFastRoundTimeout(_coordinatorLogger, fastRoundTimeout);
                     break;
-                    
+
                 case ConsensusResult.Timeout:
                     LogFastRoundTimeout(_coordinatorLogger, fastRoundTimeout);
                     break;
@@ -274,7 +274,7 @@ internal sealed partial class ConsensusCoordinator : IAsyncDisposable
                 LogClassicRoundTimeout(_coordinatorLogger, roundNumber, delay);
                 roundNumber++;
             }
-            
+
             // Exhausted all rounds without decision
             if (cancellationToken.IsCancellationRequested)
             {

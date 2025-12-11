@@ -18,7 +18,7 @@ internal sealed class SimulationNode : IAsyncDisposable, IDisposable
     private readonly RapidProtocolOptions _protocolOptions;
     private readonly ILoggerFactory? _loggerFactory;
     private readonly ILogger<SimulationNode> _logger;
-    
+
     // These are mutable because they need to be recreated during rejoin
     private SharedResources _sharedResources;
     private PingPongFailureDetectorFactory _failureDetectorFactory;
@@ -314,7 +314,7 @@ internal sealed class SimulationNode : IAsyncDisposable, IDisposable
     {
         // Mark as disposed first to prevent any rejoin attempts (MembershipService checks _disposed)
         _disposed = true;
-        
+
         if (_membershipService != null)
         {
             _logger.LogInformation("Node {Address} shutting down", RapidUtils.Loggable(Address));

@@ -288,7 +288,7 @@ public sealed class JoinProtocolTests : IAsyncLifetime
 
         // Attempting to join should fail because consensus cannot be reached
         // The join will timeout after exhausting retries
-        Assert.Throws<JoinException>(() =>
+        Assert.Throws<TimeoutException>(() =>
         {
             _harness.CreateJoinerNode(seedNode, nodeId: 2);
         });
@@ -409,19 +409,19 @@ public sealed class JoinProtocolTests : IAsyncLifetime
         // - Partition B: joiner1 (isolated from seed, but can reach joiner2)
         // Eventually the cluster will converge to a stable state.
         _harness.AdvanceTime(TimeSpan.FromSeconds(30), maxIterations: 500000);
-        
+
         // Heal the partition to restore connectivity
         _harness.HealPartition(seedNode, joiner1);
-        
+
         // Wait for the cluster to stabilize after healing
         _harness.AdvanceTime(TimeSpan.FromSeconds(10), maxIterations: 200000);
-        
+
         // Get remaining nodes to find one we can join through
         var aliveNodes = _harness.Nodes.Where(n => n.IsInitialized && n.MembershipSize > 0).ToList();
         Assert.NotEmpty(aliveNodes);
-        
+
         var joinPoint = aliveNodes[0];
-        
+
         // Now join through a surviving node - the cluster should be stable
         var joiner3 = _harness.CreateJoinerNode(joinPoint, nodeId: 3);
 

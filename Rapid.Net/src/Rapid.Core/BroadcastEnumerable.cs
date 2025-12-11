@@ -102,7 +102,7 @@ internal sealed class BroadcastEnumerable<T> : IAsyncEnumerable<T>, IDisposable
             }
 
             var nextTask = _current.NextAsync();
-            
+
             // Fast path: if next element is already available, complete synchronously.
             // This is critical for simulation tests where async continuations may not
             // be pumped by the custom scheduler.

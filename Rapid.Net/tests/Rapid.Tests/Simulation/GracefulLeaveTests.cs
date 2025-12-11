@@ -777,7 +777,7 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 5);
 
         var suspendedNode = nodes[2];
-        
+
         // A suspended node is effectively down - it won't respond to failure detector probes
         _harness.SuspendNode(suspendedNode);
 

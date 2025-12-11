@@ -48,10 +48,10 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     private readonly RapidProtocolOptions _options;
     private bool _announcedProposal;
     private ConsensusCoordinator _consensusInstance = null!;
-    
+
     // Initialization state
     private bool _initialized;
-    
+
     // Configuration for join - stored from RapidOptions
     private readonly Endpoint? _seedAddress;
     private readonly Metadata _nodeMetadata;
@@ -65,7 +65,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
 
     // Flag to track if the kicked event has been published (to avoid multiple notifications)
     private bool _kickedEventPublished;
-    
+
     // Flag to track if a rejoin is in progress
     private bool _isRejoining;
 
@@ -580,12 +580,12 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
         {
             // Get metadata map from the manager (was populated by StartNewCluster or JoinClusterAsync)
             var metadataMap = new Dictionary<Endpoint, Metadata>(_metadataManager.GetAllMetadata());
-            
+
             // SetMembershipView handles all the setup - for initial join, nodeStatusChanges is null
             // which causes GetInitialViewChange() to be used (all nodes marked as Up)
             SetMembershipView(_membershipView, metadataMap, nodeStatusChanges: null, addedNodes: null);
         }
-        
+
         LogMembershipServiceInitialized(new LoggableEndpoint(_myAddr), new CurrentConfigId(_membershipView), new MembershipSize(_membershipView));
     }
 
@@ -613,67 +613,67 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     {
         // Must be called under _membershipUpdateLock
         var previousConsensusInstance = _initialized ? _consensusInstance : null;
-        
+
         // Update the view
         _membershipView = newView;
-        
+
         // Update metadata if provided
         if (metadataMap != null)
         {
             _metadataManager.Clear();
             _metadataManager.AddMetadata(metadataMap);
         }
-        
+
         // Recreate cut detector for the new cluster size
         _cutDetection = _cutDetectorFactory.Create(_membershipView);
-        
+
         // Update broadcaster membership
         _broadcaster.SetMembership([.. _membershipView.GetRing(0)]);
-        
+
         // Dispose old failure detectors and create new ones
         foreach (var fd in _failureDetectors)
         {
             fd.Dispose();
         }
         _failureDetectors.Clear();
-        
+
         // Create new consensus instance
         _consensusInstance = _consensusCoordinatorFactory.Create(_myAddr, _membershipView.ConfigurationId, _membershipView.Size, _broadcaster);
         RegisterConsensusDecidedContinuation(_consensusInstance);
         _announcedProposal = false;
-        
+
         // Replay any buffered consensus messages for this configuration
         ReplayBufferedConsensusMessages(_membershipView.ConfigurationId, _sharedResources.ShuttingDownToken);
-        
+
         // Create new failure detectors
         CreateFailureDetectorsForCurrentConfiguration();
-        
+
         // Notify waiting joiners if any nodes were added
         if (addedNodes != null)
         {
             NotifyWaitingJoiners(addedNodes);
         }
-        
+
         // Publish the new view to the accessor
         _viewAccessor.PublishView(_membershipView);
-        
+
         // Publish VIEW_CHANGE event
         var statusChanges = nodeStatusChanges ?? GetInitialViewChange();
         var currentMembership = _membershipView.GetRing(0);
         var clusterStatusChange = new ClusterStatusChange(_membershipView.ConfigurationId, [.. currentMembership], statusChanges);
-        
+
         LogPublishingViewChange(new CurrentConfigId(_membershipView), new MembershipSize(_membershipView));
         PublishEvent(ClusterEvents.ViewChange, clusterStatusChange);
-        
+
         // Clear pending joiner data that's no longer needed
         _pendingConsensusMessages.Keys
             .Where(k => k < _membershipView.ConfigurationId)
             .ToList()
             .ForEach(k => _pendingConsensusMessages.Remove(k));
-        
+
         return previousConsensusInstance;
     }
-    
+
     /// <summary>
     /// Notifies joiners waiting for their join to complete.
     /// </summary>
@@ -884,7 +884,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
             // Use SortedSet for deduplication and consistent ordering across all nodes.
             // This ensures all nodes propose the same set in the same order.
             var proposals = new SortedSet<Endpoint>(EndpointComparer.Instance);
-            
+
             // Process alerts by ring number to enable proper batching.
             // This ensures multiple nodes can accumulate in the preProposal set
             // before any of them reaches the H threshold, allowing them to be
@@ -902,7 +902,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
                     {
                         continue;
                     }
-                    
+
                     LogProcessingAlert(new LoggableEndpoint(msg.EdgeSrc), new LoggableEndpoint(msg.EdgeDst), msg.EdgeStatus);
                     // For valid UP alerts, extract the joiner details (UUID and metadata) which is going to be needed
                     // when the node is added to the rings
@@ -960,31 +960,31 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
 
         // Extract configuration ID from the message
         var messageConfigId = GetConfigurationIdFromConsensusMessage(request);
-        
+
         lock (_membershipUpdateLock)
         {
             var currentConfigId = _membershipView.ConfigurationId;
-            
+
             if (messageConfigId > currentConfigId)
             {
                 // Message is for a future configuration - buffer it for later processing
                 LogBufferingFutureConsensusMessage(request.ContentCase, messageConfigId, currentConfigId);
-                
+
                 if (!_pendingConsensusMessages.TryGetValue(messageConfigId, out var pendingList))
                 {
                     pendingList = [];
                     _pendingConsensusMessages[messageConfigId] = pendingList;
                 }
                 pendingList.Add(request);
-                
+
                 return RapidUtils.ToRapidResponse(new ConsensusResponse());
             }
-            
+
             // Message is for current or past configuration - process normally
             // (past config messages will be rejected by Paxos due to config mismatch)
             _consensusInstance.HandleMessages(request, cancellationToken);
         }
-        
+
         return RapidUtils.ToRapidResponse(new ConsensusResponse());
     }
 
@@ -1093,7 +1093,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
             var newView = builder.Build(_membershipView.ConfigurationId);
 
             LogDecideViewChangeCleanup();
-            
+
             // Use SetMembershipView to apply all changes - pass null for metadataMap to preserve existing
             previousConsensusInstance = SetMembershipView(newView, metadataMap: null, nodeStatusChanges, addedNodes);
         }
@@ -1371,7 +1371,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
 
             // Get known members from our current (stale) view to try as seeds
             var knownMembers = _membershipView.GetRing(0).Where(e => !e.Equals(_myAddr)).ToList();
-            
+
             // Generate a new node ID for the rejoin
             var nodeId = RapidUtils.NodeIdFromUuid(_sharedResources.NewGuid());
             var metadata = _metadataManager.Get(_myAddr) ?? new Metadata();
@@ -1526,7 +1526,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
             // Use SetMembershipView to apply all changes - for rejoin, all nodes are treated as Up
             oldConsensus = SetMembershipView(newView, metadataMap, nodeStatusChanges: null, addedNodes: null);
         }
-        
+
         // Dispose old consensus (fire and forget)
         if (oldConsensus != null)
         {
@@ -1647,9 +1647,9 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
 
             // Create a fresh consensus coordinator for the same configuration
             _consensusInstance = _consensusCoordinatorFactory.Create(
-                _myAddr, 
-                _membershipView.ConfigurationId, 
-                _membershipView.Size, 
+                _myAddr,
+                _membershipView.ConfigurationId,
+                _membershipView.Size,
                 _broadcaster);
             RegisterConsensusDecidedContinuation(_consensusInstance);
         }
@@ -1675,11 +1675,11 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
         if (_pendingConsensusMessages.TryGetValue(currentConfigId, out var pendingMessages))
         {
             _pendingConsensusMessages.Remove(currentConfigId);
-            
+
             if (pendingMessages.Count > 0)
             {
                 LogReplayingBufferedMessages(pendingMessages.Count, currentConfigId);
-                
+
                 foreach (var message in pendingMessages)
                 {
                     _consensusInstance.HandleMessages(message, cancellationToken);

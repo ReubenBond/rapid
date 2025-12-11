@@ -229,13 +229,13 @@ public sealed class RapidProtocolOptions
         // H should be close to K to require high agreement, but must be strictly less than K
         // L should be at least 1
         var highWatermark = Math.Max(1, (int)Math.Ceiling((double)observersPerSubject * HighWatermark / ObserversPerSubject));
-        
+
         // Ensure K > H (strict inequality required by MultiNodeCutDetector)
         if (highWatermark >= observersPerSubject)
         {
             highWatermark = observersPerSubject - 1;
         }
-        
+
         var lowWatermark = Math.Max(1, (int)Math.Floor((double)observersPerSubject * LowWatermark / ObserversPerSubject));
         lowWatermark = Math.Min(lowWatermark, highWatermark); // L cannot exceed H
 
