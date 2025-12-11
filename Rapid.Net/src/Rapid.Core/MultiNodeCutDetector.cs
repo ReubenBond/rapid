@@ -34,8 +34,8 @@ internal sealed partial class MultiNodeCutDetector : ICutDetector
     private int _proposalCount;
     private int _updatesInProgress;
     private readonly Dictionary<Endpoint, Dictionary<int, Endpoint>> _reportsPerHost = [];
-    private readonly HashSet<Endpoint> _proposal = [];
-    private readonly HashSet<Endpoint> _preProposal = [];
+    private readonly SortedSet<Endpoint> _proposal = [];
+    private readonly SortedSet<Endpoint> _preProposal = [];
     private bool _seenLinkDownEvents;
 
     /// <summary>

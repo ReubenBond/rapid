@@ -777,9 +777,13 @@ internal sealed class SimulationHarness : IAsyncDisposable
     private bool RunOneTaskRoundRobin()
     {
         // First, try to execute from non-suspended node contexts (round-robin)
-        foreach (var (_, context) in _nodeContexts)
+        // IMPORTANT: Iterate over _nodes list (which maintains insertion order) rather than
+        // _nodeContexts dictionary (which has undefined iteration order) to ensure determinism.
+        foreach (var node in _nodes)
         {
-            if (context.State == NodeSimulationState.Running && context.Step())
+            if (_nodeContexts.TryGetValue(node, out var context) &&
+                context.State == NodeSimulationState.Running && 
+                context.Step())
             {
                 return true;
             }
@@ -802,12 +806,17 @@ internal sealed class SimulationHarness : IAsyncDisposable
         TimeSpan? earliest = null;
 
         // Check all node contexts (including suspended ones - their timers still tick)
-        foreach (var (_, context) in _nodeContexts)
+        // IMPORTANT: Iterate over _nodes list (which maintains insertion order) rather than
+        // _nodeContexts dictionary (which has undefined iteration order) to ensure determinism.
+        foreach (var node in _nodes)
         {
-            var nextTime = context.NextWaitingDueTime;
-            if (nextTime.HasValue && (!earliest.HasValue || nextTime.Value < earliest.Value))
+            if (_nodeContexts.TryGetValue(node, out var context))
             {
-                earliest = nextTime;
+                var nextTime = context.NextWaitingDueTime;
+                if (nextTime.HasValue && (!earliest.HasValue || nextTime.Value < earliest.Value))
+                {
+                    earliest = nextTime;
+                }
             }
         }
 
