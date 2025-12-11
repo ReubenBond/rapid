@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 
 namespace Rapid.Tests.Simulation;
@@ -18,7 +17,8 @@ namespace Rapid.Tests.Simulation;
 /// </summary>
 internal sealed class SimulationHarness : IAsyncDisposable
 {
-    private readonly ConcurrentDictionary<string, SimulationNode> _nodeRegistry = new();
+    private readonly SortedDictionary<string, SimulationNode> _nodeRegistry = new(StringComparer.Ordinal);
+    private readonly SingleThreadedGuard _nodeRegistryGuard = new();
     private readonly Dictionary<SimulationNode, NodeSimulationContext> _nodeContexts = new();
     private readonly List<SimulationNode> _nodes = [];
     private readonly List<SimulationEvent> _eventLog = [];
@@ -272,6 +272,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
     internal void RegisterNode(SimulationNode node)
     {
         var key = RapidUtils.Loggable(node.Address);
+        using var _ = _nodeRegistryGuard.Enter();
         if (!_nodeRegistry.TryAdd(key, node))
         {
             throw new InvalidOperationException($"Node with address {key} already exists");
@@ -284,7 +285,8 @@ internal sealed class SimulationHarness : IAsyncDisposable
     internal void UnregisterNode(SimulationNode node)
     {
         var key = RapidUtils.Loggable(node.Address);
-        _nodeRegistry.TryRemove(key, out _);
+        using var _ = _nodeRegistryGuard.Enter();
+        _nodeRegistry.Remove(key);
     }
 
     /// <summary>
@@ -292,6 +294,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
     /// </summary>
     internal SimulationNode? GetNode(string address)
     {
+        using var _ = _nodeRegistryGuard.Enter();
         _nodeRegistry.TryGetValue(address, out var node);
         return node;
     }
@@ -317,11 +320,16 @@ internal sealed class SimulationHarness : IAsyncDisposable
     /// Creates a node without initializing it (for testing edge cases).
     /// The node is registered but not started or joined to any cluster.
     /// </summary>
-    public SimulationNode CreateUninitializedNode(int nodeId, RapidProtocolOptions? options = null)
+    /// <param name="nodeId">The node ID.</param>
+    /// <param name="seedNode">Optional seed node for joining. If null, the node will start its own cluster when initialized.</param>
+    /// <param name="options">Optional protocol options.</param>
+    public SimulationNode CreateUninitializedNode(int nodeId, SimulationNode? seedNode = null, RapidProtocolOptions? options = null)
     {
         var opts = ConfigureOptions(options);
         var context = CreateNodeContext();
-        var node = SimulationNode.Create(this, context, nodeId, opts, LoggerFactory);
+        var address = RapidUtils.HostFromParts("node", nodeId);
+        var node = new SimulationNode(this, context, address, seedNode?.Address, metadata: null, opts, LoggerFactory);
+        RegisterNode(node);
         RegisterNodeContext(node, context);
         _nodes.Add(node);
         LogEvent(SimulationEventType.NodeCreated, $"Uninitialized node {nodeId} created");
@@ -335,10 +343,19 @@ internal sealed class SimulationHarness : IAsyncDisposable
     {
         var opts = ConfigureOptions(options);
         var context = CreateNodeContext();
-        var node = SimulationNode.Create(this, context, nodeId, opts, LoggerFactory);
+        var address = RapidUtils.HostFromParts("node", nodeId);
+        var node = new SimulationNode(this, context, address, seedAddress: null, metadata: null, opts, LoggerFactory);
+        RegisterNode(node);
         RegisterNodeContext(node, context);
-        node.StartCluster();
+
+        // Add to _nodes BEFORE initialization so the node's task queue is included
+        // in the simulation loop (consistent with CreateJoinerNode pattern).
         _nodes.Add(node);
+
+        // For seed nodes, initialization is synchronous (no network I/O needed),
+        // but we still drive it through DriveToCompletion for consistency.
+        DriveToCompletion(() => node.InitializeAsync());
+
         LogEvent(SimulationEventType.NodeCreated, $"Seed node {nodeId} created");
         return node;
     }
@@ -354,15 +371,20 @@ internal sealed class SimulationHarness : IAsyncDisposable
     {
         var opts = ConfigureOptions(options);
         var context = CreateNodeContext();
-        var node = SimulationNode.Create(this, context, nodeId, opts, LoggerFactory);
+        var address = RapidUtils.HostFromParts("node", nodeId);
+        var node = new SimulationNode(this, context, address, seedNode.Address, metadata: null, opts, LoggerFactory);
+        RegisterNode(node);
         RegisterNodeContext(node, context);
 
         LogEvent(SimulationEventType.NodeJoining, $"Node {nodeId} joining via seed");
 
-        // Drive the join to completion
-        DriveToCompletion(() => node.JoinClusterAsync(seedNode));
-
+        // Add to _nodes BEFORE DriveToCompletion so the node's task queue is included
+        // in the simulation loop. This is critical for retry timers to be processed.
         _nodes.Add(node);
+
+        // Drive the initialization to completion
+        DriveToCompletion(() => node.InitializeAsync());
+
         LogEvent(SimulationEventType.NodeJoined, $"Node {nodeId} joined cluster");
         return node;
     }
@@ -459,14 +481,15 @@ internal sealed class SimulationHarness : IAsyncDisposable
         {
             var currentBatchSize = Math.Min(effectiveBatchSize, remainingNodes);
             var batchNodes = new List<SimulationNode>(currentBatchSize);
-            var joinTasks = new List<Task>(currentBatchSize);
 
-            // Create all nodes in this batch first
+            // Create all nodes in this batch first (with seedAddress so MembershipService is ready)
             for (var i = 0; i < currentBatchSize; i++)
             {
                 var opts = ConfigureOptions(options);
                 var context = CreateNodeContext();
-                var node = SimulationNode.Create(this, context, nodeId++, opts, LoggerFactory);
+                var address = RapidUtils.HostFromParts("node", nodeId++);
+                var node = new SimulationNode(this, context, address, seedNode.Address, metadata: null, opts, LoggerFactory);
+                RegisterNode(node);
                 RegisterNodeContext(node, context);
 
                 LogEvent(SimulationEventType.NodeJoining, $"Node {node.Address} joining via seed (parallel batch)");
@@ -480,10 +503,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
             // capture the simulation's SynchronizationContext for their continuations.
             DriveToCompletion(() =>
             {
-                foreach (var node in batchNodes)
-                {
-                    joinTasks.Add(node.JoinClusterAsync(seedNode));
-                }
+                var joinTasks = batchNodes.Select(node => node.InitializeAsync()).ToList();
                 return Task.WhenAll(joinTasks);
             }, maxIterationsPerBatch);
 
@@ -1230,3 +1250,50 @@ internal readonly record struct SimulationEvent(
     DateTimeOffset SimulatedTime,
     SimulationEventType Type,
     string Description);
+
+/// <summary>
+/// A debug guard that detects accidental concurrent access in single-threaded code.
+/// Unlike a real lock, this throws immediately if concurrent access is detected
+/// rather than blocking. Allows reentrant access by the same thread.
+/// Use this for simulation code that must be single-threaded.
+/// </summary>
+internal sealed class SingleThreadedGuard
+{
+    private int _ownerThreadId;
+    private int _entryCount;
+
+    /// <summary>
+    /// Enters the guarded section. Throws if another thread is already inside.
+    /// Allows reentrant access by the same thread.
+    /// </summary>
+    /// <returns>A disposable scope that exits the guard when disposed.</returns>
+    public Scope Enter()
+    {
+        var currentThreadId = Environment.CurrentManagedThreadId;
+        var existingOwner = Interlocked.CompareExchange(ref _ownerThreadId, currentThreadId, 0);
+
+        if (existingOwner != 0 && existingOwner != currentThreadId)
+        {
+            throw new InvalidOperationException(
+                $"Concurrent access detected in single-threaded simulation code. " +
+                $"Thread {currentThreadId} attempted to enter while thread {existingOwner} is inside. " +
+                $"This indicates a bug - simulation code must not be accessed concurrently.");
+        }
+
+        Interlocked.Increment(ref _entryCount);
+        return new Scope(this);
+    }
+
+    private void Exit()
+    {
+        if (Interlocked.Decrement(ref _entryCount) == 0)
+        {
+            Interlocked.Exchange(ref _ownerThreadId, 0);
+        }
+    }
+
+    public readonly struct Scope(SingleThreadedGuard guard) : IDisposable
+    {
+        public void Dispose() => guard.Exit();
+    }
+}

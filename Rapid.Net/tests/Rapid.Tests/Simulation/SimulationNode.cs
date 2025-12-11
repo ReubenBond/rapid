@@ -18,6 +18,7 @@ internal sealed class SimulationNode : IAsyncDisposable, IDisposable
     private readonly RapidProtocolOptions _protocolOptions;
     private readonly ILoggerFactory? _loggerFactory;
     private readonly ILogger<SimulationNode> _logger;
+    private readonly MembershipService _membershipService;
 
     // These are mutable because they need to be recreated during rejoin
     private SharedResources _sharedResources;
@@ -26,9 +27,8 @@ internal sealed class SimulationNode : IAsyncDisposable, IDisposable
     private CutDetectorFactory _cutDetectorFactory;
     private MembershipViewAccessor _viewAccessor;
     private ILogger<MembershipService> _membershipServiceLogger;
-    private TaskCompletionSource<MembershipService> _membershipServiceTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    private MembershipService? _membershipService;
     private bool _disposed;
+    private bool _initialized;
 
     /// <summary>
     /// Gets the endpoint address of this node.
@@ -58,7 +58,7 @@ internal sealed class SimulationNode : IAsyncDisposable, IDisposable
     /// <summary>
     /// Gets whether this node is initialized and part of a cluster.
     /// </summary>
-    public bool IsInitialized => _membershipService != null;
+    public bool IsInitialized => _initialized;
 
     /// <summary>
     /// Gets the membership size of this node's view.
@@ -70,10 +70,12 @@ internal sealed class SimulationNode : IAsyncDisposable, IDisposable
     /// </summary>
     internal InMemoryMessagingClient MessagingClient { get; }
 
-    private SimulationNode(
+    internal SimulationNode(
         SimulationHarness harness,
         NodeSimulationContext context,
         Endpoint address,
+        Endpoint? seedAddress,
+        Metadata? metadata,
         RapidProtocolOptions? protocolOptions,
         ILoggerFactory? loggerFactory)
     {
@@ -137,55 +139,15 @@ internal sealed class SimulationNode : IAsyncDisposable, IDisposable
             ?? NullLogger<MultiNodeCutDetector>.Instance;
         _cutDetectorFactory = new CutDetectorFactory(Options.Create(_protocolOptions), simpleCutDetectorLogger, multiNodeCutDetectorLogger);
 
-        // Register with the simulation harness
-        harness.RegisterNode(this);
-    }
-
-    /// <summary>
-    /// Creates a new simulation node with a pre-created context.
-    /// </summary>
-    public static SimulationNode Create(
-        SimulationHarness harness,
-        NodeSimulationContext context,
-        string hostname,
-        int port,
-        RapidProtocolOptions? protocolOptions = null,
-        ILoggerFactory? loggerFactory = null)
-    {
-        ArgumentNullException.ThrowIfNull(harness);
-        ArgumentNullException.ThrowIfNull(context);
-        var address = RapidUtils.HostFromParts(hostname, port);
-        return new SimulationNode(harness, context, address, protocolOptions, loggerFactory);
-    }
-
-    /// <summary>
-    /// Creates a new simulation node with a numeric identifier.
-    /// </summary>
-    public static SimulationNode Create(
-        SimulationHarness harness,
-        NodeSimulationContext context,
-        int nodeId,
-        RapidProtocolOptions? protocolOptions = null,
-        ILoggerFactory? loggerFactory = null) => Create(harness, context, "node", nodeId, protocolOptions, loggerFactory);
-
-    /// <summary>
-    /// Creates a MembershipService with the given seed address and initializes it.
-    /// </summary>
-    private async Task<MembershipService> CreateAndInitializeMembershipServiceAsync(
-        Endpoint? seedAddress,
-        Metadata? metadata,
-        CancellationToken cancellationToken)
-    {
+        // Create the MembershipService (but don't initialize it yet)
         var rapidOptions = new RapidOptions
         {
-            ListenAddress = Address,
+            ListenAddress = address,
             SeedAddress = seedAddress,
             Metadata = metadata ?? new Metadata()
         };
-
         var broadcasterFactory = new UnicastToAllBroadcasterFactory(MessagingClient);
-
-        var membershipService = new MembershipService(
+        _membershipService = new MembershipService(
             Options.Create(rapidOptions),
             Options.Create(_protocolOptions),
             MessagingClient,
@@ -196,91 +158,29 @@ internal sealed class SimulationNode : IAsyncDisposable, IDisposable
             _viewAccessor,
             _sharedResources,
             _membershipServiceLogger);
-
-        await membershipService.InitializeAsync(cancellationToken).ConfigureAwait(true);
-
-        return membershipService;
     }
 
     /// <summary>
-    /// Starts this node as a new single-node cluster (seed node).
+    /// Initializes the membership service (completes the join or cluster start).
     /// </summary>
-    public async Task StartClusterAsync(Metadata? metadata = null, CancellationToken cancellationToken = default)
+    internal async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("Starting cluster for node {Address}", RapidUtils.Loggable(Address));
+        await _membershipService.InitializeAsync(cancellationToken).ConfigureAwait(true);
+        _initialized = true;
 
-        if (_membershipService != null)
-        {
-            _logger.LogError("Cannot start cluster - node {Address} is already initialized", RapidUtils.Loggable(Address));
-            throw new InvalidOperationException("Node is already initialized");
-        }
-
-        // seedAddress = null means start a new cluster
-        _membershipService = await CreateAndInitializeMembershipServiceAsync(
-            seedAddress: null,
-            metadata,
-            cancellationToken).ConfigureAwait(true);
-
-        // Signal that the node is now initialized and ready to handle requests
-        _membershipServiceTcs.TrySetResult(_membershipService);
-
-        _logger.LogInformation("Cluster started for node {Address} with {MembershipSize} members",
-            RapidUtils.Loggable(Address), CurrentView.Size);
-    }
-
-    /// <summary>
-    /// Starts this node as a new single-node cluster (seed node).
-    /// Synchronous wrapper for backwards compatibility with existing tests.
-    /// </summary>
-    public void StartCluster(Metadata? metadata = null)
-    {
-        // Run synchronously on the simulation's task scheduler
-        StartClusterAsync(metadata, CancellationToken.None).GetAwaiter().GetResult();
-    }
-
-    /// <summary>
-    /// Joins this node to an existing cluster through the specified seed node.
-    /// </summary>
-    public async Task JoinClusterAsync(SimulationNode seedNode, Metadata? metadata = null, CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(seedNode);
-        cancellationToken.ThrowIfCancellationRequested();
-
-        _logger.LogInformation("Node {Address} attempting to join cluster via seed {SeedAddress}",
-            RapidUtils.Loggable(Address), RapidUtils.Loggable(seedNode.Address));
-
-        if (_membershipService != null)
-        {
-            _logger.LogError("Cannot join cluster - node {Address} is already initialized", RapidUtils.Loggable(Address));
-            throw new InvalidOperationException("Node is already initialized");
-        }
-
-        _membershipService = await CreateAndInitializeMembershipServiceAsync(
-            seedAddress: seedNode.Address,
-            metadata,
-            cancellationToken).ConfigureAwait(true);
-
-        // Signal that the node is now initialized and ready to handle requests
-        _membershipServiceTcs.TrySetResult(_membershipService);
-
-        _logger.LogInformation("Node {Address} successfully joined cluster with {MembershipSize} members, ConfigId={ConfigId}",
+        _logger.LogInformation("Node {Address} initialized with {MembershipSize} members, ConfigId={ConfigId}",
             RapidUtils.Loggable(Address), CurrentView.Size, CurrentView.ConfigurationId);
     }
 
     /// <summary>
     /// Handles an incoming request from another node.
-    /// Waits for the node to be initialized before processing the request.
     /// </summary>
     internal async Task<RapidResponse> HandleRequestAsync(RapidRequest request, CancellationToken cancellationToken)
     {
-        // Wait for the node to be initialized. This handles the case where
-        // messages arrive before the node has completed joining the cluster.
-        var membershipService = await _membershipServiceTcs.Task.WaitAsync(cancellationToken).ConfigureAwait(true);
-
         _logger.LogTrace("Node {Address} handling request of type {RequestType}",
             RapidUtils.Loggable(Address), request.ContentCase);
 
-        return await membershipService.HandleMessageAsync(request, cancellationToken).ConfigureAwait(true);
+        return await _membershipService.HandleMessageAsync(request, cancellationToken).ConfigureAwait(true);
     }
 
     /// <summary>

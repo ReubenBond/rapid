@@ -217,7 +217,7 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
         var nodes = new List<SimulationNode>();
         for (var i = 1; i < clusterSize; i++)
         {
-            nodes.Add(_harness.CreateUninitializedNode(i));
+            nodes.Add(_harness.CreateUninitializedNode(i, seedNode));
         }
 
         // Drive simulation until all joins complete (larger clusters need more iterations).
@@ -226,7 +226,7 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
         var maxIterations = clusterSize >= 50 ? 500000 : 100000;
         _harness.DriveToCompletion(() =>
         {
-            var joinTasks = nodes.Select(n => n.JoinClusterAsync(seedNode, cancellationToken: cancellationToken));
+            var joinTasks = nodes.Select(n => n.InitializeAsync(cancellationToken));
             return Task.WhenAll(joinTasks);
         }, maxIterations);
         _harness.WaitForConvergence(expectedSize: clusterSize, maxIterations: maxIterations);
