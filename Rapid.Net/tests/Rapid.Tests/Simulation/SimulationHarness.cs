@@ -461,7 +461,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
             var batchNodes = new List<SimulationNode>(currentBatchSize);
             var joinTasks = new List<Task>(currentBatchSize);
 
-            // Create all nodes in this batch and initiate their joins
+            // Create all nodes in this batch first
             for (var i = 0; i < currentBatchSize; i++)
             {
                 var opts = ConfigureOptions(options);
@@ -471,16 +471,21 @@ internal sealed class SimulationHarness : IAsyncDisposable
 
                 LogEvent(SimulationEventType.NodeJoining, $"Node {node.Address} joining via seed (parallel batch)");
 
-                // Start the join but don't wait - this allows batching
-                var joinTask = node.JoinClusterAsync(seedNode);
-
                 batchNodes.Add(node);
-                joinTasks.Add(joinTask);
                 _nodes.Add(node);
             }
 
-            // Drive the simulation until all joins in this batch complete
-            DriveToCompletion(() => Task.WhenAll(joinTasks), maxIterationsPerBatch);
+            // Drive the simulation until all joins in this batch complete.
+            // IMPORTANT: Join tasks must be started inside DriveToCompletion so they
+            // capture the simulation's SynchronizationContext for their continuations.
+            DriveToCompletion(() =>
+            {
+                foreach (var node in batchNodes)
+                {
+                    joinTasks.Add(node.JoinClusterAsync(seedNode));
+                }
+                return Task.WhenAll(joinTasks);
+            }, maxIterationsPerBatch);
 
             // Log completion
             foreach (var node in batchNodes)
@@ -573,16 +578,19 @@ internal sealed class SimulationHarness : IAsyncDisposable
 
         LogEvent(SimulationEventType.NodeLeaving, $"{nodesToRemove.Count} nodes beginning parallel graceful leave");
 
-        // Initiate all leaves concurrently
-        var leaveTasks = new List<Task>(nodesToRemove.Count);
         foreach (var node in nodesToRemove)
         {
             LogEvent(SimulationEventType.NodeLeaving, $"Node {node.Address} initiating leave (parallel batch)");
-            leaveTasks.Add(node.LeaveAsync());
         }
 
-        // Drive the simulation until all leave operations complete
-        DriveToCompletion(() => Task.WhenAll(leaveTasks));
+        // Drive the simulation until all leave operations complete.
+        // IMPORTANT: Leave tasks must be started inside DriveToCompletion so they
+        // capture the simulation's SynchronizationContext for their continuations.
+        DriveToCompletion(() =>
+        {
+            var leaveTasks = nodesToRemove.Select(node => node.LeaveAsync());
+            return Task.WhenAll(leaveTasks);
+        });
 
         // Wait for remaining nodes to converge to the new size
         var converged = RunUntil(
@@ -776,7 +784,13 @@ internal sealed class SimulationHarness : IAsyncDisposable
     /// </summary>
     private bool RunOneTaskRoundRobin()
     {
-        // First, try to execute from non-suspended node contexts (round-robin)
+        // Try the harness queue (for scheduled operations like auto-resume)
+        if (_harnessQueue.RunOnce())
+        {
+            return true;
+        }
+
+        // Try to execute from non-suspended node contexts (round-robin)
         // IMPORTANT: Iterate over _nodes list (which maintains insertion order) rather than
         // _nodeContexts dictionary (which has undefined iteration order) to ensure determinism.
         foreach (var node in _nodes)
@@ -788,12 +802,6 @@ internal sealed class SimulationHarness : IAsyncDisposable
             }
         }
 
-        // Then try the harness queue (for scheduled operations like auto-resume)
-        if (_harnessQueue.RunOnce())
-        {
-            return true;
-        }
-
         return false;
     }
 
@@ -801,30 +809,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
     /// Gets the earliest due time across all queues (node contexts + harness queue).
     /// </summary>
     private TimeSpan? GetNextWaitingDueTime()
-    {
-        TimeSpan? earliest = null;
-
-        // Check all node contexts (including suspended ones - their timers still tick)
-        // IMPORTANT: Iterate over _nodes list (which maintains insertion order) rather than
-        // _nodeContexts dictionary (which has undefined iteration order) to ensure determinism.
-        foreach (var node in _nodes)
-        {
-            var nextTime = node.Context.NextWaitingDueTime;
-            if (nextTime.HasValue && (!earliest.HasValue || nextTime.Value < earliest.Value))
-            {
-                earliest = nextTime;
-            }
-        }
-
-        // Check harness queue
-        var harnessNextTime = _harnessQueue.NextWaitingDueTime;
-        if (harnessNextTime.HasValue && (!earliest.HasValue || harnessNextTime.Value < earliest.Value))
-        {
-            earliest = harnessNextTime;
-        }
-
-        return earliest;
-    }
+        => _nodes.Select(n => n.Context.NextWaitingDueTime).Concat([_harnessQueue.NextWaitingDueTime]).Min();
 
     /// <summary>
     /// Runs until all nodes have the expected membership size.

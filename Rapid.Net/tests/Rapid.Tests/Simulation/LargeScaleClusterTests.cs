@@ -213,18 +213,22 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
             }
         }, cancellationToken);
 
-        // Join remaining nodes in parallel
-        var joinTasks = new List<Task>();
+        // Create nodes first (without starting joins)
+        var nodes = new List<SimulationNode>();
         for (var i = 1; i < clusterSize; i++)
         {
-            var node = _harness.CreateUninitializedNode(i);
-            var joinTask = node.JoinClusterAsync(seedNode, cancellationToken: cancellationToken);
-            joinTasks.Add(joinTask);
+            nodes.Add(_harness.CreateUninitializedNode(i));
         }
 
-        // Drive simulation until all joins complete (larger clusters need more iterations)
+        // Drive simulation until all joins complete (larger clusters need more iterations).
+        // IMPORTANT: Join tasks must be started inside DriveToCompletion so they
+        // capture the simulation's SynchronizationContext for their continuations.
         var maxIterations = clusterSize >= 50 ? 500000 : 100000;
-        _harness.DriveToCompletion(() => Task.WhenAll(joinTasks), maxIterations);
+        _harness.DriveToCompletion(() =>
+        {
+            var joinTasks = nodes.Select(n => n.JoinClusterAsync(seedNode, cancellationToken: cancellationToken));
+            return Task.WhenAll(joinTasks);
+        }, maxIterations);
         _harness.WaitForConvergence(expectedSize: clusterSize, maxIterations: maxIterations);
 
         // Signal view collection is complete and wait for it
