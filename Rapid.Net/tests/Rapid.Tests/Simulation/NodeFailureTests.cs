@@ -170,15 +170,15 @@ public sealed class NodeFailureTests : IAsyncLifetime
     }
 
     [Fact]
-    public void NewJoinsFailAfterSeedCrash()
+    public void JoinThroughCrashedSeedFails()
     {
         var seedNode = _harness.CreateSeedNode();
 
-        // Crash the seed
-        _harness.CrashNode(seedNode);
+        // Suspend the seed (simulates crash but keeps node in harness so we can attempt to contact it)
+        _harness.SuspendNode(seedNode);
 
-        // Attempting to join through crashed seed should fail
-        Assert.Throws<InvalidOperationException>(() =>
+        // Attempting to join through crashed seed should timeout
+        Assert.Throws<TimeoutException>(() =>
         {
             _harness.CreateJoinerNode(seedNode, nodeId: 1);
         });

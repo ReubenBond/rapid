@@ -22,6 +22,13 @@ public sealed partial class PingPongFailureDetectorFactory(
     private readonly RapidProtocolOptions _protocolOptions = protocolOptions.Value;
     private readonly ILogger<PingPongFailureDetector> _logger = logger;
 
+    /// <summary>
+    /// Gets or sets the callback invoked when a probe response indicates
+    /// this node has been kicked from the cluster (not in remote's membership view).
+    /// The parameter is the remote configuration ID.
+    /// </summary>
+    public Action<long>? OnKickedDetected { get; set; }
+
     public IEdgeFailureDetector CreateInstance(Endpoint subject, Action notifier) =>
         new PingPongFailureDetector(
             subject,
@@ -30,6 +37,7 @@ public sealed partial class PingPongFailureDetectorFactory(
             _sharedResources,
             notifier,
             _protocolOptions.FailureDetectorConsecutiveFailures,
+            OnKickedDetected,
             _logger);
 }
 
@@ -47,6 +55,7 @@ public sealed partial class PingPongFailureDetector : IEdgeFailureDetector
 #pragma warning restore CA2213
     private readonly Action _notifier;
     private readonly int _consecutiveFailuresThreshold;
+    private readonly Action<long>? _onKickedDetected;
     private readonly ILogger<PingPongFailureDetector> _logger;
     private readonly CancellationTokenSource _cts = new();
     private int _disposed;
@@ -62,6 +71,7 @@ public sealed partial class PingPongFailureDetector : IEdgeFailureDetector
     /// <param name="sharedResources">Shared resources including TimeProvider.</param>
     /// <param name="notifier">Action to invoke when the subject is detected as failed.</param>
     /// <param name="consecutiveFailuresThreshold">Number of consecutive failures required before declaring node down.</param>
+    /// <param name="onKickedDetected">Optional callback when kicked from cluster is detected.</param>
     /// <param name="logger">Optional logger.</param>
     public PingPongFailureDetector(
         Endpoint subject,
@@ -70,6 +80,7 @@ public sealed partial class PingPongFailureDetector : IEdgeFailureDetector
         SharedResources sharedResources,
         Action notifier,
         int consecutiveFailuresThreshold = 3,
+        Action<long>? onKickedDetected = null,
         ILogger<PingPongFailureDetector>? logger = null)
     {
         _subject = subject;
@@ -78,6 +89,7 @@ public sealed partial class PingPongFailureDetector : IEdgeFailureDetector
         _sharedResources = sharedResources;
         _notifier = notifier;
         _consecutiveFailuresThreshold = consecutiveFailuresThreshold;
+        _onKickedDetected = onKickedDetected;
         _logger = logger ?? NullLogger<PingPongFailureDetector>.Instance;
     }
 
@@ -98,6 +110,9 @@ public sealed partial class PingPongFailureDetector : IEdgeFailureDetector
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Probe succeeded for {Subject}, resetting consecutive failure count")]
     private partial void LogProbeSucceeded(LoggableEndpoint Subject);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Kicked from cluster detected: not in {Subject}'s membership view (remote config: {RemoteConfigId})")]
+    private partial void LogKickedDetected(LoggableEndpoint Subject, long RemoteConfigId);
 
     public void Start()
     {
@@ -140,6 +155,9 @@ public sealed partial class PingPongFailureDetector : IEdgeFailureDetector
                     LogProbeSucceeded(new LoggableEndpoint(_subject));
                 }
                 _consecutiveFailures = 0;
+
+                // Check if we've been kicked from the cluster
+                CheckForKicked(response.ProbeResponse);
             }
         }
         catch (Exception ex)
@@ -149,6 +167,21 @@ public sealed partial class PingPongFailureDetector : IEdgeFailureDetector
             CheckAndNotifyFailure();
         }
 #pragma warning restore CA1031
+    }
+
+    private void CheckForKicked(ProbeResponse probeResponse)
+    {
+        if (_onKickedDetected == null)
+        {
+            return;
+        }
+
+        // If the remote node says we're not in their membership, we've been kicked
+        if (!probeResponse.SenderInMembership)
+        {
+            LogKickedDetected(new LoggableEndpoint(_subject), probeResponse.ConfigurationId);
+            _onKickedDetected(probeResponse.ConfigurationId);
+        }
     }
 
     private void CheckAndNotifyFailure()

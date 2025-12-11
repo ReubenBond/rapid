@@ -505,18 +505,19 @@ public sealed class AsymmetricFailureTests : IAsyncLifetime
     [Fact]
     public void AsymmetricPartition_MultipleConcurrentJoins()
     {
-        // Arrange: Create a 3-node cluster
-        var nodes = _harness.CreateCluster(size: 3);
-        _harness.WaitForConvergence(expectedSize: 3);
+        // Arrange: Create a 10-node cluster so MultiNodeCutDetector is used (K > 1)
+        // This provides better fault tolerance for asymmetric partition scenarios
+        var nodes = _harness.CreateCluster(size: 10);
+        _harness.WaitForConvergence(expectedSize: 10);
 
         // Create asymmetric partitions between existing nodes
         var addr0 = RapidUtils.Loggable(nodes[0].Address);
         var addr1 = RapidUtils.Loggable(nodes[1].Address);
         _harness.Network.CreatePartition(addr0, addr1);
 
-        // Act: Join multiple nodes in sequence (simulating concurrent-like behavior)
-        var newNode1 = _harness.CreateJoinerNode(nodes[0], nodeId: 10);
-        var newNode2 = _harness.CreateJoinerNode(nodes[2], nodeId: 11);
+        // Act: Join multiple nodes in sequence
+        var newNode1 = _harness.CreateJoinerNode(nodes[0], nodeId: 20);
+        var newNode2 = _harness.CreateJoinerNode(nodes[2], nodeId: 21);
 
         // Wait for convergence
         _harness.RunUntilIdle(maxSimulatedTime: TimeSpan.FromMinutes(2));

@@ -744,8 +744,13 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
     [Fact]
     public void GracefulLeave_WithSuspendedNode()
     {
-        // Arrange: Create a 5-node cluster
-        var nodes = _harness.CreateCluster(size: 5);
+        // Arrange: Create a 5-node cluster with long failure detector interval
+        // This prevents the suspended node from being detected as failed during the test
+        var options = new RapidProtocolOptions
+        {
+            FailureDetectorInterval = TimeSpan.FromMinutes(10)
+        };
+        var nodes = _harness.CreateCluster(size: 5, options);
         _harness.WaitForConvergence(expectedSize: 5);
 
         // Suspend one node (not the one leaving)
@@ -760,55 +765,61 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         // Wait for convergence
         _harness.WaitForConvergence(expectedSize: 4, maxIterations: 200000);
 
-        // Assert: Cluster converged
+        // Assert: Cluster converged to 4 nodes (only the leaving node removed)
         Assert.Equal(4, _harness.Nodes.Count);
     }
 
     [Fact]
-    public void GracefulLeave_SuspendedNodeNotAffected()
+    public void GracefulLeave_SuspendedNodeDetectedAsFailed()
     {
         // Arrange: Create a 5-node cluster
         var nodes = _harness.CreateCluster(size: 5);
         _harness.WaitForConvergence(expectedSize: 5);
 
         var suspendedNode = nodes[2];
+        
+        // A suspended node is effectively down - it won't respond to failure detector probes
         _harness.SuspendNode(suspendedNode);
 
-        // Act: Another node leaves
+        // Act: Another node leaves gracefully
         _harness.RemoveNodeGracefully(nodes[4]);
 
-        // Resume
+        // Resume suspended node - it will detect it was kicked and automatically rejoin
         _harness.ResumeNode(suspendedNode);
 
-        // Wait for convergence
+        // Wait for convergence - expect size 4 because:
+        // - Node 4 left gracefully
+        // - Suspended node was detected as failed and kicked, but auto-rejoins after resume
         _harness.WaitForConvergence(expectedSize: 4, maxIterations: 200000);
 
-        // Assert: Suspended node is still in cluster
+        // Assert: Suspended node should have rejoined after being kicked
         Assert.Contains(suspendedNode, _harness.Nodes);
         Assert.Equal(4, _harness.Nodes.Count);
     }
 
     [Fact]
-    public void GracefulLeave_ResumeAfterLeaveCompletes()
+    public void GracefulLeave_SuspendedNodeRemovedWithLeavingNode()
     {
         // Arrange: Create a 5-node cluster
         var nodes = _harness.CreateCluster(size: 5);
         _harness.WaitForConvergence(expectedSize: 5);
 
-        // Suspend a node
+        // Suspend a node - this makes it effectively down (won't respond to probes)
         var suspendedNode = nodes[1];
         _harness.SuspendNode(suspendedNode);
 
         // Act: Another node leaves while one is suspended
         _harness.RemoveNodeGracefully(nodes[4]);
 
-        // Don't wait - resume immediately
+        // Resume the node - it will detect it was kicked and automatically rejoin
         _harness.ResumeNode(suspendedNode);
 
-        // Now wait for convergence
+        // Wait for convergence - expect size 4 because:
+        // - Node 4 left gracefully
+        // - Suspended node was detected as failed and kicked, but auto-rejoins after resume
         _harness.WaitForConvergence(expectedSize: 4, maxIterations: 200000);
 
-        // Assert: Correct final state
+        // Assert: Suspended node should have rejoined after being kicked
         Assert.Equal(4, _harness.Nodes.Count);
         Assert.Contains(suspendedNode, _harness.Nodes);
     }

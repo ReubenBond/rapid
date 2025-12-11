@@ -15,15 +15,18 @@ internal sealed class SimulationNode : IAsyncDisposable, IDisposable
 {
     private readonly SimulationHarness _harness;
     private readonly NodeSimulationContext _context;
-    private readonly SharedResources _sharedResources;
-    private readonly PingPongFailureDetectorFactory _failureDetectorFactory;
-    private readonly IConsensusCoordinatorFactory _consensusCoordinatorFactory;
-    private readonly CutDetectorFactory _cutDetectorFactory;
-    private readonly MembershipViewAccessor _viewAccessor;
     private readonly IOptions<RapidProtocolOptions> _protocolOptions;
+    private readonly ILoggerFactory? _loggerFactory;
     private readonly ILogger<SimulationNode> _logger;
-    private readonly ILogger<MembershipService> _membershipServiceLogger;
-    private readonly TaskCompletionSource<MembershipService> _membershipServiceTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    
+    // These are mutable because they need to be recreated during rejoin
+    private SharedResources _sharedResources;
+    private PingPongFailureDetectorFactory _failureDetectorFactory;
+    private IConsensusCoordinatorFactory _consensusCoordinatorFactory;
+    private CutDetectorFactory _cutDetectorFactory;
+    private MembershipViewAccessor _viewAccessor;
+    private ILogger<MembershipService> _membershipServiceLogger;
+    private TaskCompletionSource<MembershipService> _membershipServiceTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private MembershipService? _membershipService;
     private bool _disposed;
 
@@ -74,10 +77,10 @@ internal sealed class SimulationNode : IAsyncDisposable, IDisposable
         Address = address;
         Random = harness.CreateDerivedRandom();
 
-        var factory = loggerFactory ?? harness.LoggerFactory;
-        _logger = factory?.CreateLogger<SimulationNode>()
+        _loggerFactory = loggerFactory ?? harness.LoggerFactory;
+        _logger = _loggerFactory?.CreateLogger<SimulationNode>()
             ?? NullLogger<SimulationNode>.Instance;
-        _membershipServiceLogger = factory?.CreateLogger<MembershipService>()
+        _membershipServiceLogger = _loggerFactory?.CreateLogger<MembershipService>()
             ?? NullLogger<MembershipService>.Instance;
 
         // Create protocol options
@@ -85,7 +88,7 @@ internal sealed class SimulationNode : IAsyncDisposable, IDisposable
         _protocolOptions = Options.Create(options);
 
         // Create shared resources with the node's time provider and task scheduler
-        var sharedResourcesLogger = factory?.CreateLogger<SharedResources>()
+        var sharedResourcesLogger = _loggerFactory?.CreateLogger<SharedResources>()
             ?? NullLogger<SharedResources>.Instance;
         _sharedResources = new SharedResources(sharedResourcesLogger, context.TimeProvider, context.TaskScheduler, Random, Random.NextGuid);
 
@@ -99,7 +102,7 @@ internal sealed class SimulationNode : IAsyncDisposable, IDisposable
         _viewAccessor = new MembershipViewAccessor();
 
         // Create failure detector factory
-        var failureDetectorLogger = factory?.CreateLogger<PingPongFailureDetector>()
+        var failureDetectorLogger = _loggerFactory?.CreateLogger<PingPongFailureDetector>()
             ?? NullLogger<PingPongFailureDetector>.Instance;
         _failureDetectorFactory = new PingPongFailureDetectorFactory(
             address,
@@ -109,11 +112,11 @@ internal sealed class SimulationNode : IAsyncDisposable, IDisposable
             failureDetectorLogger);
 
         // Create consensus coordinator factory
-        var consensusCoordinatorLogger = factory?.CreateLogger<ConsensusCoordinator>()
+        var consensusCoordinatorLogger = _loggerFactory?.CreateLogger<ConsensusCoordinator>()
             ?? NullLogger<ConsensusCoordinator>.Instance;
-        var fastPaxosLogger = factory?.CreateLogger<FastPaxos>()
+        var fastPaxosLogger = _loggerFactory?.CreateLogger<FastPaxos>()
             ?? NullLogger<FastPaxos>.Instance;
-        var paxosLogger = factory?.CreateLogger<Paxos>()
+        var paxosLogger = _loggerFactory?.CreateLogger<Paxos>()
             ?? NullLogger<Paxos>.Instance;
         _consensusCoordinatorFactory = new ConsensusCoordinatorFactory(
             MessagingClient,
@@ -124,9 +127,9 @@ internal sealed class SimulationNode : IAsyncDisposable, IDisposable
             paxosLogger);
 
         // Create cut detector factory
-        var simpleCutDetectorLogger = factory?.CreateLogger<SimpleCutDetector>()
+        var simpleCutDetectorLogger = _loggerFactory?.CreateLogger<SimpleCutDetector>()
             ?? NullLogger<SimpleCutDetector>.Instance;
-        var multiNodeCutDetectorLogger = factory?.CreateLogger<MultiNodeCutDetector>()
+        var multiNodeCutDetectorLogger = _loggerFactory?.CreateLogger<MultiNodeCutDetector>()
             ?? NullLogger<MultiNodeCutDetector>.Instance;
         _cutDetectorFactory = new CutDetectorFactory(_protocolOptions, simpleCutDetectorLogger, multiNodeCutDetectorLogger);
 
@@ -211,7 +214,8 @@ internal sealed class SimulationNode : IAsyncDisposable, IDisposable
 
     /// <summary>
     /// Joins this node to an existing cluster through the specified seed node.
-    /// Implements retry logic with exponential backoff for resilience against message loss.
+    /// Implements retry logic with exponential backoff for resilience against transient failures.
+    /// Retry behavior is controlled by RapidProtocolOptions.
     /// </summary>
     public async Task JoinClusterAsync(SimulationNode seedNode, Metadata? metadata = null, CancellationToken cancellationToken = default)
     {
@@ -232,26 +236,34 @@ internal sealed class SimulationNode : IAsyncDisposable, IDisposable
 
         _logger.LogDebug("Node {Address} generated node ID {NodeId} for join", RapidUtils.Loggable(Address), nodeId);
 
-        var maxRetries = _protocolOptions.Value.GrpcDefaultRetries;
-        var retryDelay = TimeSpan.FromMilliseconds(100);
+        var opts = _protocolOptions.Value;
+        var maxRetries = opts.GrpcDefaultRetries;
+        var retryDelay = opts.JoinRetryBaseDelay;
         JoinResponse? successfulResponse = null;
 
         for (var attempt = 0; attempt <= maxRetries; attempt++)
         {
             try
             {
+                _logger.LogDebug("Node {Address} join attempt {Attempt} of {MaxRetries}", RapidUtils.Loggable(Address), attempt, maxRetries);
                 successfulResponse = await TryJoinClusterAsync(seedNode, nodeId, actualMetadata, cancellationToken).ConfigureAwait(true);
                 if (successfulResponse != null)
                 {
                     break;
                 }
             }
-            catch (Exception ex) when (attempt < maxRetries && (ex is TimeoutException || (ex is InvalidOperationException && IsRetryableJoinError(ex))))
+            catch (Exception ex) when (CanRetry(attempt, maxRetries, ex))
             {
                 _logger.LogWarning("Node {Address} join attempt {Attempt} failed: {Message}. Retrying in {Delay}ms",
                     RapidUtils.Loggable(Address), attempt + 1, ex.Message, retryDelay.TotalMilliseconds);
                 await Task.Delay(retryDelay, _context.TimeProvider, cancellationToken).ConfigureAwait(true);
-                retryDelay *= 2; // Exponential backoff
+                retryDelay = TimeSpan.FromTicks((long)(retryDelay.Ticks * opts.JoinRetryBackoffMultiplier));
+                
+                // Cap at maximum delay
+                if (retryDelay > opts.JoinRetryMaxDelay)
+                {
+                    retryDelay = opts.JoinRetryMaxDelay;
+                }
             }
         }
 
@@ -271,8 +283,6 @@ internal sealed class SimulationNode : IAsyncDisposable, IDisposable
             metadataMap[endpoint] = m;
         }
 
-        var opts = _protocolOptions.Value;
-        var clusterSize = successfulResponse.Endpoints.Count;
         var membershipView = new MembershipViewBuilder(
             opts.ObserversPerSubject,
             [.. successfulResponse.Identifiers],
@@ -409,13 +419,24 @@ internal sealed class SimulationNode : IAsyncDisposable, IDisposable
     /// </summary>
     private static bool IsRetryableJoinError(Exception ex)
     {
-        // Network partition errors, message drops (timeout), and config changes are retryable
-        return ex is TimeoutException ||  // Dropped messages cause timeouts
-               ex.Message.Contains("Network partition", StringComparison.OrdinalIgnoreCase) ||
-               ex.Message.Contains("cannot reach", StringComparison.OrdinalIgnoreCase) ||
-               ex.Message.Contains("Configuration changed", StringComparison.OrdinalIgnoreCase) ||
-               ex.Message.Contains("Failed to get successful response", StringComparison.OrdinalIgnoreCase) ||
-               ex.Message.Contains("dropped", StringComparison.OrdinalIgnoreCase);
+        // Timeouts are always retryable
+        if (ex is TimeoutException)
+        {
+            return true;
+        }
+
+        // Check for retryable error messages
+        var message = ex.Message;
+        return message.Contains("Network partition", StringComparison.OrdinalIgnoreCase) ||
+               message.Contains("cannot reach", StringComparison.OrdinalIgnoreCase) ||
+               message.Contains("Configuration changed", StringComparison.OrdinalIgnoreCase) ||
+               message.Contains("Failed to get successful response", StringComparison.OrdinalIgnoreCase) ||
+               message.Contains("dropped", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool CanRetry(int attempt, int maxRetries, Exception ex)
+    {
+        return attempt < maxRetries && IsRetryableJoinError(ex);
     }
 
     /// <summary>
@@ -461,6 +482,9 @@ internal sealed class SimulationNode : IAsyncDisposable, IDisposable
     /// </summary>
     public void Shutdown()
     {
+        // Mark as disposed first to prevent any rejoin attempts (MembershipService checks _disposed)
+        _disposed = true;
+        
         if (_membershipService != null)
         {
             _logger.LogInformation("Node {Address} shutting down", RapidUtils.Loggable(Address));
@@ -480,7 +504,7 @@ internal sealed class SimulationNode : IAsyncDisposable, IDisposable
         _logger.LogDebug("Node {Address} disposing async", RapidUtils.Loggable(Address));
 
         // First shutdown shared resources to cancel the ShuttingDownToken
-        // This will cause consensus instances to complete
+        // This will cause consensus instances to complete and prevent rejoins
         _sharedResources.StartShutdown();
 
         // Now dispose the membership service asynchronously
@@ -505,10 +529,13 @@ internal sealed class SimulationNode : IAsyncDisposable, IDisposable
         _logger.LogDebug("Node {Address} disposing", RapidUtils.Loggable(Address));
 
         // First shutdown shared resources to cancel the ShuttingDownToken
-        // This will cause consensus instances to complete
+        // This will cause consensus instances to complete and prevent rejoins
         _sharedResources.StartShutdown();
 
-        _membershipService?.Shutdown();
+        if (_membershipService != null)
+        {
+            _membershipService.Shutdown();
+        }
         // Note: We cannot await DisposeAsync here, so we skip the async dispose
         // The shutdown above should have cancelled everything
         _sharedResources.Dispose();

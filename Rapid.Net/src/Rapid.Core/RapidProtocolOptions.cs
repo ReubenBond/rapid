@@ -152,6 +152,21 @@ public sealed class RapidProtocolOptions
     public int FailureDetectorConsecutiveFailures { get; set; } = 3;
 
     /// <summary>
+    /// Base delay between join retry attempts. Default: 100 milliseconds
+    /// </summary>
+    public TimeSpan JoinRetryBaseDelay { get; set; } = TimeSpan.FromMilliseconds(100);
+
+    /// <summary>
+    /// Maximum delay between join retry attempts. Default: 5 seconds
+    /// </summary>
+    public TimeSpan JoinRetryMaxDelay { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Multiplier for exponential backoff between join retries. Default: 2.0
+    /// </summary>
+    public double JoinRetryBackoffMultiplier { get; set; } = 2.0;
+
+    /// <summary>
     /// Computes effective protocol parameters based on the actual cluster size.
     /// When the cluster is smaller than the configured ObserversPerSubject (K),
     /// the effective values are scaled down proportionally.

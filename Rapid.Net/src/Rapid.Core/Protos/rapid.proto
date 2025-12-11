@@ -199,6 +199,8 @@ message ProbeMessage
 message ProbeResponse
 {
     NodeStatus status = 1;
+    int64 configurationId = 2;
+    bool senderInMembership = 3;  // Indicates if the probe sender is in the responder's membership view
 }
 
 enum NodeStatus {

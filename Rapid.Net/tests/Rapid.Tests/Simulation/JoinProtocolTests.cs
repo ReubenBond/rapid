@@ -269,24 +269,6 @@ public sealed class JoinProtocolTests : IAsyncLifetime
     #region Join Failures (JOIN-040 to JOIN-045)
 
     /// <summary>
-    /// Tests that join fails when trying to join through a crashed node.
-    /// </summary>
-    [Fact]
-    public void JoinThroughCrashedNodeFails()
-    {
-        var seedNode = _harness.CreateSeedNode();
-
-        // Crash the seed
-        _harness.CrashNode(seedNode);
-
-        // Attempt to join through crashed node should fail
-        Assert.Throws<InvalidOperationException>(() =>
-        {
-            _harness.CreateJoinerNode(seedNode, nodeId: 1);
-        });
-    }
-
-    /// <summary>
     /// Tests that join fails (times out) when consensus is impossible due to node isolation.
     /// In a 2-node cluster where one node is isolated, the remaining node cannot reach
     /// the consensus threshold alone, so any new join attempt will fail.

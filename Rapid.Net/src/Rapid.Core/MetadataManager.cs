@@ -42,6 +42,14 @@ internal sealed class MetadataManager
         }
     }
 
+    public void Clear()
+    {
+        lock (_lock)
+        {
+            _metadata.Clear();
+        }
+    }
+
     public IReadOnlyDictionary<Endpoint, Metadata> GetAllMetadata()
     {
         lock (_lock)

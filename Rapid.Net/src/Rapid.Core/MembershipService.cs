@@ -55,6 +55,12 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     // View change accessor for publishing updates
     private readonly MembershipViewAccessor _viewAccessor;
 
+    // Flag to track if the kicked event has been published (to avoid multiple notifications)
+    private bool _kickedEventPublished;
+    
+    // Flag to track if a rejoin is in progress
+    private bool _isRejoining;
+
     private readonly struct LoggableEndpoint(Endpoint endpoint)
     {
         private readonly Endpoint _endpoint = endpoint;
@@ -220,6 +226,30 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     [LoggerMessage(Level = LogLevel.Debug, Message = "Replaying {Count} buffered consensus messages for config {ConfigId}")]
     private partial void LogReplayingBufferedMessages(int Count, long ConfigId);
 
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Node {MyAddr} detected it has been kicked from the cluster. Remote config version {RemoteConfigVersion} > local {LocalConfigVersion}")]
+    private partial void LogNodeKicked(LoggableEndpoint MyAddr, long RemoteConfigVersion, long LocalConfigVersion);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Node {MyAddr} starting rejoin process")]
+    private partial void LogStartingRejoin(LoggableEndpoint MyAddr);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Node {MyAddr} attempting rejoin through seed {Seed}")]
+    private partial void LogAttemptingRejoinThroughSeed(LoggableEndpoint MyAddr, LoggableEndpoint Seed);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Node {MyAddr} rejoin PreJoin response: {StatusCode}, observers: {ObserverCount}")]
+    private partial void LogRejoinPreJoinResponse(LoggableEndpoint MyAddr, JoinStatusCode StatusCode, int ObserverCount);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Node {MyAddr} successfully rejoined cluster with {MemberCount} members, configId={ConfigId}")]
+    private partial void LogRejoinSuccessful(LoggableEndpoint MyAddr, int MemberCount, long ConfigId);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Node {MyAddr} failed to rejoin through seed {Seed}: {Message}")]
+    private partial void LogRejoinFailedThroughSeed(LoggableEndpoint MyAddr, LoggableEndpoint Seed, string Message);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Node {MyAddr} failed to rejoin cluster - no live seeds found")]
+    private partial void LogRejoinFailedNoSeeds(LoggableEndpoint MyAddr);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Node {MyAddr} rejoin skipped (already rejoining or disposed)")]
+    private partial void LogRejoinSkipped(LoggableEndpoint MyAddr);
+
     private readonly struct LoggableRingNumbers(IEnumerable<int> ringNumbers)
     {
         private readonly IEnumerable<int> _ringNumbers = ringNumbers;
@@ -270,6 +300,12 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
         _viewAccessor = viewAccessor;
         _logger = logger;
         _sendQueue = Channel.CreateUnbounded<AlertMessage>();
+
+        // Configure the failure detector factory to detect when this node has been kicked
+        if (edgeFailureDetector is PingPongFailureDetectorFactory pingPongFactory)
+        {
+            pingPongFactory.OnKickedDetected = OnKickedDetected;
+        }
 
         // Start background jobs and track them
         var alertBatcherTask = Task.Factory.StartNew(AlertBatcherAsync, _sharedResources.ShuttingDownToken, TaskCreationOptions.None, _sharedResources.TaskScheduler).Unwrap();
@@ -590,7 +626,12 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     private RapidResponse HandleProbeMessage(ProbeMessage probeMessage, CancellationToken cancellationToken)
     {
         LogHandleProbeMessage();
-        return RapidUtils.ToRapidResponse(new ProbeResponse());
+        var senderInMembership = probeMessage.Sender != null && _membershipView.IsHostPresent(probeMessage.Sender);
+        return RapidUtils.ToRapidResponse(new ProbeResponse
+        {
+            ConfigurationId = _membershipView.ConfigurationId,
+            SenderInMembership = senderInMembership
+        });
     }
 
     /// <summary>
@@ -935,6 +976,249 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     {
         var notification = new ClusterEventNotification(evt, statusChange);
         _eventBroadcaster.TryPublish(notification);
+    }
+
+    /// <summary>
+    /// Called by the failure detector when a probe response indicates this node
+    /// is not in the remote node's membership view (i.e., we've been kicked).
+    /// </summary>
+    /// <param name="remoteConfigVersion">The configuration version from the probe response.</param>
+    private void OnKickedDetected(long remoteConfigVersion)
+    {
+        // Only process if we haven't already published the kicked event
+        if (_kickedEventPublished)
+        {
+            return;
+        }
+
+        _kickedEventPublished = true;
+        var localConfigVersion = _membershipView.ConfigurationId.Version;
+        LogNodeKicked(new LoggableEndpoint(_myAddr), remoteConfigVersion, localConfigVersion);
+
+        // Publish the kicked event so higher-level components can observe
+        var currentMembership = _membershipView.GetRing(0);
+        var nodeStatusChange = new NodeStatusChange(_myAddr, EdgeStatus.Down, _metadataManager.Get(_myAddr) ?? new Metadata());
+        var clusterStatusChange = new ClusterStatusChange(_membershipView.ConfigurationId, [.. currentMembership], [nodeStatusChange]);
+
+        PublishEvent(ClusterEvents.Kicked, clusterStatusChange);
+
+        // Schedule rejoin on the background task scheduler
+        var rejoinTask = Task.Factory.StartNew(
+            () => RejoinClusterAsync(_sharedResources.ShuttingDownToken),
+            _sharedResources.ShuttingDownToken,
+            TaskCreationOptions.None,
+            _sharedResources.TaskScheduler).Unwrap();
+        _sharedResources.TrackBackgroundTask(rejoinTask);
+    }
+
+    /// <summary>
+    /// Attempts to rejoin the cluster after being kicked.
+    /// Cycles through known members to find a live seed and performs the join protocol.
+    /// </summary>
+    private async Task RejoinClusterAsync(CancellationToken cancellationToken)
+    {
+        if (_isRejoining || _disposed != 0)
+        {
+            LogRejoinSkipped(new LoggableEndpoint(_myAddr));
+            return;
+        }
+        _isRejoining = true;
+
+        try
+        {
+            LogStartingRejoin(new LoggableEndpoint(_myAddr));
+
+            // Get known members from our current (stale) view to try as seeds
+            var knownMembers = _membershipView.GetRing(0).Where(e => !e.Equals(_myAddr)).ToList();
+            
+            // Generate a new node ID for the rejoin
+            var nodeId = RapidUtils.NodeIdFromUuid(_sharedResources.NewGuid());
+            var metadata = _metadataManager.Get(_myAddr) ?? new Metadata();
+
+            JoinResponse? successfulResponse = null;
+
+            foreach (var seed in knownMembers)
+            {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    return;
+                }
+
+                try
+                {
+                    successfulResponse = await TryRejoinThroughSeedAsync(seed, nodeId, metadata, cancellationToken).ConfigureAwait(true);
+                    if (successfulResponse != null)
+                    {
+                        break;
+                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    LogRejoinFailedThroughSeed(new LoggableEndpoint(_myAddr), new LoggableEndpoint(seed), ex.Message);
+                    // Try next seed
+                }
+            }
+
+            if (successfulResponse == null)
+            {
+                LogRejoinFailedNoSeeds(new LoggableEndpoint(_myAddr));
+                return;
+            }
+
+            // Reset internal state with new membership
+            ResetStateAfterRejoin(successfulResponse, nodeId);
+
+            LogRejoinSuccessful(
+                new LoggableEndpoint(_myAddr),
+                successfulResponse.Endpoints.Count,
+                successfulResponse.ConfigurationId);
+        }
+        finally
+        {
+            _isRejoining = false;
+        }
+    }
+
+    /// <summary>
+    /// Attempts to rejoin the cluster through a specific seed node.
+    /// </summary>
+    private async Task<JoinResponse?> TryRejoinThroughSeedAsync(
+        Endpoint seed,
+        NodeId nodeId,
+        Metadata metadata,
+        CancellationToken cancellationToken)
+    {
+        LogAttemptingRejoinThroughSeed(new LoggableEndpoint(_myAddr), new LoggableEndpoint(seed));
+
+        // Phase 1: PreJoin to get observers
+        var preJoinMessage = new PreJoinMessage
+        {
+            Sender = _myAddr,
+            NodeId = nodeId
+        };
+
+        var preJoinResponse = await _messagingClient.SendMessageAsync(
+            seed,
+            RapidUtils.ToRapidRequest(preJoinMessage),
+            cancellationToken).ConfigureAwait(true);
+
+        var joinResponse = preJoinResponse.JoinResponse;
+        LogRejoinPreJoinResponse(
+            new LoggableEndpoint(_myAddr),
+            joinResponse.StatusCode,
+            joinResponse.Endpoints.Count);
+
+        if (joinResponse.StatusCode != JoinStatusCode.SafeToJoin &&
+            joinResponse.StatusCode != JoinStatusCode.HostnameAlreadyInRing)
+        {
+            return null;
+        }
+
+        var observers = joinResponse.Endpoints.ToList();
+        if (observers.Count == 0)
+        {
+            return null;
+        }
+
+        // Phase 2: Contact observers
+        var ringNumbersPerObserver = new Dictionary<Endpoint, List<int>>();
+        for (var ringNumber = 0; ringNumber < observers.Count; ringNumber++)
+        {
+            var observer = observers[ringNumber];
+            if (!ringNumbersPerObserver.TryGetValue(observer, out var value))
+            {
+                ringNumbersPerObserver[observer] = value = [];
+            }
+            value.Add(ringNumber);
+        }
+
+        var tasks = ringNumbersPerObserver.Select(async entry =>
+        {
+            var joinMessageForObserver = new JoinMessage
+            {
+                Sender = _myAddr,
+                NodeId = nodeId,
+                Metadata = metadata,
+                ConfigurationId = joinResponse.ConfigurationId
+            };
+            joinMessageForObserver.RingNumber.AddRange(entry.Value);
+
+            return await _messagingClient.SendMessageBestEffortAsync(
+                entry.Key,
+                RapidUtils.ToRapidRequest(joinMessageForObserver),
+                cancellationToken).ConfigureAwait(true);
+        });
+
+        var responses = await Task.WhenAll(tasks).ConfigureAwait(true);
+        return responses.FirstOrDefault(r => r?.JoinResponse?.StatusCode == JoinStatusCode.SafeToJoin)?.JoinResponse;
+    }
+
+    /// <summary>
+    /// Resets the internal state after a successful rejoin.
+    /// </summary>
+    private void ResetStateAfterRejoin(JoinResponse response, NodeId nodeId)
+    {
+        lock (_membershipUpdateLock)
+        {
+            // Stop old failure detectors
+            foreach (var fd in _failureDetectors)
+            {
+                fd.Dispose();
+            }
+            _failureDetectors.Clear();
+
+            // Clear pending data
+            _joinersToRespondTo.Clear();
+            _joinerUuid.Clear();
+            _joinerMetadata.Clear();
+            _pendingConsensusMessages.Clear();
+
+            // Build new membership view
+            var metadataMap = new Dictionary<Endpoint, Metadata>();
+            for (var i = 0; i < response.MetadataKeys.Count && i < response.MetadataValues.Count; i++)
+            {
+                metadataMap[response.MetadataKeys[i]] = response.MetadataValues[i];
+            }
+
+            _membershipView = new MembershipViewBuilder(
+                _options.ObserversPerSubject,
+                [.. response.Identifiers],
+                [.. response.Endpoints]).BuildWithConfigurationId(new ConfigurationId(response.ConfigurationId));
+
+            // Reset metadata
+            _metadataManager.Clear();
+            _metadataManager.AddMetadata(metadataMap);
+
+            // Recreate cut detector
+            _cutDetection = _cutDetectorFactory.Create(_membershipView);
+
+            // Update broadcaster
+            _broadcaster.SetMembership([.. _membershipView.GetRing(0)]);
+
+            // Recreate consensus instance
+            var oldConsensus = _consensusInstance;
+            _consensusInstance = _consensusCoordinatorFactory.Create(_myAddr, _membershipView.ConfigurationId, _membershipView.Size, _broadcaster);
+            RegisterConsensusDecidedContinuation(_consensusInstance);
+            _announcedProposal = false;
+
+            // Dispose old consensus (fire and forget)
+            _ = oldConsensus.DisposeAsync();
+
+            // Reset flags
+            _kickedEventPublished = false;
+
+            // Publish the new view
+            _viewAccessor.PublishView(_membershipView);
+
+            // Create new failure detectors
+            CreateFailureDetectorsForCurrentConfiguration();
+
+            // Publish VIEW_CHANGE event to notify subscribers of the rejoin
+            var currentMembership = _membershipView.GetRing(0);
+            var nodeStatusChanges = GetInitialViewChange();
+            var clusterStatusChange = new ClusterStatusChange(_membershipView.ConfigurationId, [.. currentMembership], nodeStatusChanges);
+            PublishEvent(ClusterEvents.ViewChange, clusterStatusChange);
+        }
     }
 
     /// <summary>
