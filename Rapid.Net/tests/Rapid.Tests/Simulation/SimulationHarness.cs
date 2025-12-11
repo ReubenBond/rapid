@@ -45,12 +45,12 @@ internal sealed class SimulationHarness : IAsyncDisposable
         Random = new SimulationRandom(seed);
 
         // Create shared clock and harness-level queue
-        Clock = new SimulationClock();
+        Clock = new SimulationClock(StartDateTime);
         TaskQueue = new SimulationTaskQueue(Clock);
         TaskScheduler = new SimulationTaskScheduler(TaskQueue);
 
         // Create time provider using harness queue (for GetUtcNow queries)
-        _timeProvider = new SimulationTimeProvider(TaskQueue, StartDateTime);
+        _timeProvider = new SimulationTimeProvider(TaskQueue, Clock);
 
         Network = new SimulationNetwork(this, Random);
 
@@ -144,18 +144,10 @@ internal sealed class SimulationHarness : IAsyncDisposable
     /// </summary>
     /// <param name="node">The node to get the context for.</param>
     /// <returns>The node's simulation context.</returns>
-    public NodeSimulationContext GetNodeContext(SimulationNode node)
+    public SimulationNodeContext GetNodeContext(SimulationNode node)
     {
         ArgumentNullException.ThrowIfNull(node);
         return node.Context;
-    }
-
-    /// <summary>
-    /// Creates a new node simulation context for the specified node.
-    /// </summary>
-    private NodeSimulationContext CreateNodeContext()
-    {
-        return new NodeSimulationContext(Clock, StartDateTime);
     }
 
     #endregion
@@ -241,9 +233,8 @@ internal sealed class SimulationHarness : IAsyncDisposable
     public SimulationNode CreateUninitializedNode(int nodeId, SimulationNode? seedNode = null, RapidProtocolOptions? options = null)
     {
         var opts = ConfigureOptions(options);
-        var context = CreateNodeContext();
         var address = RapidUtils.HostFromParts("node", nodeId);
-        var node = new SimulationNode(this, context, address, seedNode?.Address, metadata: null, opts, LoggerFactory);
+        var node = new SimulationNode(this, address, seedNode?.Address, metadata: null, opts, LoggerFactory);
         RegisterNode(node);
         LogEvent(SimulationEventType.NodeCreated, $"Uninitialized node {nodeId} created");
         return node;
@@ -255,9 +246,8 @@ internal sealed class SimulationHarness : IAsyncDisposable
     public SimulationNode CreateSeedNode(int nodeId = 0, RapidProtocolOptions? options = null)
     {
         var opts = ConfigureOptions(options);
-        var context = CreateNodeContext();
         var address = RapidUtils.HostFromParts("node", nodeId);
-        var node = new SimulationNode(this, context, address, seedAddress: null, metadata: null, opts, LoggerFactory);
+        var node = new SimulationNode(this, address, seedAddress: null, metadata: null, opts, LoggerFactory);
         RegisterNode(node);
 
         // For seed nodes, initialization is synchronous (no network I/O needed),
@@ -279,9 +269,8 @@ internal sealed class SimulationHarness : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(seedNode);
         var opts = ConfigureOptions(options);
-        var context = CreateNodeContext();
         var address = RapidUtils.HostFromParts("node", nodeId);
-        var node = new SimulationNode(this, context, address, seedNode.Address, metadata: null, opts, LoggerFactory);
+        var node = new SimulationNode(this, address, seedNode.Address, metadata: null, opts, LoggerFactory);
         RegisterNode(node);
 
         LogEvent(SimulationEventType.NodeJoining, $"Node {nodeId} joining via seed");
@@ -390,9 +379,8 @@ internal sealed class SimulationHarness : IAsyncDisposable
             for (var i = 0; i < currentBatchSize; i++)
             {
                 var opts = ConfigureOptions(options);
-                var context = CreateNodeContext();
                 var address = RapidUtils.HostFromParts("node", nodeId++);
-                var node = new SimulationNode(this, context, address, seedNode.Address, metadata: null, opts, LoggerFactory);
+                var node = new SimulationNode(this, address, seedNode.Address, metadata: null, opts, LoggerFactory);
                 RegisterNode(node);
 
                 LogEvent(SimulationEventType.NodeJoining, $"Node {node.Address} joining via seed (parallel batch)");
@@ -447,7 +435,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
         var targetSize = remainingNodes.Count;
 
         // Drive the leave operation to completion (sends LeaveMessages to observers)
-        DriveToCompletion(() => node.LeaveAsync());
+        DriveToCompletion(node.LeaveAsync);
 
         // The leaving node must remain active to participate in consensus.
         // Run the simulation until all remaining nodes converge to the new size.
@@ -714,7 +702,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
         foreach (var node in Nodes)
         {
             var context = node.Context;
-            if (context.State == NodeSimulationState.Running && context.Step())
+            if (context.State == SimulationNodeState.Running && context.Step())
             {
                 return true;
             }
@@ -818,32 +806,6 @@ internal sealed class SimulationHarness : IAsyncDisposable
 
         LogEvent(SimulationEventType.MaxStepsReached, $"Max iterations ({maxIterations}) reached");
         return maxIterations;
-    }
-
-    /// <summary>
-    /// Drives a task to completion by running the simulation.
-    /// The task factory is invoked with the harness's synchronization context installed,
-    /// ensuring async continuations are captured on the simulation scheduler.
-    /// </summary>
-    public T DriveToCompletion<T>(Func<Task<T>> taskFactory, int maxIterations = 100000)
-    {
-        ArgumentNullException.ThrowIfNull(taskFactory);
-        using var lockScope = _lock.Enter();
-
-        // Use the harness queue's sync context for the task factory invocation
-        using var _ = TaskQueue.SynchronizationContext.Install();
-
-        var task = taskFactory();
-
-        if (!RunUntilCore(() => task.IsCompleted, maxIterations))
-        {
-            if (!task.IsCompleted)
-            {
-                throw new TimeoutException($"Task did not complete within {maxIterations} iterations");
-            }
-        }
-
-        return task.GetAwaiter().GetResult();
     }
 
     /// <summary>

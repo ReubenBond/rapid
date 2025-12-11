@@ -76,7 +76,7 @@ public sealed class ClusterBasicTests : IAsyncLifetime
         Assert.True(seedNode.IsInitialized);
 
         // Leave should not throw (degenerates to shutdown for single node)
-        _harness.DriveToCompletion(() => seedNode.LeaveAsync());
+        _harness.DriveToCompletion(seedNode.LeaveAsync);
     }
 
     #endregion

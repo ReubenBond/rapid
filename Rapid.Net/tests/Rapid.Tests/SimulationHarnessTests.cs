@@ -197,17 +197,6 @@ public sealed class SimulationHarnessTests : IAsyncLifetime
         Assert.False(_harness.TaskQueue.HasItems);
     }
 
-    [Fact]
-    public void DriveToCompletionWorks()
-    {
-        var seedNode = _harness.CreateSeedNode();
-
-        // DriveToCompletion should complete synchronously for already-started tasks
-        var result = _harness.DriveToCompletion(() => Task.FromResult(42));
-
-        Assert.Equal(42, result);
-    }
-
     #endregion
 
     #region Per-Node Simulation Control Tests
@@ -358,7 +347,7 @@ public sealed class SimulationHarnessTests : IAsyncLifetime
         Assert.NotNull(context.TaskScheduler);
         Assert.NotNull(context.SynchronizationContext);
         Assert.NotNull(context.TimeProvider);
-        Assert.Equal(NodeSimulationState.Running, context.State);
+        Assert.Equal(SimulationNodeState.Running, context.State);
     }
 
     [Fact]

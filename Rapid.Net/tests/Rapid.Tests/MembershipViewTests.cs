@@ -678,7 +678,7 @@ public class MembershipViewTests
         Assert.Throws<InvalidOperationException>(() => builder.IsHostPresent(n1));
         Assert.Throws<InvalidOperationException>(() => builder.IsIdentifierPresent(Utils.NodeIdFromUuid(Guid.NewGuid())));
         Assert.Throws<InvalidOperationException>(() => builder.IsSafeToJoin(n1, Utils.NodeIdFromUuid(Guid.NewGuid())));
-        Assert.Throws<InvalidOperationException>(() => builder.Build());
+        Assert.Throws<InvalidOperationException>(builder.Build);
         Assert.Throws<InvalidOperationException>(() => _ = builder.RingCount);
     }
 }

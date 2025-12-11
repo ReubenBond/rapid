@@ -9,37 +9,33 @@ namespace Rapid.Tests.Simulation;
 /// Timer callbacks are scheduled through the queue instead of being executed immediately.
 /// This enables fully deterministic simulation testing where task execution order is controlled.
 /// 
-/// Time is tracked centrally by the <see cref="SimulationTaskQueue"/> - this provider
-/// delegates all time queries and modifications to the task queue.
+/// Time is tracked centrally by the <see cref="SimulationClock"/> - this provider
+/// delegates all time queries to the clock.
 /// </summary>
 internal sealed class SimulationTimeProvider : TimeProvider
 {
     private readonly SimulationTaskQueue _taskQueue;
-    private readonly DateTimeOffset _start;
+    private readonly SimulationClock _clock;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="SimulationTimeProvider"/> class with a task queue.
+    /// Initializes a new instance of the <see cref="SimulationTimeProvider"/> class with a task queue and clock.
     /// </summary>
     /// <param name="taskQueue">The task queue for scheduling timer callbacks.</param>
-    /// <param name="startDateTime">The initial time and date reported by the provider. Defaults to midnight January 1st 2000.</param>
-    public SimulationTimeProvider(SimulationTaskQueue taskQueue, DateTimeOffset? startDateTime = null)
+    /// <param name="clock">The simulation clock for time queries.</param>
+    public SimulationTimeProvider(SimulationTaskQueue taskQueue, SimulationClock clock)
     {
         ArgumentNullException.ThrowIfNull(taskQueue);
+        ArgumentNullException.ThrowIfNull(clock);
 
         _taskQueue = taskQueue;
-        _start = startDateTime ?? new DateTimeOffset(2000, 1, 1, 0, 0, 0, 0, TimeSpan.Zero);
-
-        if (startDateTime.HasValue)
-        {
-            ArgumentOutOfRangeException.ThrowIfLessThan(startDateTime.Value.Ticks, 0);
-        }
+        _clock = clock;
     }
 
     /// <inheritdoc />
-    public override DateTimeOffset GetUtcNow() => _start + _taskQueue.CurrentTime;
+    public override DateTimeOffset GetUtcNow() => _clock.UtcNow;
 
     /// <inheritdoc />
-    public override long GetTimestamp() => (_start + _taskQueue.CurrentTime).Ticks;
+    public override long GetTimestamp() => _clock.UtcNow.Ticks;
 
     /// <inheritdoc />
     public override TimeZoneInfo LocalTimeZone => TimeZoneInfo.Utc;

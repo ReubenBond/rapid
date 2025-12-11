@@ -7,10 +7,12 @@ namespace Rapid.Tests;
 /// </summary>
 public sealed class SimulationSchedulerTests
 {
+    private static SimulationClock CreateClock() => new(DateTimeOffset.UtcNow);
+
     [Fact]
     public void QueuedTasksAreNotExecutedAutomatically()
     {
-        var clock = new SimulationClock();
+        var clock = CreateClock();
         var taskQueue = new SimulationTaskQueue(clock);
         var scheduler = new SimulationTaskScheduler(taskQueue);
         var executed = false;
@@ -25,7 +27,7 @@ public sealed class SimulationSchedulerTests
     [Fact]
     public void StepExecutesSingleTask()
     {
-        var clock = new SimulationClock();
+        var clock = CreateClock();
         var taskQueue = new SimulationTaskQueue(clock);
         var scheduler = new SimulationTaskScheduler(taskQueue);
         var executed = false;
@@ -43,7 +45,7 @@ public sealed class SimulationSchedulerTests
     [Fact]
     public void StepAllExecutesAllTasks()
     {
-        var clock = new SimulationClock();
+        var clock = CreateClock();
         var taskQueue = new SimulationTaskQueue(clock);
         var scheduler = new SimulationTaskScheduler(taskQueue);
         var count = 0;
@@ -64,7 +66,7 @@ public sealed class SimulationSchedulerTests
     [Fact]
     public void StepWithCountLimitsExecution()
     {
-        var clock = new SimulationClock();
+        var clock = CreateClock();
         var taskQueue = new SimulationTaskQueue(clock);
         var scheduler = new SimulationTaskScheduler(taskQueue);
         var count = 0;
@@ -89,7 +91,7 @@ public sealed class SimulationSchedulerTests
     [Fact]
     public void ClearRemovesAllPendingTasks()
     {
-        var clock = new SimulationClock();
+        var clock = CreateClock();
         var taskQueue = new SimulationTaskQueue(clock);
         var scheduler = new SimulationTaskScheduler(taskQueue);
 
@@ -107,7 +109,7 @@ public sealed class SimulationSchedulerTests
     [Fact]
     public void TasksExecuteInFifoOrder()
     {
-        var clock = new SimulationClock();
+        var clock = CreateClock();
         var taskQueue = new SimulationTaskQueue(clock);
         var scheduler = new SimulationTaskScheduler(taskQueue);
         var order = new List<int>();
@@ -127,7 +129,7 @@ public sealed class SimulationSchedulerTests
     [Fact]
     public void SynchronizationContextPostRoutesToScheduler()
     {
-        var clock = new SimulationClock();
+        var clock = CreateClock();
         var taskQueue = new SimulationTaskQueue(clock);
         var syncContext = taskQueue.SynchronizationContext;
         var executed = false;
@@ -142,7 +144,7 @@ public sealed class SimulationSchedulerTests
     [Fact]
     public void SynchronizationContextSendExecutesSynchronously()
     {
-        var clock = new SimulationClock();
+        var clock = CreateClock();
         var taskQueue = new SimulationTaskQueue(clock);
         var syncContext = taskQueue.SynchronizationContext;
         var executed = false;
@@ -155,7 +157,7 @@ public sealed class SimulationSchedulerTests
     [Fact]
     public void SynchronizationContextCreateCopyReturnsNewInstance()
     {
-        var clock = new SimulationClock();
+        var clock = CreateClock();
         var taskQueue = new SimulationTaskQueue(clock);
         var syncContext = taskQueue.SynchronizationContext;
 
@@ -168,7 +170,7 @@ public sealed class SimulationSchedulerTests
     [Fact]
     public void SchedulerWithTaskQueueOrdersByTime()
     {
-        var clock = new SimulationClock();
+        var clock = CreateClock();
         var taskQueue = new SimulationTaskQueue(clock);
         var scheduler = new SimulationTaskScheduler(taskQueue);
         var order = new List<string>();
@@ -191,7 +193,7 @@ public sealed class SimulationSchedulerTests
     [Fact]
     public void TryExecuteOneReturnsFalseWhenEmpty()
     {
-        var clock = new SimulationClock();
+        var clock = CreateClock();
         var taskQueue = new SimulationTaskQueue(clock);
 
         var result = taskQueue.RunOnce();
@@ -202,7 +204,7 @@ public sealed class SimulationSchedulerTests
     [Fact]
     public void HasPendingTasksReflectsQueueState()
     {
-        var clock = new SimulationClock();
+        var clock = CreateClock();
         var taskQueue = new SimulationTaskQueue(clock);
         var scheduler = new SimulationTaskScheduler(taskQueue);
 

@@ -1140,7 +1140,6 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     public void Shutdown()
     {
         LogShutdown();
-        _viewAccessor.Complete();
 
         // Dispose the event channel to signal completion to all subscribers
         _eventChannel.Dispose();

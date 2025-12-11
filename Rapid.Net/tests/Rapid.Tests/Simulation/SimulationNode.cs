@@ -18,7 +18,7 @@ namespace Rapid.Tests.Simulation;
 internal sealed class SimulationNode
 {
     private readonly SimulationHarness _harness;
-    private readonly NodeSimulationContext _context;
+    private readonly SimulationNodeContext _context;
     private readonly RapidProtocolOptions _protocolOptions;
     private readonly ILoggerFactory? _loggerFactory;
     private readonly ILogger<SimulationNode> _logger;
@@ -42,12 +42,12 @@ internal sealed class SimulationNode
     /// <summary>
     /// Gets the simulation context for this node.
     /// </summary>
-    public NodeSimulationContext Context => _context;
+    public SimulationNodeContext Context => _context;
 
     /// <summary>
     /// Gets the simulation random instance for this node.
     /// </summary>
-    public SimulationRandom Random { get; }
+    public SimulationRandom Random => _context.Random;
 
     /// <summary>
     /// Gets the current membership view of this node.
@@ -79,7 +79,7 @@ internal sealed class SimulationNode
     /// <summary>
     /// Gets whether this node is currently suspended.
     /// </summary>
-    public bool IsSuspended => _context.State == NodeSimulationState.Suspended;
+    public bool IsSuspended => _context.State == SimulationNodeState.Suspended;
 
     /// <summary>
     /// Suspends this node, preventing it from executing tasks.
@@ -112,7 +112,7 @@ internal sealed class SimulationNode
         Suspend();
 
         // Schedule auto-resume on the harness queue
-        _harness.TaskQueue.EnqueueAfter(() => Resume(), duration);
+        _harness.TaskQueue.EnqueueAfter(Resume, duration);
 
         _harness.LogNodeEvent(this, SimulationEventType.NodeSuspended, $"Node suspended for {duration}");
     }
@@ -135,7 +135,6 @@ internal sealed class SimulationNode
 
     internal SimulationNode(
         SimulationHarness harness,
-        NodeSimulationContext context,
         Endpoint address,
         Endpoint? seedAddress,
         Metadata? metadata,
@@ -143,9 +142,8 @@ internal sealed class SimulationNode
         ILoggerFactory? loggerFactory)
     {
         _harness = harness;
-        _context = context;
+        _context = new SimulationNodeContext(harness.Clock, harness.CreateDerivedRandom());
         Address = address;
-        Random = harness.CreateDerivedRandom();
 
         _loggerFactory = loggerFactory ?? harness.LoggerFactory;
         _logger = _loggerFactory?.CreateLogger<SimulationNode>()
@@ -159,7 +157,7 @@ internal sealed class SimulationNode
         // Create shared resources with the node's time provider and task scheduler
         var sharedResourcesLogger = _loggerFactory?.CreateLogger<SharedResources>()
             ?? NullLogger<SharedResources>.Instance;
-        _sharedResources = new SharedResources(sharedResourcesLogger, context.TimeProvider, context.TaskScheduler, Random, Random.NextGuid);
+        _sharedResources = new SharedResources(sharedResourcesLogger, _context.TimeProvider, _context.TaskScheduler, _context.Random, _context.Random.NextGuid);
 
         // Create in-memory messaging client using GrpcTimeout from protocol options.
         // For tests with suspended nodes requiring Classic Paxos fallback,

@@ -99,12 +99,8 @@ internal sealed class SimulationTaskQueue
     // Single queue ordered by due time, then sequence number
     private readonly SortedSet<ScheduledItem> _queue = new(new ScheduledItemComparer());
     private readonly SimulationClock _clock;
+    private readonly Lock _lock = new();
     private long _sequenceNumber;
-
-    /// <summary>
-    /// Lock object used to protect all accesses to the queue's internal state.
-    /// </summary>
-    public object Lock { get; } = new object();
 
     /// <summary>
     /// Gets the scheduled items in the queue, ordered by due time then sequence number.
@@ -126,11 +122,6 @@ internal sealed class SimulationTaskQueue
     }
 
     /// <summary>
-    /// Gets the clock used by this queue.
-    /// </summary>
-    public SimulationClock Clock => _clock;
-
-    /// <summary>
     /// Gets the current time offset from the start.
     /// </summary>
     public TimeSpan CurrentTime => _clock.CurrentTime;
@@ -147,7 +138,7 @@ internal sealed class SimulationTaskQueue
     {
         get
         {
-            lock (Lock)
+            lock (_lock)
             {
                 return _queue.Count > 0;
             }
@@ -161,7 +152,7 @@ internal sealed class SimulationTaskQueue
     {
         get
         {
-            lock (Lock)
+            lock (_lock)
             {
                 foreach (var item in _queue)
                 {
@@ -180,7 +171,7 @@ internal sealed class SimulationTaskQueue
     public void Enqueue(ScheduledItem item)
     {
         ArgumentNullException.ThrowIfNull(item);
-        lock (Lock)
+        lock (_lock)
         {
             ScheduleCore(item, CurrentTime);
         }
@@ -196,7 +187,7 @@ internal sealed class SimulationTaskQueue
     {
         ArgumentNullException.ThrowIfNull(action);
         ArgumentOutOfRangeException.ThrowIfLessThan(delay, TimeSpan.Zero);
-        lock (Lock)
+        lock (_lock)
         {
             ScheduleCore(new ScheduledActionItem(action), CurrentTime + delay);
         }
@@ -211,7 +202,7 @@ internal sealed class SimulationTaskQueue
     {
         ArgumentNullException.ThrowIfNull(item);
         ArgumentOutOfRangeException.ThrowIfLessThan(delay, TimeSpan.Zero);
-        lock (Lock)
+        lock (_lock)
         {
             ScheduleCore(item, CurrentTime + delay);
         }
@@ -239,7 +230,7 @@ internal sealed class SimulationTaskQueue
     /// <param name="item">The item to remove.</param>
     internal void RemoveItem(ScheduledItem item)
     {
-        lock (Lock)
+        lock (_lock)
         {
             _queue.Remove(item);
         }
@@ -252,7 +243,7 @@ internal sealed class SimulationTaskQueue
     public bool RunOnce()
     {
         ScheduledItem? item;
-        lock (Lock)
+        lock (_lock)
         {
             if (_queue.Count == 0)
                 return false;
@@ -292,7 +283,7 @@ internal sealed class SimulationTaskQueue
     /// </summary>
     public void Clear()
     {
-        lock (Lock)
+        lock (_lock)
         {
             _queue.Clear();
         }

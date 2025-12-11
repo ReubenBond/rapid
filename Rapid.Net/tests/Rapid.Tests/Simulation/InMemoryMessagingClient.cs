@@ -117,7 +117,7 @@ internal sealed class InMemoryMessagingClient : IMessagingClient
     {
         // Get the target node's context for message delivery
         // If the target node was crashed/disposed, this will fail - handle gracefully
-        NodeSimulationContext targetContext;
+        SimulationNodeContext targetContext;
         try
         {
             targetContext = _harness.GetNodeContext(targetNode);

@@ -22,9 +22,9 @@ public class SimulationTimeProviderTests
         public TestTimeProvider(DateTimeOffset? startDateTime = null)
         {
             Start = startDateTime ?? new DateTimeOffset(2000, 1, 1, 0, 0, 0, 0, TimeSpan.Zero);
-            Clock = new SimulationClock();
+            Clock = new SimulationClock(Start);
             TaskQueue = new SimulationTaskQueue(Clock);
-            TimeProvider = new SimulationTimeProvider(TaskQueue, startDateTime);
+            TimeProvider = new SimulationTimeProvider(TaskQueue, Clock);
         }
 
         // Convenience delegations to TimeProvider
@@ -504,7 +504,7 @@ public class SimulationTimeProviderTests
 
         p.Advance(TimeSpan.FromSeconds(3));
         // This should throw due to timer1's callback - exceptions propagate from timer callbacks
-        var ex = Assert.Throws<InvalidOperationException>(() => p.RunUntilIdle());
+        var ex = Assert.Throws<InvalidOperationException>(p.RunUntilIdle);
         Assert.Equal("Test exception", ex.Message);
     }
 

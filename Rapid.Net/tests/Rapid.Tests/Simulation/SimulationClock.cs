@@ -7,13 +7,19 @@ namespace Rapid.Tests.Simulation;
 /// a unified view of time while maintaining separate task queues.
 /// </summary>
 /// <remarks>
-/// Creates a new simulation clock with the specified initial time.
+/// Creates a new simulation clock with the specified start date/time and initial time offset.
 /// </remarks>
+/// <param name="startDateTime">The starting date/time for the simulation.</param>
 /// <param name="initialTime">The initial time offset. Default is <see cref="TimeSpan.Zero"/>.</param>
-internal sealed class SimulationClock(TimeSpan initialTime = default)
+internal sealed class SimulationClock(DateTimeOffset startDateTime, TimeSpan initialTime = default)
 {
     private readonly Lock _lock = new();
     private TimeSpan _currentTime = initialTime;
+
+    /// <summary>
+    /// Gets the starting date/time for the simulation.
+    /// </summary>
+    public DateTimeOffset StartDateTime { get; } = startDateTime;
 
     /// <summary>
     /// Gets the current simulated time as an offset from the start.
@@ -30,6 +36,11 @@ internal sealed class SimulationClock(TimeSpan initialTime = default)
     }
 
     /// <summary>
+    /// Gets the current simulated date/time (StartDateTime + CurrentTime).
+    /// </summary>
+    public DateTimeOffset UtcNow => StartDateTime + CurrentTime;
+
+    /// <summary>
     /// Advances the current time by the specified amount.
     /// </summary>
     /// <param name="delta">The amount to advance. Must be non-negative.</param>
@@ -40,24 +51,6 @@ internal sealed class SimulationClock(TimeSpan initialTime = default)
         lock (_lock)
         {
             _currentTime += delta;
-        }
-    }
-
-    /// <summary>
-    /// Sets the current time to the specified value.
-    /// </summary>
-    /// <param name="time">The new time. Must not be before the current time.</param>
-    /// <exception cref="ArgumentOutOfRangeException">Thrown if <paramref name="time"/> is before the current time.</exception>
-    public void SetTime(TimeSpan time)
-    {
-        lock (_lock)
-        {
-            if (time < _currentTime)
-            {
-                throw new ArgumentOutOfRangeException(nameof(time),
-                    $"Cannot go back in time. Current time is {_currentTime}, attempted to set to {time}.");
-            }
-            _currentTime = time;
         }
     }
 }

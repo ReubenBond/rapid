@@ -463,7 +463,7 @@ public sealed class SubscriptionsTests(ITestOutputHelper outputHelper) : IAsyncD
         var subscription = seed.Events
             .Where(n => n.Event == ClusterEvents.ViewChange)
             .Select(n => n.Change.Membership.Count)
-            .Subscribe(count => membershipCounts.Add(count));
+            .Subscribe(membershipCounts.Add);
         _observableSubscriptions.Add(subscription);
 
         var (joinerApp, joiner) = await _cluster.CreateJoinerNodeAsync(joinerAddress, seedAddress, TestContext.Current.CancellationToken);

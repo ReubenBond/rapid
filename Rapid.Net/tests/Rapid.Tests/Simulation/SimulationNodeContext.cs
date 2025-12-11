@@ -3,7 +3,7 @@ namespace Rapid.Tests.Simulation;
 /// <summary>
 /// Represents the execution state of a simulated node.
 /// </summary>
-internal enum NodeSimulationState
+internal enum SimulationNodeState
 {
     /// <summary>
     /// The node is running and will execute tasks during simulation stepping.
@@ -20,33 +20,40 @@ internal enum NodeSimulationState
 
 /// <summary>
 /// Encapsulates all per-node simulation state, including the node's task queue,
-/// task scheduler, synchronization context, and time provider.
+/// task scheduler, synchronization context, time provider, and random number generator.
 /// 
 /// Each <see cref="SimulationNode"/> has its own context, allowing fine-grained control
 /// over individual node execution (pause, resume, step) while sharing a unified
 /// <see cref="SimulationClock"/> for time synchronization.
 /// </summary>
-internal sealed class NodeSimulationContext
+internal sealed class SimulationNodeContext
 {
     /// <summary>
-    /// Creates a new node simulation context using the specified shared clock.
+    /// Creates a new simulation node context using the specified shared clock and random generator.
     /// </summary>
     /// <param name="clock">The shared simulation clock for time coordination.</param>
-    /// <param name="startDateTime">The starting date/time for the time provider.</param>
-    public NodeSimulationContext(SimulationClock clock, DateTimeOffset startDateTime)
+    /// <param name="random">The deterministic random number generator for this node.</param>
+    public SimulationNodeContext(SimulationClock clock, SimulationRandom random)
     {
         ArgumentNullException.ThrowIfNull(clock);
+        ArgumentNullException.ThrowIfNull(random);
 
         Clock = clock;
+        Random = random;
         TaskQueue = new SimulationTaskQueue(clock);
         TaskScheduler = new SimulationTaskScheduler(TaskQueue);
-        TimeProvider = new SimulationTimeProvider(TaskQueue, startDateTime);
+        TimeProvider = new SimulationTimeProvider(TaskQueue, clock);
     }
 
     /// <summary>
     /// Gets the shared simulation clock.
     /// </summary>
     public SimulationClock Clock { get; }
+
+    /// <summary>
+    /// Gets the deterministic random number generator for this node.
+    /// </summary>
+    public SimulationRandom Random { get; }
 
     /// <summary>
     /// Gets the task queue for this node.
@@ -75,7 +82,7 @@ internal sealed class NodeSimulationContext
     /// <summary>
     /// Gets the current execution state of this node.
     /// </summary>
-    public NodeSimulationState State { get; private set; } = NodeSimulationState.Running;
+    public SimulationNodeState State { get; private set; } = SimulationNodeState.Running;
 
     /// <summary>
     /// Gets whether this node has any tasks ready to execute at the current time.
@@ -84,7 +91,7 @@ internal sealed class NodeSimulationContext
     {
         get
         {
-            if (State == NodeSimulationState.Suspended)
+            if (State == SimulationNodeState.Suspended)
                 return false;
 
             // Check if the queue has any items due at or before the current time
@@ -111,7 +118,7 @@ internal sealed class NodeSimulationContext
     /// <returns>True if a task was executed; false if no tasks are ready or the node is suspended.</returns>
     public bool Step()
     {
-        if (State == NodeSimulationState.Suspended)
+        if (State == SimulationNodeState.Suspended)
             return false;
 
         return TaskQueue.RunOnce();
@@ -123,7 +130,7 @@ internal sealed class NodeSimulationContext
     /// <returns>The number of tasks executed. Returns 0 if the node is suspended.</returns>
     public int RunUntilIdle()
     {
-        if (State == NodeSimulationState.Suspended)
+        if (State == SimulationNodeState.Suspended)
             return 0;
 
         return TaskQueue.RunUntilIdle();
@@ -135,7 +142,7 @@ internal sealed class NodeSimulationContext
     /// </summary>
     internal void Suspend()
     {
-        State = NodeSimulationState.Suspended;
+        State = SimulationNodeState.Suspended;
     }
 
     /// <summary>
@@ -144,7 +151,7 @@ internal sealed class NodeSimulationContext
     /// </summary>
     internal void Resume()
     {
-        State = NodeSimulationState.Running;
+        State = SimulationNodeState.Running;
     }
 
     /// <summary>
