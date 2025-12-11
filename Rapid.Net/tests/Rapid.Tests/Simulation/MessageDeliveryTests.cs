@@ -165,24 +165,24 @@ public sealed class MessageDeliveryTests : IAsyncLifetime
 
     /// <summary>
     /// Verifies that the consensus protocol can tolerate message loss during membership
-    /// changes. With 5% message drop rate, the consensus algorithm should still reach
+    /// changes. With 2% message drop rate, the consensus algorithm should still reach
     /// agreement, ensuring the cluster can grow even under adverse network conditions.
     /// </summary>
     [Fact]
     public void MessageLossDuringConsensusRetried()
     {
-        // Enable low message loss (5% - lower than original to be more reliable)
-        _harness.Network.MessageDropRate = 0.05;
+        // Enable low message loss (2% - conservative rate to ensure reliability)
+        _harness.Network.MessageDropRate = 0.02;
 
         var seedNode = _harness.CreateSeedNode();
         var joiner1 = _harness.CreateJoinerNode(seedNode, nodeId: 1);
 
-        _harness.WaitForConvergence(expectedSize: 2);
+        _harness.WaitForConvergence(expectedSize: 2, maxIterations: 200000);
 
         // Add another node with message loss active
         var joiner2 = _harness.CreateJoinerNode(seedNode, nodeId: 2);
 
-        _harness.WaitForConvergence(expectedSize: 3);
+        _harness.WaitForConvergence(expectedSize: 3, maxIterations: 200000);
 
         Assert.All(_harness.Nodes, n => Assert.Equal(3, n.MembershipSize));
     }

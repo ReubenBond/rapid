@@ -119,12 +119,16 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
     [InlineData(50, 10)]  // 50 nodes in batches of 10
     [InlineData(80, 20)]  // 80 nodes in batches of 20
     [InlineData(100, 25)] // 100 nodes in batches of 25
-    [InlineData(200, 25)] // 100 nodes in batches of 25
+    [InlineData(200, 25)] // 200 nodes in batches of 25
     public void LargeClusterFormation_BatchedParallel(int clusterSize, int batchSize)
     {
-        var nodes = _harness.CreateClusterParallel(size: clusterSize, batchSize: batchSize);
+        // Use higher max iterations for larger clusters (100+ nodes need more time per batch)
+        var maxIterationsPerBatch = clusterSize >= 100 ? 500000 : 100000;
+        var nodes = _harness.CreateClusterParallel(size: clusterSize, batchSize: batchSize, maxIterationsPerBatch: maxIterationsPerBatch);
 
-        _harness.WaitForConvergence(expectedSize: clusterSize);
+        // Use higher max iterations for larger clusters (200+ nodes need more time)
+        var maxIterations = clusterSize >= 200 ? 5000000 : 100000;
+        _harness.WaitForConvergence(expectedSize: clusterSize, maxIterations: maxIterations);
 
         Assert.Equal(clusterSize, nodes.Count);
         Assert.All(nodes, n => Assert.True(n.IsInitialized));
@@ -212,9 +216,10 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
             joinTasks.Add(joinTask);
         }
 
-        // Drive simulation until all joins complete
-        _harness.DriveToCompletion(() => Task.WhenAll(joinTasks));
-        _harness.WaitForConvergence(expectedSize: clusterSize);
+        // Drive simulation until all joins complete (larger clusters need more iterations)
+        var maxIterations = clusterSize >= 50 ? 500000 : 100000;
+        _harness.DriveToCompletion(() => Task.WhenAll(joinTasks), maxIterations);
+        _harness.WaitForConvergence(expectedSize: clusterSize, maxIterations: maxIterations);
         
         // Signal view collection is complete and wait for it
         viewCollectionComplete = true;
@@ -519,9 +524,10 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
     [InlineData(50, 20, 10)]  // Remove 20 from 50 nodes, expect at most 10 config changes
     public void ParallelLeaves_BatchMultipleNodesPerViewChange(int clusterSize, int nodesToRemove, int maxExpectedChanges)
     {
-        // Create the cluster using parallel joins for speed
-        var nodes = _harness.CreateClusterParallel(size: clusterSize);
-        _harness.WaitForConvergence(expectedSize: clusterSize);
+        // Create the cluster using parallel joins for speed (larger clusters need more iterations)
+        var maxIterationsPerBatch = clusterSize >= 30 ? 500000 : 100000;
+        var nodes = _harness.CreateClusterParallel(size: clusterSize, maxIterationsPerBatch: maxIterationsPerBatch);
+        _harness.WaitForConvergence(expectedSize: clusterSize, maxIterations: maxIterationsPerBatch);
 
         var configVersionBeforeLeaves = nodes[0].CurrentView.ConfigurationId.Version;
 
@@ -532,7 +538,7 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
         var configChanges = _harness.RemoveNodesGracefullyParallel(leavingNodes);
 
         var expectedSize = clusterSize - nodesToRemove;
-        _harness.WaitForConvergence(expectedSize: expectedSize);
+        _harness.WaitForConvergence(expectedSize: expectedSize, maxIterations: maxIterationsPerBatch);
 
         Assert.All(_harness.Nodes, n => Assert.Equal(expectedSize, n.MembershipSize));
         

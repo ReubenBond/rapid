@@ -16,6 +16,14 @@ namespace Rapid;
 /// 
 /// A new instance is created for each view, so no Clear() method is needed.
 /// </summary>
+/// <remarks>
+/// TODO: Currently, if a node is reported as DOWN but then reported as UP again (e.g., a transient
+/// failure that recovers before reaching the H threshold), the original DOWN reports remain in the
+/// system and are not cleared. The subsequent UP report is simply ignored as a duplicate for that
+/// ring number. This could potentially lead to stale DOWN reports contributing to an incorrect
+/// proposal if the node experiences another failure later. Consider adding support for clearing
+/// stale DOWN reports when a subsequent UP report is received for the same (node, ringNumber) pair.
+/// </remarks>
 internal sealed partial class MultiNodeCutDetector : ICutDetector
 {
     private readonly int _highWaterMark; // High watermark

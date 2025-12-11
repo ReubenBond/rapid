@@ -25,11 +25,17 @@ internal sealed class SimulationHarness : IAsyncDisposable
     private readonly Lock _eventLogLock = new();
     private readonly Lock _randomLock = new();
     private readonly ILogger<SimulationHarness>? _logger;
-    private readonly string _logFilePath;
+    private readonly InMemoryLoggerProvider _inMemoryLoggerProvider;
     private readonly SimulationClock _clock;
     private readonly SimulationTaskQueue _harnessQueue;
     private readonly SimulationTaskScheduler _harnessScheduler;
     private bool _disposed;
+
+    /// <summary>
+    /// Maximum size in bytes for full log attachment (1 MB).
+    /// If logs exceed this size, only Information level and above will be attached.
+    /// </summary>
+    private const long MaxFullLogSizeBytes = 1024 * 1024;
 
     /// <summary>
     /// Creates a new simulation harness with the specified seed.
@@ -55,17 +61,13 @@ internal sealed class SimulationHarness : IAsyncDisposable
 
         Network = new SimulationNetwork(this, Random);
 
-        // Create logger factory with file provider only (xUnit output is too verbose)
-        var testName = context.Test?.TestDisplayName;
-        _logFilePath = GenerateLogFilePath(testName, seed);
+        // Create logger factory with in-memory provider for attachment to test context
+        _inMemoryLoggerProvider = new InMemoryLoggerProvider(_timeProvider);
         LoggerFactory = Microsoft.Extensions.Logging.LoggerFactory.Create(builder =>
         {
-            builder.AddProvider(new FileLoggerProvider(_logFilePath, _timeProvider));
+            builder.AddProvider(_inMemoryLoggerProvider);
             builder.SetMinimumLevel(LogLevel.Debug);
         });
-
-        // Log the file path to xUnit so users know where to find detailed logs
-        context.TestOutputHelper?.WriteLine($"Simulation logs: {_logFilePath}");
 
         _logger = LoggerFactory.CreateLogger<SimulationHarness>();
         _timeProvider.SetLogger(LoggerFactory.CreateLogger<SimulationTimeProvider>());
@@ -419,11 +421,16 @@ internal sealed class SimulationHarness : IAsyncDisposable
     /// Number of nodes to initiate joining simultaneously. Default is 0 which means all nodes.
     /// Smaller batch sizes provide more control over join ordering while still enabling batching.
     /// </param>
+    /// <param name="maxIterationsPerBatch">
+    /// Maximum simulation iterations to run for each batch of joins. Default is 100000.
+    /// Larger clusters may need higher values (e.g., 500000 for 200+ nodes).
+    /// </param>
     /// <returns>List of all nodes in the cluster.</returns>
     public IReadOnlyList<SimulationNode> CreateClusterParallel(
         int size,
         RapidProtocolOptions? options = null,
-        int batchSize = 0)
+        int batchSize = 0,
+        int maxIterationsPerBatch = 100000)
     {
         if (size < 1)
         {
@@ -473,7 +480,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
             }
 
             // Drive the simulation until all joins in this batch complete
-            DriveToCompletion(() => Task.WhenAll(joinTasks));
+            DriveToCompletion(() => Task.WhenAll(joinTasks), maxIterationsPerBatch);
 
             // Log completion
             foreach (var node in batchNodes)
@@ -1102,42 +1109,67 @@ internal sealed class SimulationHarness : IAsyncDisposable
         _nodes.Clear();
         _nodeRegistry.Clear();
 
-        // Dispose the logger factory and attach log file to test context
+        // Attach logs to test context BEFORE disposing the provider
+        AttachLogsToTestContext(TestContext.Current);
+
+        // Dispose the logger factory first (removes reference to provider)
         LoggerFactory.Dispose();
-        AttachLogFileToTestContext(TestContext.Current);
+
+        // Explicitly dispose the in-memory logger provider to satisfy CA2213
+        _inMemoryLoggerProvider.Dispose();
 
         await Task.CompletedTask.ConfigureAwait(true);
     }
 
     /// <summary>
-    /// Attaches the log file to the test context if it exists.
+    /// Attaches buffered logs to the test context.
+    /// If the full log exceeds 1MB, a warning is added and only Information level and above are attached.
     /// </summary>
-    private void AttachLogFileToTestContext(ITestContext? testContext)
+    private void AttachLogsToTestContext(ITestContext? testContext)
     {
-        if (testContext == null || !File.Exists(_logFilePath))
+        if (testContext == null)
         {
             return;
         }
 
-        var logFileName = Path.GetFileName(_logFilePath);
-        testContext.AddAttachment(logFileName, _logFilePath);
+        var buffer = _inMemoryLoggerProvider.Buffer;
+        var (fullContent, fullSizeBytes) = buffer.FormatAllEntriesWithSize();
+
+        string logContent;
+        string logFileName;
+
+        if (fullSizeBytes <= MaxFullLogSizeBytes)
+        {
+            // Full log is under 1MB - attach it directly
+            logContent = fullContent;
+            logFileName = GenerateLogFileName(testContext.Test?.TestDisplayName, Seed);
+        }
+        else
+        {
+            // Full log exceeds 1MB - warn and attach only Information and above
+            testContext.TestOutputHelper?.WriteLine(
+                $"Warning: Full simulation log ({fullSizeBytes:N0} bytes) exceeds 1MB limit. " +
+                $"Attaching only Information level and above.");
+
+            var (filteredContent, _) = buffer.FormatEntriesWithSize(LogLevel.Information);
+            logContent = filteredContent;
+            logFileName = GenerateLogFileName(testContext.Test?.TestDisplayName, Seed, filtered: true);
+        }
+
+        // Attach log content directly to the test context
+        testContext.AddAttachment(logFileName, logContent);
     }
 
     /// <summary>
-    /// Generates a unique log file path for a simulation.
-    /// Logs are written to a 'logs' directory next to the test executable for easy access.
+    /// Generates a unique log file name for a simulation.
     /// </summary>
-    private static string GenerateLogFilePath(string? testName, int seed)
+    private static string GenerateLogFileName(string? testName, int seed, bool filtered = false)
     {
         var sanitizedTestName = SanitizeFileName(testName ?? "unknown_test");
         var uniqueId = Guid.NewGuid().ToString("N")[..8];
+        var suffix = filtered ? "_info_and_above" : "";
 
-        // Use a 'logs' directory next to the test executable for easy access
-        var assemblyLocation = typeof(SimulationHarness).Assembly.Location;
-        var baseDirectory = Path.GetDirectoryName(assemblyLocation) ?? AppContext.BaseDirectory;
-        var logsDirectory = Path.Combine(baseDirectory, "logs");
-
-        return Path.Combine(logsDirectory, $"rapid_sim_{sanitizedTestName}_{seed}_{uniqueId}.log");
+        return $"rapid_sim_{sanitizedTestName}_{seed}_{uniqueId}{suffix}.log";
     }
 
     /// <summary>
