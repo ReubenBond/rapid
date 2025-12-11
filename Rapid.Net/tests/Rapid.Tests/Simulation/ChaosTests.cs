@@ -64,12 +64,12 @@ public sealed class ChaosTests : IAsyncLifetime
         _chaos.ScheduleNodeCrash(node, TimeSpan.FromSeconds(5));
 
         // Before scheduled time - node should still exist
-        _harness.AdvanceTime(TimeSpan.FromSeconds(4));
+        _harness.RunForDuration(TimeSpan.FromSeconds(4));
         _chaos.MaybeInjectFault(); // Process scheduled faults
         Assert.Contains(node, _harness.Nodes);
 
         // After scheduled time - node should be crashed
-        _harness.AdvanceTime(TimeSpan.FromSeconds(2));
+        _harness.RunForDuration(TimeSpan.FromSeconds(2));
         _chaos.MaybeInjectFault(); // Process scheduled faults
         Assert.DoesNotContain(node, _harness.Nodes);
     }
@@ -92,12 +92,12 @@ public sealed class ChaosTests : IAsyncLifetime
         Assert.True(_harness.Network.CanDeliver(node1Addr, node2Addr));
 
         // After isolation
-        _harness.AdvanceTime(TimeSpan.FromSeconds(3));
+        _harness.RunForDuration(TimeSpan.FromSeconds(3));
         _chaos.MaybeInjectFault();
         Assert.False(_harness.Network.CanDeliver(node1Addr, node2Addr));
 
         // After reconnection
-        _harness.AdvanceTime(TimeSpan.FromSeconds(3));
+        _harness.RunForDuration(TimeSpan.FromSeconds(3));
         _chaos.MaybeInjectFault();
         Assert.True(_harness.Network.CanDeliver(node1Addr, node2Addr));
     }
@@ -175,7 +175,7 @@ public sealed class ChaosTests : IAsyncLifetime
         _chaos.ClearScheduledFaults();
 
         // Advance past scheduled time
-        _harness.AdvanceTime(TimeSpan.FromSeconds(2));
+        _harness.RunForDuration(TimeSpan.FromSeconds(2));
         _chaos.MaybeInjectFault();
 
         // Node should still exist
@@ -198,12 +198,12 @@ public sealed class ChaosTests : IAsyncLifetime
         var addr2 = RapidUtils.Loggable(node2.Address);
 
         // Before scheduled time
-        _harness.AdvanceTime(TimeSpan.FromSeconds(2));
+        _harness.RunForDuration(TimeSpan.FromSeconds(2));
         _chaos.MaybeInjectFault();
         Assert.True(_harness.Network.CanDeliver(addr1, addr2));
 
         // After scheduled time
-        _harness.AdvanceTime(TimeSpan.FromSeconds(2));
+        _harness.RunForDuration(TimeSpan.FromSeconds(2));
         _chaos.MaybeInjectFault();
         Assert.False(_harness.Network.CanDeliver(addr1, addr2));
     }
@@ -228,12 +228,12 @@ public sealed class ChaosTests : IAsyncLifetime
         _chaos.SchedulePartitionHeal(node1, node2, TimeSpan.FromSeconds(3));
 
         // Before heal
-        _harness.AdvanceTime(TimeSpan.FromSeconds(2));
+        _harness.RunForDuration(TimeSpan.FromSeconds(2));
         _chaos.MaybeInjectFault();
         Assert.False(_harness.Network.CanDeliver(addr1, addr2));
 
         // After heal
-        _harness.AdvanceTime(TimeSpan.FromSeconds(2));
+        _harness.RunForDuration(TimeSpan.FromSeconds(2));
         _chaos.MaybeInjectFault();
         Assert.True(_harness.Network.CanDeliver(addr1, addr2));
     }
@@ -252,19 +252,19 @@ public sealed class ChaosTests : IAsyncLifetime
         _chaos.ScheduleIsolation(node1, TimeSpan.FromSeconds(6));
 
         // Check state at each time point
-        _harness.AdvanceTime(TimeSpan.FromSeconds(1));
+        _harness.RunForDuration(TimeSpan.FromSeconds(1));
         _chaos.MaybeInjectFault();
         Assert.True(_harness.Network.CanDeliver(node1Addr, node2Addr)); // Before first isolation
 
-        _harness.AdvanceTime(TimeSpan.FromSeconds(2));
+        _harness.RunForDuration(TimeSpan.FromSeconds(2));
         _chaos.MaybeInjectFault();
         Assert.False(_harness.Network.CanDeliver(node1Addr, node2Addr)); // After first isolation
 
-        _harness.AdvanceTime(TimeSpan.FromSeconds(2));
+        _harness.RunForDuration(TimeSpan.FromSeconds(2));
         _chaos.MaybeInjectFault();
         Assert.True(_harness.Network.CanDeliver(node1Addr, node2Addr)); // After reconnect
 
-        _harness.AdvanceTime(TimeSpan.FromSeconds(2));
+        _harness.RunForDuration(TimeSpan.FromSeconds(2));
         _chaos.MaybeInjectFault();
         Assert.False(_harness.Network.CanDeliver(node1Addr, node2Addr)); // After second isolation
     }
@@ -280,7 +280,7 @@ public sealed class ChaosTests : IAsyncLifetime
         _harness.CrashNode(node);
 
         // Advance past scheduled time and process - should not throw
-        _harness.AdvanceTime(TimeSpan.FromSeconds(10));
+        _harness.RunForDuration(TimeSpan.FromSeconds(10));
         _chaos.MaybeInjectFault(); // Should not throw even though node is already crashed
     }
 
@@ -327,12 +327,12 @@ public sealed class ChaosTests : IAsyncLifetime
 
         // Schedule events at different times
         _chaos.ScheduleIsolation(node1, TimeSpan.FromSeconds(1));
-        _harness.AdvanceTime(TimeSpan.FromSeconds(1.5));
+        _harness.RunForDuration(TimeSpan.FromSeconds(1.5));
         _chaos.MaybeInjectFault();
         events.Add("isolated");
 
         _chaos.ScheduleReconnect(node1, TimeSpan.FromSeconds(0.5)); // 2 seconds from start
-        _harness.AdvanceTime(TimeSpan.FromSeconds(1));
+        _harness.RunForDuration(TimeSpan.FromSeconds(1));
         _chaos.MaybeInjectFault();
         events.Add("reconnected");
 

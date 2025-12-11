@@ -452,9 +452,9 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
 
         // Create and heal a partition
         _harness.PartitionNodes(nodes[2], nodes[3]);
-        _harness.AdvanceTime(TimeSpan.FromSeconds(5));
+        _harness.RunForDuration(TimeSpan.FromSeconds(5));
         _harness.HealPartition(nodes[2], nodes[3]);
-        _harness.AdvanceTime(TimeSpan.FromSeconds(5));
+        _harness.RunForDuration(TimeSpan.FromSeconds(5));
 
         // Act: Now perform graceful leave
         _harness.RemoveNodeGracefully(nodes[3]);
@@ -707,7 +707,7 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 4);
 
         // Advance time to trigger failure detection cycles
-        _harness.AdvanceTime(TimeSpan.FromSeconds(10));
+        _harness.RunForDuration(TimeSpan.FromSeconds(10));
         _harness.RunUntilIdle();
 
         // Assert: Remaining nodes are still monitored (cluster stable)

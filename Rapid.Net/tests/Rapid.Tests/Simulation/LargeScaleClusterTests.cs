@@ -50,6 +50,12 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// Tests formation of a cluster using 10 parallel joins.
+    /// </summary>
+    [Fact]
+    public void LargeClusterFormation_Parallel_10() => LargeClusterFormation_Parallel(clusterSize: 10);
+
+    /// <summary>
     /// Tests formation of a cluster using parallel joins.
     /// Multiple nodes join concurrently, allowing the multi-node cut detection
     /// to batch them into fewer consensus rounds (O(log N) instead of O(N)).

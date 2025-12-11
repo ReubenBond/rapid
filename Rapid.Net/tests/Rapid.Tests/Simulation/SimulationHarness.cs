@@ -781,9 +781,8 @@ internal sealed class SimulationHarness : IAsyncDisposable
         // _nodeContexts dictionary (which has undefined iteration order) to ensure determinism.
         foreach (var node in _nodes)
         {
-            if (_nodeContexts.TryGetValue(node, out var context) &&
-                context.State == NodeSimulationState.Running &&
-                context.Step())
+            var context = node.Context;
+            if (context.State == NodeSimulationState.Running && context.Step())
             {
                 return true;
             }
@@ -810,13 +809,10 @@ internal sealed class SimulationHarness : IAsyncDisposable
         // _nodeContexts dictionary (which has undefined iteration order) to ensure determinism.
         foreach (var node in _nodes)
         {
-            if (_nodeContexts.TryGetValue(node, out var context))
+            var nextTime = node.Context.NextWaitingDueTime;
+            if (nextTime.HasValue && (!earliest.HasValue || nextTime.Value < earliest.Value))
             {
-                var nextTime = context.NextWaitingDueTime;
-                if (nextTime.HasValue && (!earliest.HasValue || nextTime.Value < earliest.Value))
-                {
-                    earliest = nextTime;
-                }
+                earliest = nextTime;
             }
         }
 
@@ -850,13 +846,16 @@ internal sealed class SimulationHarness : IAsyncDisposable
     /// <summary>
     /// Runs the simulation until it becomes idle.
     /// </summary>
-    public bool RunUntilIdle(TimeSpan? maxSimulatedTime = null, int maxIterations = 100000) => RunUntilIdleCore(maxSimulatedTime, maxIterations);
+    /// <returns>The number of iterations executed. Callers can compare this to maxIterations
+    /// and the current time to determine which limit was reached.</returns>
+    public int RunUntilIdle(TimeSpan? maxSimulatedTime = null, int maxIterations = 100000) => RunUntilIdleCore(maxSimulatedTime, maxIterations);
 
     /// <summary>
     /// Core implementation of RunUntilIdle without context installation (for internal use).
     /// Uses round-robin execution across all non-suspended node contexts, plus the harness queue.
     /// </summary>
-    private bool RunUntilIdleCore(TimeSpan? maxSimulatedTime, int maxIterations)
+    /// <returns>The number of iterations executed.</returns>
+    private int RunUntilIdleCore(TimeSpan? maxSimulatedTime, int maxIterations)
     {
         var startTime = TimeProvider.GetUtcNow();
         var maxEndTime = maxSimulatedTime ?? MaxSimulatedTimeAdvance;
@@ -868,7 +867,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
             if (TeardownCancellationToken.IsCancellationRequested)
             {
                 LogEvent(SimulationEventType.MaxStepsReached, "Teardown cancellation requested - exiting simulation loop");
-                return false;
+                return i;
             }
 
             if (RunOneTaskRoundRobin())
@@ -882,7 +881,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
             if (!nextScheduledTime.HasValue)
             {
                 LogEvent(SimulationEventType.ConditionMet, "Simulation reached idle state");
-                return true;
+                return i;
             }
 
             var timeDelta = nextScheduledTime.Value - _clock.CurrentTime;
@@ -891,7 +890,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
                 LogEvent(SimulationEventType.MaxStepsReached,
                     $"Simulation appears stuck: exceeded max simulated time ({maxSimulatedTime ?? MaxSimulatedTimeAdvance}). " +
                     $"Start: {startTime:O}, Current: {TimeProvider.GetUtcNow():O}, Next scheduled time delta: {timeDelta}");
-                return false;
+                return i;
             }
 
             // Advance time to the next scheduled task
@@ -906,12 +905,12 @@ internal sealed class SimulationHarness : IAsyncDisposable
             {
                 LogEvent(SimulationEventType.MaxStepsReached,
                     $"Simulation appears stuck: {timeAdvanceCount} consecutive time advances without task execution");
-                return false;
+                return i;
             }
         }
 
         LogEvent(SimulationEventType.MaxStepsReached, $"Max iterations ({maxIterations}) reached");
-        return false;
+        return maxIterations;
     }
 
     /// <summary>
@@ -1004,14 +1003,14 @@ internal sealed class SimulationHarness : IAsyncDisposable
     }
 
     /// <summary>
-    /// Advances simulated time by the specified amount and runs the simulation until idle.
+    /// Runs the simulation for the specified duration or until the maximum iterations are exceeded.
     /// This is the preferred method for advancing time in tests, as it ensures that any
     /// tasks triggered by timers are processed before returning.
     /// </summary>
     /// <param name="delta">The amount of time to advance.</param>
     /// <param name="maxIterations">Maximum iterations to run while processing tasks.</param>
     /// <returns>True if the simulation reached an idle state; false if max iterations reached.</returns>
-    public bool AdvanceTime(TimeSpan delta, int maxIterations = 100000)
+    public bool RunForDuration(TimeSpan delta, int maxIterations = 100000)
     {
         if (delta < TimeSpan.Zero)
         {
@@ -1024,10 +1023,20 @@ internal sealed class SimulationHarness : IAsyncDisposable
         }
 
         // Advance time to trigger timers, then run until idle
-        _clock.Advance(delta);
-        LogEvent(SimulationEventType.TimeAdvanced, $"Advanced time by {delta}");
+        LogEvent(SimulationEventType.TimeAdvanced, $"Advancing time until {delta}");
 
-        return RunUntilIdleCore(maxSimulatedTime: null, maxIterations);
+        var iterations1 = RunUntilIdleCore(maxSimulatedTime: _clock.CurrentTime + delta, maxIterations);
+        if (_clock.CurrentTime < delta)
+        {
+            _clock.Advance(delta - _clock.CurrentTime);
+        }
+
+        // If first call didn't exhaust max iterations, it reached idle or a time limit
+        // Run again to process any remaining work
+        var iterations2 = RunUntilIdleCore(null, maxIterations);
+        
+        // Return true if idle was reached (didn't exhaust iterations)
+        return iterations2 < maxIterations;
     }
 
     #endregion

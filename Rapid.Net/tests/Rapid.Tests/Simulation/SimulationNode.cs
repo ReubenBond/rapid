@@ -36,6 +36,11 @@ internal sealed class SimulationNode : IAsyncDisposable, IDisposable
     public Endpoint Address { get; }
 
     /// <summary>
+    /// Gets the simulation context for this node.
+    /// </summary>
+    public NodeSimulationContext Context => _context;
+
+    /// <summary>
     /// Gets the simulation random instance for this node.
     /// </summary>
     public SimulationRandom Random { get; }

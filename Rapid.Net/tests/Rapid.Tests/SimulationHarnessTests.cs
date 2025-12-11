@@ -123,10 +123,10 @@ public sealed class SimulationHarnessTests : IAsyncLifetime
     #region RunUntilIdle Tests
 
     [Fact]
-    public void RunUntilIdleReturnsTrueWhenNoTasks()
+    public void RunUntilIdleReturnsZeroWhenNoTasks()
     {
-        var result = _harness.RunUntilIdle();
-        Assert.True(result);
+        var iterations = _harness.RunUntilIdle();
+        Assert.Equal(0, iterations);
     }
 
     [Fact]
@@ -141,9 +141,9 @@ public sealed class SimulationHarnessTests : IAsyncLifetime
             task.Start(scheduler);
         }
 
-        var result = _harness.RunUntilIdle();
+        var iterations = _harness.RunUntilIdle();
 
-        Assert.True(result);
+        Assert.Equal(5, iterations);
         Assert.Equal(5, executionCount);
     }
 
@@ -156,9 +156,11 @@ public sealed class SimulationHarnessTests : IAsyncLifetime
         // Schedule a task for 1 minute in the future
         _harness.TaskQueue.EnqueueAfter(() => executed = true, TimeSpan.FromMinutes(1));
 
-        var result = _harness.RunUntilIdle();
+        const int maxIterations = 100000;
+        var iterations = _harness.RunUntilIdle(maxIterations: maxIterations);
 
-        Assert.True(result);
+        // Should reach idle (iterations < maxIterations)
+        Assert.True(iterations < maxIterations);
         Assert.True(executed);
         Assert.True(_harness.TimeProvider.GetUtcNow() >= initialTime + TimeSpan.FromMinutes(1));
     }
@@ -171,10 +173,11 @@ public sealed class SimulationHarnessTests : IAsyncLifetime
         // Schedule a task for 10 minutes in the future
         _harness.TaskQueue.EnqueueAfter(() => { }, TimeSpan.FromMinutes(10));
 
-        // Limit to 5 minutes
-        var result = _harness.RunUntilIdle(maxSimulatedTime: TimeSpan.FromMinutes(5));
+        // Limit to 5 minutes - task won't execute because it's beyond the time limit
+        var iterations = _harness.RunUntilIdle(maxSimulatedTime: TimeSpan.FromMinutes(5));
 
-        Assert.False(result);
+        // No tasks were executed (task is scheduled beyond the time limit)
+        Assert.Equal(0, iterations);
         // Time should not have advanced beyond 5 minutes
         Assert.True(_harness.TimeProvider.GetUtcNow() < initialTime + TimeSpan.FromMinutes(10));
     }

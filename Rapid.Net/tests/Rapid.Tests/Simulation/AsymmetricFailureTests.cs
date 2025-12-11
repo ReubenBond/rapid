@@ -172,7 +172,7 @@ public sealed class AsymmetricFailureTests : IAsyncLifetime
 
         // Run simulation to allow failure detection to potentially trigger
         // Since observer can't send probes to monitored, it might report monitored as failed
-        _harness.AdvanceTime(TimeSpan.FromSeconds(10));
+        _harness.RunForDuration(TimeSpan.FromSeconds(10));
 
         // The cluster should remain stable since monitored can still communicate with other nodes
         // and those nodes can vouch for monitored being alive
@@ -197,7 +197,7 @@ public sealed class AsymmetricFailureTests : IAsyncLifetime
         _harness.Network.CreatePartition(addrMonitored, addrObserver);
 
         // Run simulation
-        _harness.AdvanceTime(TimeSpan.FromSeconds(10));
+        _harness.RunForDuration(TimeSpan.FromSeconds(10));
 
         // The monitored node might be reported as failed by the observer
         // since probe responses can't get back
@@ -229,7 +229,7 @@ public sealed class AsymmetricFailureTests : IAsyncLifetime
         _harness.Network.CreatePartition(addrB, addrA);
 
         // Advance time significantly to trigger failure detection
-        _harness.AdvanceTime(TimeSpan.FromSeconds(30));
+        _harness.RunForDuration(TimeSpan.FromSeconds(30));
 
         // Wait for cluster to stabilize
         _harness.RunUntilIdle(maxSimulatedTime: TimeSpan.FromMinutes(2));
@@ -254,7 +254,7 @@ public sealed class AsymmetricFailureTests : IAsyncLifetime
 
         // Act: Create and then heal asymmetric partition
         _harness.Network.CreatePartition(addrA, addrB);
-        _harness.AdvanceTime(TimeSpan.FromSeconds(5));
+        _harness.RunForDuration(TimeSpan.FromSeconds(5));
 
         // Heal the partition before failure detection kicks in
         _harness.Network.HealPartition(addrA, addrB);
@@ -294,7 +294,7 @@ public sealed class AsymmetricFailureTests : IAsyncLifetime
         Assert.Equal(DeliveryStatus.Success, _harness.Network.CheckDelivery(addrC, addrB));
 
         // Run simulation
-        _harness.AdvanceTime(TimeSpan.FromSeconds(15));
+        _harness.RunForDuration(TimeSpan.FromSeconds(15));
         _harness.RunUntilIdle(maxSimulatedTime: TimeSpan.FromMinutes(1));
 
         // Cluster should maintain quorum capability
@@ -327,7 +327,7 @@ public sealed class AsymmetricFailureTests : IAsyncLifetime
         }
 
         // Run simulation
-        _harness.AdvanceTime(TimeSpan.FromSeconds(20));
+        _harness.RunForDuration(TimeSpan.FromSeconds(20));
         _harness.RunUntilIdle(maxSimulatedTime: TimeSpan.FromMinutes(2));
 
         // The central node might be removed or the cluster adapts
@@ -361,7 +361,7 @@ public sealed class AsymmetricFailureTests : IAsyncLifetime
         }
 
         // Run simulation
-        _harness.AdvanceTime(TimeSpan.FromSeconds(20));
+        _harness.RunForDuration(TimeSpan.FromSeconds(20));
         _harness.RunUntilIdle(maxSimulatedTime: TimeSpan.FromMinutes(2));
 
         // Cluster should adapt - central may be removed as other nodes can't reach it
@@ -385,16 +385,16 @@ public sealed class AsymmetricFailureTests : IAsyncLifetime
         {
             // A cannot reach B
             _harness.Network.CreatePartition(addrA, addrB);
-            _harness.AdvanceTime(TimeSpan.FromSeconds(2));
+            _harness.RunForDuration(TimeSpan.FromSeconds(2));
 
             // Heal and reverse
             _harness.Network.HealPartition(addrA, addrB);
             _harness.Network.CreatePartition(addrB, addrA);
-            _harness.AdvanceTime(TimeSpan.FromSeconds(2));
+            _harness.RunForDuration(TimeSpan.FromSeconds(2));
 
             // Heal
             _harness.Network.HealPartition(addrB, addrA);
-            _harness.AdvanceTime(TimeSpan.FromSeconds(2));
+            _harness.RunForDuration(TimeSpan.FromSeconds(2));
         }
 
         // Wait for stabilization
@@ -440,7 +440,7 @@ public sealed class AsymmetricFailureTests : IAsyncLifetime
         }
 
         // Run simulation
-        _harness.AdvanceTime(TimeSpan.FromSeconds(30));
+        _harness.RunForDuration(TimeSpan.FromSeconds(30));
         _harness.RunUntilIdle(maxSimulatedTime: TimeSpan.FromMinutes(2));
 
         // Cluster should adapt - some nodes may be removed
@@ -563,7 +563,7 @@ public sealed class AsymmetricFailureTests : IAsyncLifetime
         }
 
         // Run simulation - isolated sender should eventually be detected as failed
-        _harness.AdvanceTime(TimeSpan.FromSeconds(30));
+        _harness.RunForDuration(TimeSpan.FromSeconds(30));
         _harness.RunUntilIdle(maxSimulatedTime: TimeSpan.FromMinutes(2));
 
         // Cluster should remain operational with 3+ nodes
@@ -595,7 +595,7 @@ public sealed class AsymmetricFailureTests : IAsyncLifetime
         }
 
         // Run simulation
-        _harness.AdvanceTime(TimeSpan.FromSeconds(30));
+        _harness.RunForDuration(TimeSpan.FromSeconds(30));
         _harness.RunUntilIdle(maxSimulatedTime: TimeSpan.FromMinutes(2));
 
         // Cluster should remain operational
@@ -651,7 +651,7 @@ public sealed class AsymmetricFailureTests : IAsyncLifetime
         }
 
         // Give time to stabilize
-        _harness.AdvanceTime(TimeSpan.FromSeconds(10));
+        _harness.RunForDuration(TimeSpan.FromSeconds(10));
         _harness.RunUntilIdle(maxSimulatedTime: TimeSpan.FromMinutes(1));
 
         // Assert: Cluster should still be operational
@@ -684,7 +684,7 @@ public sealed class AsymmetricFailureTests : IAsyncLifetime
         Assert.Equal(DeliveryStatus.Success, _harness.Network.CheckDelivery(addr1, addr3));
 
         // Run simulation
-        _harness.AdvanceTime(TimeSpan.FromSeconds(20));
+        _harness.RunForDuration(TimeSpan.FromSeconds(20));
         _harness.RunUntilIdle(maxSimulatedTime: TimeSpan.FromMinutes(2));
 
         // Cluster should adapt somehow

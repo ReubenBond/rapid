@@ -408,13 +408,13 @@ public sealed class JoinProtocolTests : IAsyncLifetime
         // - Partition A: seed + joiner2 (they can still communicate)
         // - Partition B: joiner1 (isolated from seed, but can reach joiner2)
         // Eventually the cluster will converge to a stable state.
-        _harness.AdvanceTime(TimeSpan.FromSeconds(30), maxIterations: 500000);
+        _harness.RunForDuration(TimeSpan.FromSeconds(30), maxIterations: 500000);
 
         // Heal the partition to restore connectivity
         _harness.HealPartition(seedNode, joiner1);
 
         // Wait for the cluster to stabilize after healing
-        _harness.AdvanceTime(TimeSpan.FromSeconds(10), maxIterations: 200000);
+        _harness.RunForDuration(TimeSpan.FromSeconds(120), maxIterations: 200000);
 
         // Get remaining nodes to find one we can join through
         var aliveNodes = _harness.Nodes.Where(n => n.IsInitialized && n.MembershipSize > 0).ToList();

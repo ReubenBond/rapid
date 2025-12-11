@@ -311,7 +311,7 @@ public sealed class ConcurrentOperationsTests : IAsyncLifetime
         Assert.True(_harness.IsNodeSuspended(nodes[2]));
 
         // Advance time past suspension duration
-        _harness.AdvanceTime(TimeSpan.FromSeconds(3));
+        _harness.RunForDuration(TimeSpan.FromSeconds(3));
 
         // Node should be automatically resumed
         Assert.False(_harness.IsNodeSuspended(nodes[2]));

@@ -165,7 +165,7 @@ internal sealed class ChaosInjector(SimulationHarness harness)
             }
 
             // Advance time and run simulation until idle
-            _harness.AdvanceTime(interval);
+            _harness.RunForDuration(interval);
         }
 
         return faultsInjected;
