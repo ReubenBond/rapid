@@ -270,9 +270,10 @@ public sealed class JoinProtocolTests : IAsyncLifetime
     #region Join Failures (JOIN-040 to JOIN-045)
 
     /// <summary>
-    /// Tests that join fails (times out) when consensus is impossible due to node isolation.
+    /// Tests that join fails when consensus is impossible due to node isolation.
     /// In a 2-node cluster where one node is isolated, the remaining node cannot reach
-    /// the consensus threshold alone, so any new join attempt will fail.
+    /// the consensus threshold alone, so any new join attempt will fail with JoinException
+    /// after exhausting retries (observers don't respond with successful join confirmation).
     /// </summary>
     [Fact]
     public void JoinFailsWhenConsensusImpossibleDueToIsolation()
@@ -286,11 +287,22 @@ public sealed class JoinProtocolTests : IAsyncLifetime
         // (needs 2 nodes to agree in a 2-node cluster)
         _harness.IsolateNode(joiner1);
 
-        // Attempting to join should fail because consensus cannot be reached
-        // The join will timeout after exhausting retries
-        Assert.Throws<TimeoutException>(() =>
+        // Attempting to join should fail because consensus cannot be reached.
+        // The join protocol contacts observers (assigned by the seed) and waits for
+        // them to confirm the join via consensus. With joiner1 isolated, the cluster
+        // cannot reach consensus, so the joining node never gets a successful response
+        // from observers, resulting in JoinException after exhausting retries.
+        //
+        // We configure limited retries so the join fails deterministically within
+        // the simulation iteration limit. Without this, the default infinite retries
+        // would cause the simulation to hit its iteration limit and throw TimeoutException.
+        var limitedRetryOptions = new RapidProtocolOptions
         {
-            _harness.CreateJoinerNode(seedNode, nodeId: 2);
+            MaxJoinRetries = 3
+        };
+        Assert.Throws<JoinException>(() =>
+        {
+            _harness.CreateJoinerNode(seedNode, nodeId: 2, limitedRetryOptions);
         });
     }
 

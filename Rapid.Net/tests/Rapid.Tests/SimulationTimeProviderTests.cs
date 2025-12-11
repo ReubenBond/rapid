@@ -9,17 +9,93 @@ public class SimulationTimeProviderTests
 {
     private static readonly TimeSpan InfiniteTimeout = TimeSpan.FromMilliseconds(-1);
 
+    /// <summary>
+    /// Helper class that wraps the simulation components and provides convenience methods for testing.
+    /// </summary>
+    private sealed class TestTimeProvider
+    {
+        public SimulationClock Clock { get; }
+        public SimulationTaskQueue TaskQueue { get; }
+        public SimulationTimeProvider TimeProvider { get; }
+        public DateTimeOffset Start { get; }
+
+        public TestTimeProvider(DateTimeOffset? startDateTime = null)
+        {
+            Start = startDateTime ?? new DateTimeOffset(2000, 1, 1, 0, 0, 0, 0, TimeSpan.Zero);
+            Clock = new SimulationClock();
+            TaskQueue = new SimulationTaskQueue(Clock);
+            TimeProvider = new SimulationTimeProvider(TaskQueue, startDateTime);
+        }
+
+        // Convenience delegations to TimeProvider
+        public DateTimeOffset GetUtcNow() => TimeProvider.GetUtcNow();
+        public long GetTimestamp() => TimeProvider.GetTimestamp();
+        public long TimestampFrequency => TimeProvider.TimestampFrequency;
+        public TimeSpan GetElapsedTime(long startingTimestamp) => TimeProvider.GetElapsedTime(startingTimestamp);
+        public TimeSpan GetElapsedTime(long startingTimestamp, long endingTimestamp) => TimeProvider.GetElapsedTime(startingTimestamp, endingTimestamp);
+        public ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+            => TimeProvider.CreateTimer(callback, state, dueTime, period);
+
+        // Test-only convenience methods
+        public void Advance(TimeSpan delta) => Clock.Advance(delta);
+
+        public void SetUtcNow(DateTimeOffset value)
+        {
+            var delta = value - GetUtcNow();
+            if (delta < TimeSpan.Zero)
+                throw new ArgumentOutOfRangeException(nameof(value), $"Cannot go back in time. Current time is {GetUtcNow()}.");
+            Clock.Advance(delta);
+        }
+
+        public TimeSpan? TimeUntilNextTimer
+        {
+            get
+            {
+                var nextDueTime = TaskQueue.NextWaitingDueTime;
+                if (!nextDueTime.HasValue)
+                    return null;
+
+                var currentTime = TaskQueue.CurrentTime;
+                var duration = nextDueTime.Value - currentTime;
+                return duration > TimeSpan.Zero ? duration : TimeSpan.Zero;
+            }
+        }
+
+        public bool AdvanceToNextTimer()
+        {
+            var nextDueTime = TaskQueue.NextWaitingDueTime;
+            if (!nextDueTime.HasValue)
+                return false;
+
+            var delta = nextDueTime.Value - TaskQueue.CurrentTime;
+            if (delta > TimeSpan.Zero)
+                Clock.Advance(delta);
+
+            return true;
+        }
+
+        public IReadOnlyList<(DateTimeOffset DueTime, TimeSpan Period)> GetPendingTimers()
+        {
+            var result = SimulationTimer.GetTimers(TaskQueue, Start);
+            return [.. result.OrderBy(t => t.DueTime)];
+        }
+
+        public int PendingTimerCount => SimulationTimer.GetPendingTimerCount(TaskQueue);
+
+        public void RunOnce() => TaskQueue.RunOnce();
+        public void RunUntilIdle() => TaskQueue.RunUntilIdle();
+    }
+
     #region Constructor Tests
 
     [Fact]
     public void ConstructorDefaultInitializationSetsExpectedValues()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
+        var p = new TestTimeProvider();
 
-        var now = timeProvider.GetUtcNow();
-        var timestamp = timeProvider.GetTimestamp();
-        var frequency = timeProvider.TimestampFrequency;
+        var now = p.GetUtcNow();
+        var timestamp = p.GetTimestamp();
+        var frequency = p.TimestampFrequency;
 
         Assert.Equal(2000, now.Year);
         Assert.Equal(1, now.Month);
@@ -31,9 +107,9 @@ public class SimulationTimeProviderTests
         Assert.Equal(TimeSpan.Zero, now.Offset);
         Assert.Equal(TimeSpan.TicksPerSecond, frequency);
 
-        var timestamp2 = timeProvider.GetTimestamp();
-        var frequency2 = timeProvider.TimestampFrequency;
-        var now2 = timeProvider.GetUtcNow();
+        var timestamp2 = p.GetTimestamp();
+        var frequency2 = p.TimestampFrequency;
+        var now2 = p.GetUtcNow();
 
         Assert.Equal(now, now2);
         Assert.Equal(frequency, frequency2);
@@ -43,11 +119,10 @@ public class SimulationTimeProviderTests
     [Fact]
     public void ConstructorInitializesWithCustomDateTimeOffset()
     {
-        var taskQueue = new SimulationTaskQueue();
         var customTime = new DateTimeOffset(2023, 6, 15, 10, 30, 45, TimeSpan.Zero);
-        var timeProvider = new SimulationTimeProvider(taskQueue, customTime);
+        var p = new TestTimeProvider(customTime);
 
-        var now = timeProvider.GetUtcNow();
+        var now = p.GetUtcNow();
 
         Assert.Equal(2023, now.Year);
         Assert.Equal(6, now.Month);
@@ -55,7 +130,7 @@ public class SimulationTimeProviderTests
         Assert.Equal(10, now.Hour);
         Assert.Equal(30, now.Minute);
         Assert.Equal(45, now.Second);
-        Assert.Equal(customTime, timeProvider.Start);
+        Assert.Equal(customTime, p.Start);
     }
 
     #endregion
@@ -65,12 +140,10 @@ public class SimulationTimeProviderTests
     [Fact]
     public void GetTimestampWithoutAdvanceDoesNotChange()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var nowOffset = new DateTimeOffset(2000, 1, 1, 0, 0, 0, 0, TimeSpan.Zero);
-        var timeProvider = new SimulationTimeProvider(taskQueue, nowOffset);
+        var p = new TestTimeProvider(new DateTimeOffset(2000, 1, 1, 0, 0, 0, 0, TimeSpan.Zero));
 
-        var timestamp1 = timeProvider.GetTimestamp();
-        var timestamp2 = timeProvider.GetTimestamp();
+        var timestamp1 = p.GetTimestamp();
+        var timestamp2 = p.GetTimestamp();
 
         Assert.Equal(timestamp1, timestamp2);
     }
@@ -78,12 +151,11 @@ public class SimulationTimeProviderTests
     [Fact]
     public void GetTimestampAfterAdvanceChanges()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
-        var timestamp1 = timeProvider.GetTimestamp();
+        var p = new TestTimeProvider();
+        var timestamp1 = p.GetTimestamp();
 
-        timeProvider.Advance(TimeSpan.FromSeconds(1));
-        var timestamp2 = timeProvider.GetTimestamp();
+        p.Advance(TimeSpan.FromSeconds(1));
+        var timestamp2 = p.GetTimestamp();
 
         Assert.True(timestamp2 > timestamp1);
     }
@@ -91,12 +163,11 @@ public class SimulationTimeProviderTests
     [Fact]
     public void GetElapsedTimeAfterAdvanceReturnsCorrectDuration()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
-        var start = timeProvider.GetTimestamp();
+        var p = new TestTimeProvider();
+        var start = p.GetTimestamp();
 
-        timeProvider.Advance(TimeSpan.FromSeconds(1));
-        var elapsed = timeProvider.GetElapsedTime(start);
+        p.Advance(TimeSpan.FromSeconds(1));
+        var elapsed = p.GetElapsedTime(start);
 
         Assert.Equal(TimeSpan.FromSeconds(1), elapsed);
     }
@@ -108,62 +179,58 @@ public class SimulationTimeProviderTests
     [Fact]
     public void AdvanceForwardAdvancesByProperAmount()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue, new DateTimeOffset(2001, 2, 3, 4, 5, 6, TimeSpan.Zero));
+        var p = new TestTimeProvider(new DateTimeOffset(2001, 2, 3, 4, 5, 6, TimeSpan.Zero));
 
-        var initialTimeUtcNow = timeProvider.GetUtcNow();
-        var initialTimestamp = timeProvider.GetTimestamp();
+        var initialTimeUtcNow = p.GetUtcNow();
+        var initialTimestamp = p.GetTimestamp();
 
-        timeProvider.Advance(TimeSpan.FromMilliseconds(1234));
+        p.Advance(TimeSpan.FromMilliseconds(1234));
 
-        var finalTimeUtcNow = timeProvider.GetUtcNow();
-        var finalTimeTimestamp = timeProvider.GetTimestamp();
+        var finalTimeUtcNow = p.GetUtcNow();
+        var finalTimeTimestamp = p.GetTimestamp();
 
         var utcDelta = finalTimeUtcNow - initialTimeUtcNow;
         var perfDelta = finalTimeTimestamp - initialTimestamp;
-        var elapsedTime = timeProvider.GetElapsedTime(initialTimestamp, finalTimeTimestamp);
+        var elapsedTime = p.GetElapsedTime(initialTimestamp, finalTimeTimestamp);
 
         Assert.Equal(1, utcDelta.Seconds);
         Assert.Equal(234, utcDelta.Milliseconds);
         Assert.Equal(1234D, utcDelta.TotalMilliseconds);
-        Assert.Equal(1.234D, (double)perfDelta / timeProvider.TimestampFrequency, 3);
+        Assert.Equal(1.234D, (double)perfDelta / p.TimestampFrequency, 3);
         Assert.Equal(1234, elapsedTime.TotalMilliseconds);
     }
 
     [Fact]
     public void AdvanceByZeroDoesNotChangeTime()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
-        var before = timeProvider.GetUtcNow();
+        var p = new TestTimeProvider();
+        var before = p.GetUtcNow();
 
-        timeProvider.Advance(TimeSpan.Zero);
+        p.Advance(TimeSpan.Zero);
 
-        Assert.Equal(before, timeProvider.GetUtcNow());
+        Assert.Equal(before, p.GetUtcNow());
     }
 
     [Fact]
     public void AdvanceBackwardsThrowsArgumentOutOfRangeException()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
+        var p = new TestTimeProvider();
 
-        Assert.Throws<ArgumentOutOfRangeException>(() => timeProvider.Advance(TimeSpan.FromTicks(-1)));
+        Assert.Throws<ArgumentOutOfRangeException>(() => p.Advance(TimeSpan.FromTicks(-1)));
     }
 
     [Fact]
     public void AdvanceMultipleSmallIncrementsAccumulatesCorrectly()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
-        var start = timeProvider.GetUtcNow();
+        var p = new TestTimeProvider();
+        var start = p.GetUtcNow();
 
         for (int i = 0; i < 100; i++)
         {
-            timeProvider.Advance(TimeSpan.FromMilliseconds(10));
+            p.Advance(TimeSpan.FromMilliseconds(10));
         }
 
-        var elapsed = timeProvider.GetUtcNow() - start;
+        var elapsed = p.GetUtcNow() - start;
         Assert.Equal(1000, elapsed.TotalMilliseconds);
     }
 
@@ -174,48 +241,45 @@ public class SimulationTimeProviderTests
     [Fact]
     public void SetUtcNowForwardAdvancesByProperAmount()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue, new DateTimeOffset(2001, 2, 3, 4, 5, 6, TimeSpan.Zero));
+        var p = new TestTimeProvider(new DateTimeOffset(2001, 2, 3, 4, 5, 6, TimeSpan.Zero));
 
-        var initialTimeUtcNow = timeProvider.GetUtcNow();
-        var initialTimestamp = timeProvider.GetTimestamp();
+        var initialTimeUtcNow = p.GetUtcNow();
+        var initialTimestamp = p.GetTimestamp();
 
-        timeProvider.SetUtcNow(timeProvider.GetUtcNow().AddMilliseconds(1234));
+        p.SetUtcNow(p.GetUtcNow().AddMilliseconds(1234));
 
-        var finalTimeUtcNow = timeProvider.GetUtcNow();
-        var finalTimeTimestamp = timeProvider.GetTimestamp();
+        var finalTimeUtcNow = p.GetUtcNow();
+        var finalTimeTimestamp = p.GetTimestamp();
 
         var utcDelta = finalTimeUtcNow - initialTimeUtcNow;
         var perfDelta = finalTimeTimestamp - initialTimestamp;
-        var elapsedTime = timeProvider.GetElapsedTime(initialTimestamp, finalTimeTimestamp);
+        var elapsedTime = p.GetElapsedTime(initialTimestamp, finalTimeTimestamp);
 
         Assert.Equal(1, utcDelta.Seconds);
         Assert.Equal(234, utcDelta.Milliseconds);
         Assert.Equal(1234D, utcDelta.TotalMilliseconds);
-        Assert.Equal(1.234D, (double)perfDelta / timeProvider.TimestampFrequency, 3);
+        Assert.Equal(1.234D, (double)perfDelta / p.TimestampFrequency, 3);
         Assert.Equal(1234, elapsedTime.TotalMilliseconds);
     }
 
     [Fact]
     public void SetUtcNowBackwardsThrowsArgumentOutOfRangeException()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
+        var p = new TestTimeProvider();
 
         Assert.Throws<ArgumentOutOfRangeException>(() =>
-            timeProvider.SetUtcNow(timeProvider.GetUtcNow() - TimeSpan.FromTicks(1)));
+            p.SetUtcNow(p.GetUtcNow() - TimeSpan.FromTicks(1)));
     }
 
     [Fact]
     public void SetUtcNowToSameTimeDoesNotThrow()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
-        var currentTime = timeProvider.GetUtcNow();
+        var p = new TestTimeProvider();
+        var currentTime = p.GetUtcNow();
 
-        timeProvider.SetUtcNow(currentTime);
+        p.SetUtcNow(currentTime);
 
-        Assert.Equal(currentTime, timeProvider.GetUtcNow());
+        Assert.Equal(currentTime, p.GetUtcNow());
     }
 
     #endregion
@@ -225,62 +289,58 @@ public class SimulationTimeProviderTests
     [Fact]
     public void CreateTimerWithDueTimeCreatesWaiter()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
+        var p = new TestTimeProvider();
         var callCount = 0;
 
-        using var timer = timeProvider.CreateTimer(_ => callCount++, null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
+        using var timer = p.CreateTimer(_ => callCount++, null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
 
         Assert.Equal(0, callCount);
-        Assert.True(timeProvider.PendingTimerCount > 0);
-        Assert.Equal(1, timeProvider.PendingTimerCount);
+        Assert.True(p.PendingTimerCount > 0);
+        Assert.Equal(1, p.PendingTimerCount);
     }
 
     [Fact]
     public void CreateTimerWithZeroDueTimeSchedulesCallback()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
+        var p = new TestTimeProvider();
         var callCount = 0;
 
-        using var timer = timeProvider.CreateTimer(_ => callCount++, null, TimeSpan.Zero, TimeSpan.Zero);
+        using var timer = p.CreateTimer(_ => callCount++, null, TimeSpan.Zero, TimeSpan.Zero);
 
         // Timer with TimeSpan.Zero schedules callback to task queue
         Assert.Equal(0, callCount);
-        taskQueue.RunOnce();
+        p.RunOnce();
         Assert.Equal(1, callCount);
     }
 
     [Fact]
     public void TimerCallbackFiresAfterAdvance()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
+        var p = new TestTimeProvider();
         var callCount = 0;
 
-        using var timer = timeProvider.CreateTimer(_ => callCount++, null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
+        using var timer = p.CreateTimer(_ => callCount++, null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
 
         Assert.Equal(0, callCount);
 
-        timeProvider.Advance(TimeSpan.FromMilliseconds(999));
-        taskQueue.RunUntilIdle();
+        p.Advance(TimeSpan.FromMilliseconds(999));
+        p.RunUntilIdle();
         Assert.Equal(0, callCount);
 
-        timeProvider.Advance(TimeSpan.FromMilliseconds(1));
-        taskQueue.RunUntilIdle();
+        p.Advance(TimeSpan.FromMilliseconds(1));
+        p.RunUntilIdle();
         Assert.Equal(1, callCount);
     }
 
     [Fact]
     public void TimerCallbackPassesState()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
+        var p = new TestTimeProvider();
         object? receivedState = null;
         var expectedState = new object();
 
-        using var timer = timeProvider.CreateTimer(state => receivedState = state, expectedState, TimeSpan.Zero, TimeSpan.Zero);
-        taskQueue.RunOnce();
+        using var timer = p.CreateTimer(state => receivedState = state, expectedState, TimeSpan.Zero, TimeSpan.Zero);
+        p.RunOnce();
 
         Assert.Same(expectedState, receivedState);
     }
@@ -288,93 +348,88 @@ public class SimulationTimeProviderTests
     [Fact]
     public void PeriodicTimerFiresRepeatedly()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
+        var p = new TestTimeProvider();
         var callCount = 0;
 
-        using var timer = timeProvider.CreateTimer(_ => callCount++, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+        using var timer = p.CreateTimer(_ => callCount++, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
 
-        timeProvider.Advance(TimeSpan.FromSeconds(1));
-        taskQueue.RunUntilIdle();
+        p.Advance(TimeSpan.FromSeconds(1));
+        p.RunUntilIdle();
         Assert.Equal(1, callCount);
 
-        timeProvider.Advance(TimeSpan.FromSeconds(1));
-        taskQueue.RunUntilIdle();
+        p.Advance(TimeSpan.FromSeconds(1));
+        p.RunUntilIdle();
         Assert.Equal(2, callCount);
 
-        timeProvider.Advance(TimeSpan.FromSeconds(1));
-        taskQueue.RunUntilIdle();
+        p.Advance(TimeSpan.FromSeconds(1));
+        p.RunUntilIdle();
         Assert.Equal(3, callCount);
     }
 
     [Fact]
     public void OneShotTimerFiresOnlyOnce()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
+        var p = new TestTimeProvider();
         var callCount = 0;
 
-        using var timer = timeProvider.CreateTimer(_ => callCount++, null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
+        using var timer = p.CreateTimer(_ => callCount++, null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
 
-        timeProvider.Advance(TimeSpan.FromSeconds(1));
-        taskQueue.RunUntilIdle();
+        p.Advance(TimeSpan.FromSeconds(1));
+        p.RunUntilIdle();
         Assert.Equal(1, callCount);
 
-        timeProvider.Advance(TimeSpan.FromSeconds(1));
-        taskQueue.RunUntilIdle();
+        p.Advance(TimeSpan.FromSeconds(1));
+        p.RunUntilIdle();
         Assert.Equal(1, callCount); // Should still be 1
 
-        timeProvider.Advance(TimeSpan.FromSeconds(10));
-        taskQueue.RunUntilIdle();
+        p.Advance(TimeSpan.FromSeconds(10));
+        p.RunUntilIdle();
         Assert.Equal(1, callCount); // Should still be 1
     }
 
     [Fact]
     public void DisposedTimerDoesNotFire()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
+        var p = new TestTimeProvider();
         var callCount = 0;
 
-        var timer = timeProvider.CreateTimer(_ => callCount++, null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
+        var timer = p.CreateTimer(_ => callCount++, null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
         timer.Dispose();
 
-        timeProvider.Advance(TimeSpan.FromSeconds(10));
-        taskQueue.RunUntilIdle();
+        p.Advance(TimeSpan.FromSeconds(10));
+        p.RunUntilIdle();
         Assert.Equal(0, callCount);
     }
 
     [Fact]
     public void ChangedTimerUsesNewValues()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
+        var p = new TestTimeProvider();
         var callCount = 0;
 
-        using var timer = timeProvider.CreateTimer(_ => callCount++, null, TimeSpan.FromSeconds(10), TimeSpan.Zero);
+        using var timer = p.CreateTimer(_ => callCount++, null, TimeSpan.FromSeconds(10), TimeSpan.Zero);
 
         // Change to fire sooner
         timer.Change(TimeSpan.FromMilliseconds(100), TimeSpan.Zero);
 
-        timeProvider.Advance(TimeSpan.FromMilliseconds(100));
-        taskQueue.RunUntilIdle();
+        p.Advance(TimeSpan.FromMilliseconds(100));
+        p.RunUntilIdle();
         Assert.Equal(1, callCount);
     }
 
     [Fact]
     public void TimerChangedToInfiniteDoesNotFire()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
+        var p = new TestTimeProvider();
         var callCount = 0;
 
-        using var timer = timeProvider.CreateTimer(_ => callCount++, null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
+        using var timer = p.CreateTimer(_ => callCount++, null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
 
         // Change to infinite (disabled)
         timer.Change(Timeout.InfiniteTimeSpan, TimeSpan.Zero);
 
-        timeProvider.Advance(TimeSpan.FromSeconds(100));
-        taskQueue.RunUntilIdle();
+        p.Advance(TimeSpan.FromSeconds(100));
+        p.RunUntilIdle();
         Assert.Equal(0, callCount);
     }
 
@@ -385,16 +440,15 @@ public class SimulationTimeProviderTests
     [Fact]
     public void MultipleTimersFireInOrder()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
+        var p = new TestTimeProvider();
         var firedOrder = new List<int>();
 
-        using var timer1 = timeProvider.CreateTimer(_ => firedOrder.Add(1), null, TimeSpan.FromSeconds(3), TimeSpan.Zero);
-        using var timer2 = timeProvider.CreateTimer(_ => firedOrder.Add(2), null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
-        using var timer3 = timeProvider.CreateTimer(_ => firedOrder.Add(3), null, TimeSpan.FromSeconds(2), TimeSpan.Zero);
+        using var timer1 = p.CreateTimer(_ => firedOrder.Add(1), null, TimeSpan.FromSeconds(3), TimeSpan.Zero);
+        using var timer2 = p.CreateTimer(_ => firedOrder.Add(2), null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
+        using var timer3 = p.CreateTimer(_ => firedOrder.Add(3), null, TimeSpan.FromSeconds(2), TimeSpan.Zero);
 
-        timeProvider.Advance(TimeSpan.FromSeconds(5));
-        taskQueue.RunUntilIdle();
+        p.Advance(TimeSpan.FromSeconds(5));
+        p.RunUntilIdle();
 
         Assert.Equal([2, 3, 1], firedOrder);
     }
@@ -402,16 +456,15 @@ public class SimulationTimeProviderTests
     [Fact]
     public void TimersWithSameDueTimeFireInScheduledOrder()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
+        var p = new TestTimeProvider();
         var firedOrder = new List<int>();
 
-        using var timer1 = timeProvider.CreateTimer(_ => firedOrder.Add(1), null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
-        using var timer2 = timeProvider.CreateTimer(_ => firedOrder.Add(2), null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
-        using var timer3 = timeProvider.CreateTimer(_ => firedOrder.Add(3), null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
+        using var timer1 = p.CreateTimer(_ => firedOrder.Add(1), null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
+        using var timer2 = p.CreateTimer(_ => firedOrder.Add(2), null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
+        using var timer3 = p.CreateTimer(_ => firedOrder.Add(3), null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
 
-        timeProvider.Advance(TimeSpan.FromSeconds(1));
-        taskQueue.RunUntilIdle();
+        p.Advance(TimeSpan.FromSeconds(1));
+        p.RunUntilIdle();
 
         Assert.Equal([1, 2, 3], firedOrder);
     }
@@ -419,23 +472,22 @@ public class SimulationTimeProviderTests
     [Fact]
     public void AdvanceTimeInCallbackPreventsInfiniteLoop()
     {
-        var taskQueue = new SimulationTaskQueue();
+        var p = new TestTimeProvider();
         var oneSecond = TimeSpan.FromSeconds(1);
-        var timeProvider = new SimulationTimeProvider(taskQueue);
         var callCount = 0;
 
-        using var timer = timeProvider.CreateTimer(_ =>
+        using var timer = p.CreateTimer(_ =>
         {
             callCount++;
             // Advance the time with exactly the same amount as the period of the timer.
             // This could lead to an infinite loop where this callback repeatedly gets invoked.
             // A correct implementation will adjust the timer's wake time.
-            timeProvider.Advance(oneSecond);
+            p.Advance(oneSecond);
         }, null, TimeSpan.Zero, oneSecond);
 
         // Execute only the currently ready items (not items added during execution)
         // This prevents infinite loops when callbacks enqueue more items
-        taskQueue.RunUntilIdle();
+        p.RunUntilIdle();
 
         // Should not hang and call count should be limited
         Assert.True(callCount >= 1, "Timer should have fired at least once");
@@ -445,15 +497,14 @@ public class SimulationTimeProviderTests
     [Fact]
     public void TimerCallbackExceptionPropagates()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
+        var p = new TestTimeProvider();
 
-        using var timer1 = timeProvider.CreateTimer(_ => throw new InvalidOperationException("Test exception"),
+        using var timer1 = p.CreateTimer(_ => throw new InvalidOperationException("Test exception"),
             null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
 
-        timeProvider.Advance(TimeSpan.FromSeconds(3));
+        p.Advance(TimeSpan.FromSeconds(3));
         // This should throw due to timer1's callback - exceptions propagate from timer callbacks
-        var ex = Assert.Throws<InvalidOperationException>(() => taskQueue.RunUntilIdle());
+        var ex = Assert.Throws<InvalidOperationException>(() => p.RunUntilIdle());
         Assert.Equal("Test exception", ex.Message);
     }
 
@@ -464,14 +515,13 @@ public class SimulationTimeProviderTests
     [Fact]
     public void AdvanceToNextTimerWithPendingTimer()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
+        var p = new TestTimeProvider();
         var callCount = 0;
 
-        using var timer = timeProvider.CreateTimer(_ => callCount++, null, TimeSpan.FromSeconds(5), TimeSpan.Zero);
+        using var timer = p.CreateTimer(_ => callCount++, null, TimeSpan.FromSeconds(5), TimeSpan.Zero);
 
-        var result = timeProvider.AdvanceToNextTimer();
-        taskQueue.RunUntilIdle();
+        var result = p.AdvanceToNextTimer();
+        p.RunUntilIdle();
 
         Assert.True(result);
         Assert.Equal(1, callCount);
@@ -480,10 +530,9 @@ public class SimulationTimeProviderTests
     [Fact]
     public void AdvanceToNextTimerWithNoTimersReturnsFalse()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
+        var p = new TestTimeProvider();
 
-        var result = timeProvider.AdvanceToNextTimer();
+        var result = p.AdvanceToNextTimer();
 
         Assert.False(result);
     }
@@ -491,24 +540,23 @@ public class SimulationTimeProviderTests
     [Fact]
     public void AdvanceToNextTimerMultipleTimersFiresOnlyNext()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
+        var p = new TestTimeProvider();
         var firedTimers = new List<int>();
 
-        using var timer1 = timeProvider.CreateTimer(_ => firedTimers.Add(1), null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
-        using var timer2 = timeProvider.CreateTimer(_ => firedTimers.Add(2), null, TimeSpan.FromSeconds(2), TimeSpan.Zero);
-        using var timer3 = timeProvider.CreateTimer(_ => firedTimers.Add(3), null, TimeSpan.FromSeconds(3), TimeSpan.Zero);
+        using var timer1 = p.CreateTimer(_ => firedTimers.Add(1), null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
+        using var timer2 = p.CreateTimer(_ => firedTimers.Add(2), null, TimeSpan.FromSeconds(2), TimeSpan.Zero);
+        using var timer3 = p.CreateTimer(_ => firedTimers.Add(3), null, TimeSpan.FromSeconds(3), TimeSpan.Zero);
 
-        timeProvider.AdvanceToNextTimer();
-        taskQueue.RunUntilIdle();
+        p.AdvanceToNextTimer();
+        p.RunUntilIdle();
         Assert.Equal([1], firedTimers);
 
-        timeProvider.AdvanceToNextTimer();
-        taskQueue.RunUntilIdle();
+        p.AdvanceToNextTimer();
+        p.RunUntilIdle();
         Assert.Equal([1, 2], firedTimers);
 
-        timeProvider.AdvanceToNextTimer();
-        taskQueue.RunUntilIdle();
+        p.AdvanceToNextTimer();
+        p.RunUntilIdle();
         Assert.Equal([1, 2, 3], firedTimers);
     }
 
@@ -519,51 +567,47 @@ public class SimulationTimeProviderTests
     [Fact]
     public void TimeUntilNextTimerNoPendingTimersReturnsNull()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
+        var p = new TestTimeProvider();
 
-        Assert.Null(timeProvider.TimeUntilNextTimer);
+        Assert.Null(p.TimeUntilNextTimer);
     }
 
     [Fact]
     public void TimeUntilNextTimerWithPendingTimerReturnsCorrectDuration()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
+        var p = new TestTimeProvider();
 
-        using var timer = timeProvider.CreateTimer(_ => { }, null, TimeSpan.FromSeconds(5), TimeSpan.Zero);
+        using var timer = p.CreateTimer(_ => { }, null, TimeSpan.FromSeconds(5), TimeSpan.Zero);
 
-        Assert.Equal(TimeSpan.FromSeconds(5), timeProvider.TimeUntilNextTimer);
+        Assert.Equal(TimeSpan.FromSeconds(5), p.TimeUntilNextTimer);
     }
 
     [Fact]
     public void TimeUntilNextTimerAfterPartialAdvanceReturnsRemainingTime()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
+        var p = new TestTimeProvider();
 
-        using var timer = timeProvider.CreateTimer(_ => { }, null, TimeSpan.FromSeconds(5), TimeSpan.Zero);
+        using var timer = p.CreateTimer(_ => { }, null, TimeSpan.FromSeconds(5), TimeSpan.Zero);
 
-        timeProvider.Advance(TimeSpan.FromSeconds(3));
+        p.Advance(TimeSpan.FromSeconds(3));
 
-        Assert.Equal(TimeSpan.FromSeconds(2), timeProvider.TimeUntilNextTimer);
+        Assert.Equal(TimeSpan.FromSeconds(2), p.TimeUntilNextTimer);
     }
 
     [Fact]
     public void TimeUntilNextTimerPeriodicTimerShowsNextPeriod()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
+        var p = new TestTimeProvider();
         var callCount = 0;
 
         // Use a periodic timer so it stays registered
-        using var timer = timeProvider.CreateTimer(_ => callCount++, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(10));
+        using var timer = p.CreateTimer(_ => callCount++, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(10));
 
         // After timer fires, next time should be period away
-        timeProvider.Advance(TimeSpan.FromSeconds(1));
-        taskQueue.RunUntilIdle();
+        p.Advance(TimeSpan.FromSeconds(1));
+        p.RunUntilIdle();
         Assert.Equal(1, callCount);
-        Assert.Equal(TimeSpan.FromSeconds(10), timeProvider.TimeUntilNextTimer);
+        Assert.Equal(TimeSpan.FromSeconds(10), p.TimeUntilNextTimer);
     }
 
     #endregion
@@ -573,10 +617,9 @@ public class SimulationTimeProviderTests
     [Fact]
     public void GetPendingTimersNoPendingReturnsEmpty()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
+        var p = new TestTimeProvider();
 
-        var timers = timeProvider.GetPendingTimers();
+        var timers = p.GetPendingTimers();
 
         Assert.Empty(timers);
     }
@@ -584,13 +627,12 @@ public class SimulationTimeProviderTests
     [Fact]
     public void GetPendingTimersWithTimersReturnsAllPending()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
+        var p = new TestTimeProvider();
 
-        using var timer1 = timeProvider.CreateTimer(_ => { }, null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
-        using var timer2 = timeProvider.CreateTimer(_ => { }, null, TimeSpan.FromSeconds(2), TimeSpan.Zero);
+        using var timer1 = p.CreateTimer(_ => { }, null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
+        using var timer2 = p.CreateTimer(_ => { }, null, TimeSpan.FromSeconds(2), TimeSpan.Zero);
 
-        var timers = timeProvider.GetPendingTimers();
+        var timers = p.GetPendingTimers();
 
         Assert.Equal(2, timers.Count);
     }
@@ -598,14 +640,13 @@ public class SimulationTimeProviderTests
     [Fact]
     public void GetPendingTimersOrderedByWakeTime()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
+        var p = new TestTimeProvider();
 
-        using var timer1 = timeProvider.CreateTimer(_ => { }, null, TimeSpan.FromSeconds(3), TimeSpan.Zero);
-        using var timer2 = timeProvider.CreateTimer(_ => { }, null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
-        using var timer3 = timeProvider.CreateTimer(_ => { }, null, TimeSpan.FromSeconds(2), TimeSpan.Zero);
+        using var timer1 = p.CreateTimer(_ => { }, null, TimeSpan.FromSeconds(3), TimeSpan.Zero);
+        using var timer2 = p.CreateTimer(_ => { }, null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
+        using var timer3 = p.CreateTimer(_ => { }, null, TimeSpan.FromSeconds(2), TimeSpan.Zero);
 
-        var timers = timeProvider.GetPendingTimers();
+        var timers = p.GetPendingTimers();
 
         Assert.Equal(3, timers.Count);
         Assert.True(timers[0].DueTime < timers[1].DueTime);
@@ -619,10 +660,9 @@ public class SimulationTimeProviderTests
     [Fact]
     public async Task DelayZeroDelayCompletesImmediately()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
+        var p = new TestTimeProvider();
 
-        var task = Task.Delay(TimeSpan.Zero, timeProvider, TestContext.Current.CancellationToken);
+        var task = Task.Delay(TimeSpan.Zero, p.TimeProvider, TestContext.Current.CancellationToken);
 
         Assert.True(task.IsCompleted);
         await task;
@@ -631,14 +671,13 @@ public class SimulationTimeProviderTests
     [Fact]
     public async Task DelayAwaitedCompletesSuccessfully()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
+        var p = new TestTimeProvider();
 
-        var delay = Task.Delay(TimeSpan.FromMilliseconds(1), timeProvider, TestContext.Current.CancellationToken);
+        var delay = Task.Delay(TimeSpan.FromMilliseconds(1), p.TimeProvider, TestContext.Current.CancellationToken);
         Assert.False(delay.IsCompleted);
 
-        timeProvider.Advance(TimeSpan.FromMilliseconds(1));
-        taskQueue.RunUntilIdle();
+        p.Advance(TimeSpan.FromMilliseconds(1));
+        p.RunUntilIdle();
         await delay;
 
         Assert.True(delay.IsCompleted);
@@ -649,11 +688,10 @@ public class SimulationTimeProviderTests
     [Fact]
     public async Task DelayCancelledTokenThrowsTaskCanceledException()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
+        var p = new TestTimeProvider();
 
         using var cts = new CancellationTokenSource();
-        var delay = Task.Delay(InfiniteTimeout, timeProvider, cts.Token);
+        var delay = Task.Delay(InfiniteTimeout, p.TimeProvider, cts.Token);
         Assert.False(delay.IsCompleted);
 
         await cts.CancelAsync();
@@ -664,14 +702,13 @@ public class SimulationTimeProviderTests
     [Fact]
     public async Task DelayWhenTimeAdvancedCompletesWithoutCancellation()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
+        var p = new TestTimeProvider();
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(1000));
 
-        var task = Task.Delay(TimeSpan.FromMilliseconds(10000), timeProvider, cts.Token);
+        var task = Task.Delay(TimeSpan.FromMilliseconds(10000), p.TimeProvider, cts.Token);
 
-        timeProvider.Advance(TimeSpan.FromMilliseconds(10000));
-        taskQueue.RunUntilIdle();
+        p.Advance(TimeSpan.FromMilliseconds(10000));
+        p.RunUntilIdle();
 
         await task;
 
@@ -681,64 +718,62 @@ public class SimulationTimeProviderTests
     [Fact]
     public void DelayMultipleDelaysRegisteredInCorrectOrder()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
+        var p = new TestTimeProvider();
         var ct = TestContext.Current.CancellationToken;
 
         // Install sync context so continuations are captured by the simulation
-        using var _ = taskQueue.SynchronizationContext.Install();
+        using var _ = p.TaskQueue.SynchronizationContext.Install();
 
         // Create delays - they immediately register timers with the provider
-        var delay1 = Task.Delay(TimeSpan.FromSeconds(3), timeProvider, ct);
-        var delay2 = Task.Delay(TimeSpan.FromSeconds(1), timeProvider, ct);
-        var delay3 = Task.Delay(TimeSpan.FromSeconds(2), timeProvider, ct);
+        var delay1 = Task.Delay(TimeSpan.FromSeconds(3), p.TimeProvider, ct);
+        var delay2 = Task.Delay(TimeSpan.FromSeconds(1), p.TimeProvider, ct);
+        var delay3 = Task.Delay(TimeSpan.FromSeconds(2), p.TimeProvider, ct);
 
         // Verify timers are registered with correct due times
-        var pendingTimers = timeProvider.GetPendingTimers();
+        var pendingTimers = p.GetPendingTimers();
         Assert.Equal(3, pendingTimers.Count);
 
         // Timers should be ordered by wake time (1s, 2s, 3s)
-        Assert.Equal(timeProvider.Start + TimeSpan.FromSeconds(1), pendingTimers[0].DueTime);
-        Assert.Equal(timeProvider.Start + TimeSpan.FromSeconds(2), pendingTimers[1].DueTime);
-        Assert.Equal(timeProvider.Start + TimeSpan.FromSeconds(3), pendingTimers[2].DueTime);
+        Assert.Equal(p.Start + TimeSpan.FromSeconds(1), pendingTimers[0].DueTime);
+        Assert.Equal(p.Start + TimeSpan.FromSeconds(2), pendingTimers[1].DueTime);
+        Assert.Equal(p.Start + TimeSpan.FromSeconds(3), pendingTimers[2].DueTime);
 
         // Advance time and verify delays complete in order
-        timeProvider.Advance(TimeSpan.FromSeconds(1));
-        taskQueue.RunUntilIdle();
+        p.Advance(TimeSpan.FromSeconds(1));
+        p.RunUntilIdle();
         Assert.True(delay2.IsCompleted);
         Assert.False(delay3.IsCompleted);
         Assert.False(delay1.IsCompleted);
 
-        timeProvider.Advance(TimeSpan.FromSeconds(1));
-        taskQueue.RunUntilIdle();
+        p.Advance(TimeSpan.FromSeconds(1));
+        p.RunUntilIdle();
         Assert.True(delay3.IsCompleted);
         Assert.False(delay1.IsCompleted);
 
-        timeProvider.Advance(TimeSpan.FromSeconds(1));
-        taskQueue.RunUntilIdle();
+        p.Advance(TimeSpan.FromSeconds(1));
+        p.RunUntilIdle();
         Assert.True(delay1.IsCompleted);
     }
 
     [Fact]
     public void DelayMultipleDelaysContinuationsRunInCorrectOrder()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
-        var scheduler = new SimulationTaskScheduler(taskQueue);
+        var p = new TestTimeProvider();
+        var scheduler = new SimulationTaskScheduler(p.TaskQueue);
         var completionOrder = new List<int>();
         var ct = TestContext.Current.CancellationToken;
 
         // Install sync context so continuations are captured by the simulation
-        using var _ = taskQueue.SynchronizationContext.Install();
+        using var _ = p.TaskQueue.SynchronizationContext.Install();
 
         // Create delays with continuations that record completion order
-        var delay1 = Task.Delay(TimeSpan.FromSeconds(3), timeProvider, ct).ContinueWith(_ => completionOrder.Add(1), ct, TaskContinuationOptions.None, scheduler);
-        var delay2 = Task.Delay(TimeSpan.FromSeconds(1), timeProvider, ct).ContinueWith(_ => completionOrder.Add(2), ct, TaskContinuationOptions.None, scheduler);
-        var delay3 = Task.Delay(TimeSpan.FromSeconds(2), timeProvider, ct).ContinueWith(_ => completionOrder.Add(3), ct, TaskContinuationOptions.None, scheduler);
+        var delay1 = Task.Delay(TimeSpan.FromSeconds(3), p.TimeProvider, ct).ContinueWith(_ => completionOrder.Add(1), ct, TaskContinuationOptions.None, scheduler);
+        var delay2 = Task.Delay(TimeSpan.FromSeconds(1), p.TimeProvider, ct).ContinueWith(_ => completionOrder.Add(2), ct, TaskContinuationOptions.None, scheduler);
+        var delay3 = Task.Delay(TimeSpan.FromSeconds(2), p.TimeProvider, ct).ContinueWith(_ => completionOrder.Add(3), ct, TaskContinuationOptions.None, scheduler);
 
         // Advance time past all delays and execute
-        timeProvider.Advance(TimeSpan.FromSeconds(5));
-        taskQueue.RunUntilIdle();
+        p.Advance(TimeSpan.FromSeconds(5));
+        p.RunUntilIdle();
 
         // Continuations should run in order of their delay durations: 1s (2), 2s (3), 3s (1)
         Assert.Equal([2, 3, 1], completionOrder);
@@ -751,10 +786,9 @@ public class SimulationTimeProviderTests
     [Fact]
     public void ToStringDefaultReturnsProperFormat()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
+        var p = new TestTimeProvider();
 
-        var result = timeProvider.ToString();
+        var result = p.TimeProvider.ToString();
 
         Assert.Equal("2000-01-01T00:00:00.000", result);
     }
@@ -762,99 +796,92 @@ public class SimulationTimeProviderTests
     [Fact]
     public void ToStringCustomTimeReturnsProperFormat()
     {
-        var taskQueue = new SimulationTaskQueue();
         var dto = new DateTimeOffset(new DateTime(2022, 1, 2, 3, 4, 5, 6), TimeSpan.Zero);
-        var timeProvider = new SimulationTimeProvider(taskQueue, dto);
+        var p = new TestTimeProvider(dto);
 
-        Assert.Equal("2022-01-02T03:04:05.006", timeProvider.ToString());
+        Assert.Equal("2022-01-02T03:04:05.006", p.TimeProvider.ToString());
     }
 
     [Fact]
     public void ToStringAfterAdvanceReturnsUpdatedTime()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue, new DateTimeOffset(2000, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        var p = new TestTimeProvider(new DateTimeOffset(2000, 1, 1, 0, 0, 0, TimeSpan.Zero));
 
-        timeProvider.Advance(TimeSpan.FromHours(1).Add(TimeSpan.FromMinutes(30)));
+        p.Advance(TimeSpan.FromHours(1).Add(TimeSpan.FromMinutes(30)));
 
-        Assert.Equal("2000-01-01T01:30:00.000", timeProvider.ToString());
+        Assert.Equal("2000-01-01T01:30:00.000", p.TimeProvider.ToString());
     }
 
     #endregion
 
-    #region HasPendingTimers and PendingTimerCount Tests
+    #region PendingTimerCount Tests
 
     [Fact]
-    public void HasPendingTimersNoTimersReturnsFalse()
+    public void PendingTimerCountNoTimersReturnsZero()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
+        var p = new TestTimeProvider();
 
-        Assert.Equal(0, timeProvider.PendingTimerCount);
+        Assert.Equal(0, p.PendingTimerCount);
     }
 
     [Fact]
-    public void HasPendingTimersWithTimerReturnsTrue()
+    public void PendingTimerCountWithTimerReturnsOne()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
+        var p = new TestTimeProvider();
 
-        using var timer = timeProvider.CreateTimer(_ => { }, null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
+        using var timer = p.CreateTimer(_ => { }, null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
 
-        Assert.True(timeProvider.PendingTimerCount > 0);
+        Assert.True(p.PendingTimerCount > 0);
     }
 
     [Fact]
-    public void HasPendingTimersAfterTimerFiresReturnsFalse()
+    public void PendingTimerCountAfterTimerFiresReturnsZero()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
+        var p = new TestTimeProvider();
 
-        using var timer = timeProvider.CreateTimer(_ => { }, null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
+        using var timer = p.CreateTimer(_ => { }, null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
 
-        timeProvider.Advance(TimeSpan.FromSeconds(1));
+        p.Advance(TimeSpan.FromSeconds(1));
 
-        Assert.Equal(0, timeProvider.PendingTimerCount);
+        Assert.Equal(0, p.PendingTimerCount);
     }
 
     [Fact]
     public void PendingTimerCountTracksCorrectly()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
+        var p = new TestTimeProvider();
 
-        Assert.Equal(0, timeProvider.PendingTimerCount);
+        Assert.Equal(0, p.PendingTimerCount);
 
-        using var timer1 = timeProvider.CreateTimer(_ => { }, null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
-        Assert.Equal(1, timeProvider.PendingTimerCount);
+        using var timer1 = p.CreateTimer(_ => { }, null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
+        Assert.Equal(1, p.PendingTimerCount);
 
-        using var timer2 = timeProvider.CreateTimer(_ => { }, null, TimeSpan.FromSeconds(2), TimeSpan.Zero);
-        Assert.Equal(2, timeProvider.PendingTimerCount);
+        using var timer2 = p.CreateTimer(_ => { }, null, TimeSpan.FromSeconds(2), TimeSpan.Zero);
+        Assert.Equal(2, p.PendingTimerCount);
 
-        timeProvider.Advance(TimeSpan.FromSeconds(1));
-        Assert.Equal(1, timeProvider.PendingTimerCount);
+        p.Advance(TimeSpan.FromSeconds(1));
+        Assert.Equal(1, p.PendingTimerCount);
 
-        timeProvider.Advance(TimeSpan.FromSeconds(1));
-        Assert.Equal(0, timeProvider.PendingTimerCount);
+        p.Advance(TimeSpan.FromSeconds(1));
+        Assert.Equal(0, p.PendingTimerCount);
     }
 
     [Fact]
     public void PendingTimerCountWithPeriodicTimerStaysConstant()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
+        var p = new TestTimeProvider();
 
-        using var timer = timeProvider.CreateTimer(_ => { }, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+        using var timer = p.CreateTimer(_ => { }, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
 
-        Assert.Equal(1, timeProvider.PendingTimerCount);
+        Assert.Equal(1, p.PendingTimerCount);
 
-        timeProvider.Advance(TimeSpan.FromSeconds(1));
-        taskQueue.RunUntilIdle(); // Execute to trigger rescheduling of periodic timer
-        Assert.Equal(1, timeProvider.PendingTimerCount); // Periodic timer stays registered
+        p.Advance(TimeSpan.FromSeconds(1));
+        p.RunUntilIdle(); // Execute to trigger rescheduling of periodic timer
+        Assert.Equal(1, p.PendingTimerCount); // Periodic timer stays registered
 
-        timeProvider.Advance(TimeSpan.FromSeconds(1));
-        taskQueue.RunUntilIdle();
-        Assert.Equal(1, timeProvider.PendingTimerCount);
+        p.Advance(TimeSpan.FromSeconds(1));
+        p.RunUntilIdle();
+        Assert.Equal(1, p.PendingTimerCount);
     }
 
     #endregion
@@ -864,36 +891,33 @@ public class SimulationTimeProviderTests
     [Fact]
     public void TimerDisposeRemovesFromPending()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
+        var p = new TestTimeProvider();
 
-        var timer = timeProvider.CreateTimer(_ => { }, null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
-        Assert.Equal(1, timeProvider.PendingTimerCount);
+        var timer = p.CreateTimer(_ => { }, null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
+        Assert.Equal(1, p.PendingTimerCount);
 
         timer.Dispose();
-        Assert.Equal(0, timeProvider.PendingTimerCount);
+        Assert.Equal(0, p.PendingTimerCount);
     }
 
     [Fact]
     public async Task TimerDisposeAsyncRemovesFromPending()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
+        var p = new TestTimeProvider();
 
-        var timer = timeProvider.CreateTimer(_ => { }, null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
-        Assert.Equal(1, timeProvider.PendingTimerCount);
+        var timer = p.CreateTimer(_ => { }, null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
+        Assert.Equal(1, p.PendingTimerCount);
 
         await timer.DisposeAsync();
-        Assert.Equal(0, timeProvider.PendingTimerCount);
+        Assert.Equal(0, p.PendingTimerCount);
     }
 
     [Fact]
     public void TimerDoubleDisposeDoesNotThrow()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
+        var p = new TestTimeProvider();
 
-        var timer = timeProvider.CreateTimer(_ => { }, null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
+        var timer = p.CreateTimer(_ => { }, null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
         timer.Dispose();
         timer.Dispose(); // Should not throw
     }
@@ -901,10 +925,9 @@ public class SimulationTimeProviderTests
     [Fact]
     public void TimerChangeAfterDisposeReturnsFalse()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
+        var p = new TestTimeProvider();
 
-        var timer = timeProvider.CreateTimer(_ => { }, null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
+        var timer = p.CreateTimer(_ => { }, null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
         timer.Dispose();
 
         var result = timer.Change(TimeSpan.FromSeconds(1), TimeSpan.Zero);
@@ -918,11 +941,10 @@ public class SimulationTimeProviderTests
     [Fact]
     public async Task ConcurrentAdvanceDoesNotCorruptState()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
+        var p = new TestTimeProvider();
         var callCount = 0;
 
-        using var timer = timeProvider.CreateTimer(_ => Interlocked.Increment(ref callCount),
+        using var timer = p.CreateTimer(_ => Interlocked.Increment(ref callCount),
             null, TimeSpan.FromMilliseconds(1), TimeSpan.FromMilliseconds(1));
 
         var tasks = new List<Task>();
@@ -932,8 +954,8 @@ public class SimulationTimeProviderTests
             {
                 for (int j = 0; j < 100; j++)
                 {
-                    timeProvider.Advance(TimeSpan.FromMilliseconds(1));
-                    taskQueue.RunUntilIdle();
+                    p.Advance(TimeSpan.FromMilliseconds(1));
+                    p.RunUntilIdle();
                 }
             }, TestContext.Current.CancellationToken));
         }
@@ -947,8 +969,7 @@ public class SimulationTimeProviderTests
     [Fact]
     public async Task ConcurrentTimerCreationDoesNotCorruptState()
     {
-        var taskQueue = new SimulationTaskQueue();
-        var timeProvider = new SimulationTimeProvider(taskQueue);
+        var p = new TestTimeProvider();
         var timers = new List<ITimer>();
         var lockObj = new object();
 
@@ -957,7 +978,7 @@ public class SimulationTimeProviderTests
         {
             tasks.Add(Task.Run(() =>
             {
-                var timer = timeProvider.CreateTimer(_ => { }, null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
+                var timer = p.CreateTimer(_ => { }, null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
                 lock (lockObj)
                 {
                     timers.Add(timer);
@@ -967,14 +988,14 @@ public class SimulationTimeProviderTests
 
         await Task.WhenAll(tasks);
 
-        Assert.Equal(100, timeProvider.PendingTimerCount);
+        Assert.Equal(100, p.PendingTimerCount);
 
         foreach (var timer in timers)
         {
             timer.Dispose();
         }
 
-        Assert.Equal(0, timeProvider.PendingTimerCount);
+        Assert.Equal(0, p.PendingTimerCount);
     }
 
     #endregion
@@ -984,26 +1005,23 @@ public class SimulationTimeProviderTests
     [Fact]
     public void StartReturnsInitialTime()
     {
-        var taskQueue = new SimulationTaskQueue();
         var startTime = new DateTimeOffset(2023, 6, 15, 12, 0, 0, TimeSpan.Zero);
-        var timeProvider = new SimulationTimeProvider(taskQueue, startTime);
+        var p = new TestTimeProvider(startTime);
 
-        Assert.Equal(startTime, timeProvider.Start);
+        Assert.Equal(startTime, p.Start);
     }
 
     [Fact]
     public void StartUnchangedAfterAdvance()
     {
-        var taskQueue = new SimulationTaskQueue();
         var startTime = new DateTimeOffset(2023, 6, 15, 12, 0, 0, TimeSpan.Zero);
-        var timeProvider = new SimulationTimeProvider(taskQueue, startTime);
+        var p = new TestTimeProvider(startTime);
 
-        timeProvider.Advance(TimeSpan.FromHours(5));
+        p.Advance(TimeSpan.FromHours(5));
 
-        Assert.Equal(startTime, timeProvider.Start);
-        Assert.NotEqual(startTime, timeProvider.GetUtcNow());
+        Assert.Equal(startTime, p.Start);
+        Assert.NotEqual(startTime, p.GetUtcNow());
     }
 
     #endregion
-
 }

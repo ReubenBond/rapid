@@ -13,12 +13,51 @@ namespace Rapid.Tests.SimulationTests;
 public sealed class GracefulLeaveTests : IAsyncLifetime
 {
     private SimulationHarness _harness = null!;
-    private const int TestSeed = 67890;
+    private SynchronizationContextScope _syncContextScope;
+    private const int BaseSeed = 67890;
     private readonly List<ObservableCollector<ClusterEventNotification>> _collectors = [];
+    
+    // Track instance reuse - each test should get a fresh instance
+    private readonly Guid _instanceId = Guid.NewGuid();
+    private int _initializeCount;
+    private string? _firstTestName;
 
     public ValueTask InitializeAsync()
     {
-        _harness = new SimulationHarness(seed: TestSeed);
+        var currentTestName = TestContext.Current.Test?.TestDisplayName ?? "unknown";
+        var initCount = Interlocked.Increment(ref _initializeCount);
+        
+        if (initCount > 1)
+        {
+            throw new InvalidOperationException(
+                $"INSTANCE REUSE DETECTED! Instance {_instanceId} was initialized {initCount} times. " +
+                $"First test: '{_firstTestName}', Current test: '{currentTestName}'. " +
+                $"xUnit should create a new instance for each test.");
+        }
+        
+        _firstTestName = currentTestName;
+        
+        // Log the current synchronization context for debugging
+        var currentSyncContext = SynchronizationContext.Current;
+        Console.WriteLine($"[GracefulLeaveTests] Before harness creation, SyncContext: {currentSyncContext?.GetType().Name ?? "null"}");
+        
+        // Derive a unique seed from the test name to ensure test isolation
+        // This makes tests deterministic (same seed for same test) but independent of execution order
+        // Use GuidUtility.GetDeterministicHashCode instead of string.GetHashCode() because
+        // .NET's string hash is randomized per-process for security
+        var testSeed = BaseSeed ^ GuidUtility.GetDeterministicHashCode(currentTestName);
+        
+        // Log the seed for debugging determinism issues
+        Console.WriteLine($"[GracefulLeaveTests] Test: {currentTestName}, Seed: {testSeed}");
+        
+        _harness = new SimulationHarness(seed: testSeed);
+        
+        // Install the simulation's synchronization context to capture async continuations
+        // This ensures all async operations are routed through the simulation task queue
+        _syncContextScope = _harness.SynchronizationContext.Install();
+        
+        Console.WriteLine($"[GracefulLeaveTests] After install, SyncContext: {SynchronizationContext.Current?.GetType().Name ?? "null"}");
+        
         return ValueTask.CompletedTask;
     }
 
@@ -31,6 +70,10 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         _collectors.Clear();
 
         await _harness.DisposeAsync().ConfigureAwait(true);
+        
+        // Restore the previous synchronization context AFTER harness disposal
+        // to ensure any async cleanup operations are captured by the simulation
+        _syncContextScope.Dispose();
     }
 
     /// <summary>

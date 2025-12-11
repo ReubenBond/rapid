@@ -10,7 +10,8 @@ public sealed class SimulationSchedulerTests
     [Fact]
     public void QueuedTasksAreNotExecutedAutomatically()
     {
-        var taskQueue = new SimulationTaskQueue();
+        var clock = new SimulationClock();
+        var taskQueue = new SimulationTaskQueue(clock);
         var scheduler = new SimulationTaskScheduler(taskQueue);
         var executed = false;
 
@@ -24,7 +25,8 @@ public sealed class SimulationSchedulerTests
     [Fact]
     public void StepExecutesSingleTask()
     {
-        var taskQueue = new SimulationTaskQueue();
+        var clock = new SimulationClock();
+        var taskQueue = new SimulationTaskQueue(clock);
         var scheduler = new SimulationTaskScheduler(taskQueue);
         var executed = false;
 
@@ -41,7 +43,8 @@ public sealed class SimulationSchedulerTests
     [Fact]
     public void StepAllExecutesAllTasks()
     {
-        var taskQueue = new SimulationTaskQueue();
+        var clock = new SimulationClock();
+        var taskQueue = new SimulationTaskQueue(clock);
         var scheduler = new SimulationTaskScheduler(taskQueue);
         var count = 0;
 
@@ -61,7 +64,8 @@ public sealed class SimulationSchedulerTests
     [Fact]
     public void StepWithCountLimitsExecution()
     {
-        var taskQueue = new SimulationTaskQueue();
+        var clock = new SimulationClock();
+        var taskQueue = new SimulationTaskQueue(clock);
         var scheduler = new SimulationTaskScheduler(taskQueue);
         var count = 0;
 
@@ -85,7 +89,8 @@ public sealed class SimulationSchedulerTests
     [Fact]
     public void ClearRemovesAllPendingTasks()
     {
-        var taskQueue = new SimulationTaskQueue();
+        var clock = new SimulationClock();
+        var taskQueue = new SimulationTaskQueue(clock);
         var scheduler = new SimulationTaskScheduler(taskQueue);
 
         for (var i = 0; i < 5; i++)
@@ -102,7 +107,8 @@ public sealed class SimulationSchedulerTests
     [Fact]
     public void TasksExecuteInFifoOrder()
     {
-        var taskQueue = new SimulationTaskQueue();
+        var clock = new SimulationClock();
+        var taskQueue = new SimulationTaskQueue(clock);
         var scheduler = new SimulationTaskScheduler(taskQueue);
         var order = new List<int>();
 
@@ -121,7 +127,8 @@ public sealed class SimulationSchedulerTests
     [Fact]
     public void SynchronizationContextPostRoutesToScheduler()
     {
-        var taskQueue = new SimulationTaskQueue();
+        var clock = new SimulationClock();
+        var taskQueue = new SimulationTaskQueue(clock);
         var syncContext = taskQueue.SynchronizationContext;
         var executed = false;
 
@@ -135,7 +142,8 @@ public sealed class SimulationSchedulerTests
     [Fact]
     public void SynchronizationContextSendExecutesSynchronously()
     {
-        var taskQueue = new SimulationTaskQueue();
+        var clock = new SimulationClock();
+        var taskQueue = new SimulationTaskQueue(clock);
         var syncContext = taskQueue.SynchronizationContext;
         var executed = false;
 
@@ -147,7 +155,8 @@ public sealed class SimulationSchedulerTests
     [Fact]
     public void SynchronizationContextCreateCopyReturnsNewInstance()
     {
-        var taskQueue = new SimulationTaskQueue();
+        var clock = new SimulationClock();
+        var taskQueue = new SimulationTaskQueue(clock);
         var syncContext = taskQueue.SynchronizationContext;
 
         var copy = syncContext.CreateCopy();
@@ -159,7 +168,8 @@ public sealed class SimulationSchedulerTests
     [Fact]
     public void SchedulerWithTaskQueueOrdersByTime()
     {
-        var taskQueue = new SimulationTaskQueue();
+        var clock = new SimulationClock();
+        var taskQueue = new SimulationTaskQueue(clock);
         var scheduler = new SimulationTaskScheduler(taskQueue);
         var order = new List<string>();
 
@@ -168,7 +178,7 @@ public sealed class SimulationSchedulerTests
         task1.Start(scheduler);
 
         // Advance time and queue second task
-        taskQueue.AdvanceTime(TimeSpan.FromSeconds(1));
+        clock.Advance(TimeSpan.FromSeconds(1));
         var task2 = new Task(() => order.Add("second"));
         task2.Start(scheduler);
 
@@ -181,7 +191,8 @@ public sealed class SimulationSchedulerTests
     [Fact]
     public void TryExecuteOneReturnsFalseWhenEmpty()
     {
-        var taskQueue = new SimulationTaskQueue();
+        var clock = new SimulationClock();
+        var taskQueue = new SimulationTaskQueue(clock);
 
         var result = taskQueue.RunOnce();
 
@@ -191,7 +202,8 @@ public sealed class SimulationSchedulerTests
     [Fact]
     public void HasPendingTasksReflectsQueueState()
     {
-        var taskQueue = new SimulationTaskQueue();
+        var clock = new SimulationClock();
+        var taskQueue = new SimulationTaskQueue(clock);
         var scheduler = new SimulationTaskScheduler(taskQueue);
 
         Assert.Empty(scheduler.Tasks);

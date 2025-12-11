@@ -396,7 +396,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     {
         LogJoiningCluster(new LoggableEndpoint(_seedAddress!), new LoggableEndpoint(_myAddr));
 
-        var maxRetries = _options.GrpcDefaultRetries;
+        var maxRetries = _options.MaxJoinRetries;
         var retryDelay = _options.JoinRetryBaseDelay;
         JoinResponse? successfulResponse = null;
         string? lastFailureReason = null;

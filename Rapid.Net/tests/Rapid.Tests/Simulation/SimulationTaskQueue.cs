@@ -91,17 +91,14 @@ internal sealed class ScheduledActionItem(Action callback) : ScheduledItem
 /// This enables deterministic simulation testing by providing unified control
 /// over task execution order and time advancement.
 /// 
-/// The queue can operate in two modes:
-/// 1. Internal time: The queue manages its own time via <see cref="AdvanceTime"/>.
-/// 2. External clock: The queue delegates time to a shared <see cref="SimulationClock"/>,
-///    enabling multiple queues to share a unified view of time.
+/// The queue delegates time to a shared <see cref="SimulationClock"/>,
+/// enabling multiple queues to share a unified view of time.
 /// </summary>
 internal sealed class SimulationTaskQueue
 {
     // Single queue ordered by due time, then sequence number
     private readonly SortedSet<ScheduledItem> _queue = new(new ScheduledItemComparer());
-    private readonly SimulationClock? _externalClock;
-    private TimeSpan _internalCurrentTime;
+    private readonly SimulationClock _clock;
     private long _sequenceNumber;
 
     /// <summary>
@@ -116,39 +113,27 @@ internal sealed class SimulationTaskQueue
     public IReadOnlySet<ScheduledItem> ScheduledItems { get; }
 
     /// <summary>
-    /// Creates a new simulation task queue with internal time management.
-    /// </summary>
-    /// <param name="initialTime">The initial time offset. Default is <see cref="TimeSpan.Zero"/>.</param>
-    public SimulationTaskQueue(TimeSpan initialTime = default)
-    {
-        _internalCurrentTime = initialTime;
-        SynchronizationContext = new SimulationSynchronizationContext(this);
-        ScheduledItems = _queue.AsReadOnly();
-    }
-
-    /// <summary>
-    /// Creates a new simulation task queue that uses an external clock for time.
+    /// Creates a new simulation task queue that uses the specified clock for time.
     /// Multiple queues can share the same clock for unified time coordination.
     /// </summary>
-    /// <param name="clock">The external clock to use for time.</param>
+    /// <param name="clock">The clock to use for time.</param>
     public SimulationTaskQueue(SimulationClock clock)
     {
         ArgumentNullException.ThrowIfNull(clock);
-        _externalClock = clock;
+        _clock = clock;
         SynchronizationContext = new SimulationSynchronizationContext(this);
         ScheduledItems = _queue.AsReadOnly();
     }
 
     /// <summary>
-    /// Gets whether this queue uses an external clock for time.
+    /// Gets the clock used by this queue.
     /// </summary>
-    public bool UsesExternalClock => _externalClock != null;
+    public SimulationClock Clock => _clock;
 
     /// <summary>
     /// Gets the current time offset from the start.
-    /// When using an external clock, this delegates to the clock.
     /// </summary>
-    public TimeSpan CurrentTime => _externalClock?.CurrentTime ?? _internalCurrentTime;
+    public TimeSpan CurrentTime => _clock.CurrentTime;
 
     /// <summary>
     /// Gets the synchronization context used to execute callbacks.
@@ -300,28 +285,6 @@ internal sealed class SimulationTaskQueue
         }
 
         return count;
-    }
-
-    /// <summary>
-    /// Advances the current time by the specified amount.
-    /// This method is only valid when using internal time management.
-    /// </summary>
-    /// <param name="delta">The amount to advance.</param>
-    /// <exception cref="InvalidOperationException">Thrown when using an external clock.</exception>
-    public void AdvanceTime(TimeSpan delta)
-    {
-        if (_externalClock != null)
-        {
-            throw new InvalidOperationException(
-                "Cannot advance time on a queue using an external clock. " +
-                "Advance time on the SimulationClock instead.");
-        }
-
-        ArgumentOutOfRangeException.ThrowIfLessThan(delta, TimeSpan.Zero);
-        lock (Lock)
-        {
-            _internalCurrentTime += delta;
-        }
     }
 
     /// <summary>

@@ -172,6 +172,11 @@ public sealed class RapidProtocolOptions
     public int FailureDetectorConsecutiveFailures { get; set; } = 3;
 
     /// <summary>
+    /// Maximum number of times to retry join attempts
+    /// </summary>
+    public int MaxJoinRetries { get; set; } = int.MaxValue;
+
+    /// <summary>
     /// Base delay between join retry attempts. Default: 100 milliseconds
     /// </summary>
     public TimeSpan JoinRetryBaseDelay { get; set; } = TimeSpan.FromMilliseconds(100);

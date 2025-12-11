@@ -6,19 +6,14 @@ namespace Rapid.Tests.Simulation;
 /// allowing multiple <see cref="SimulationTaskQueue"/> instances to share
 /// a unified view of time while maintaining separate task queues.
 /// </summary>
-internal sealed class SimulationClock
+/// <remarks>
+/// Creates a new simulation clock with the specified initial time.
+/// </remarks>
+/// <param name="initialTime">The initial time offset. Default is <see cref="TimeSpan.Zero"/>.</param>
+internal sealed class SimulationClock(TimeSpan initialTime = default)
 {
     private readonly Lock _lock = new();
-    private TimeSpan _currentTime;
-
-    /// <summary>
-    /// Creates a new simulation clock with the specified initial time.
-    /// </summary>
-    /// <param name="initialTime">The initial time offset. Default is <see cref="TimeSpan.Zero"/>.</param>
-    public SimulationClock(TimeSpan initialTime = default)
-    {
-        _currentTime = initialTime;
-    }
+    private TimeSpan _currentTime = initialTime;
 
     /// <summary>
     /// Gets the current simulated time as an offset from the start.

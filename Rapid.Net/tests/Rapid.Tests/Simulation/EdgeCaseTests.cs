@@ -139,20 +139,16 @@ public sealed class EdgeCaseTests : IAsyncLifetime
         // Remove from harness first
         _harness.CrashNode(seedNode);
 
-        // First dispose
-        seedNode.Dispose();
-
-        // Second dispose should not throw
-        seedNode.Dispose();
+        // Second Destroy should not throw (idempotent)
+        seedNode.Destroy();
     }
 
     [Fact]
-    public void CancellationDuringJoinHandled()
+    public void CreateJoinerNodeRejectsNullSeed()
     {
-        var seedNode = _harness.CreateSeedNode();
+        _ = _harness.CreateSeedNode();
 
-        // Note: With synchronous CreateJoinerNode, we can't easily test cancellation
-        // during join. Instead, test that the harness throws on null seed node.
+        // CreateJoinerNode requires a valid seed node
         Assert.Throws<ArgumentNullException>(() =>
         {
             _harness.CreateJoinerNode(null!, nodeId: 1);
@@ -171,20 +167,25 @@ public sealed class EdgeCaseTests : IAsyncLifetime
         // Node not initialized - should not be in a valid state
         Assert.False(node.IsInitialized);
 
-        node.Dispose();
+        // Cleanup via harness
+        _harness.CrashNode(node);
     }
 
     [Fact]
-    public void JoinToSelfFails()
+    public void JoinToUninitializedNodeFails()
     {
-        var seedNode = _harness.CreateSeedNode();
+        // Create an uninitialized node (not a proper seed)
+        var uninitializedNode = _harness.CreateUninitializedNode(nodeId: 1);
 
-        // Attempting to join to self doesn't make sense and should fail
-        // Note: This test may need adjustment based on actual behavior
-        Assert.Throws<ArgumentNullException>(() =>
+        // Attempting to join using an uninitialized node as seed should fail
+        // because the uninitialized node doesn't have proper membership set up
+        Assert.ThrowsAny<Exception>(() =>
         {
-            _harness.CreateJoinerNode(null!, nodeId: 1);
+            _harness.CreateJoinerNode(uninitializedNode, nodeId: 2);
         });
+
+        // Cleanup
+        _harness.CrashNode(uninitializedNode);
     }
 
     [Fact]

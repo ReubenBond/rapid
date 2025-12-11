@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -10,8 +11,11 @@ namespace Rapid.Tests.Simulation;
 /// <summary>
 /// Represents a simulated node in a Rapid cluster.
 /// Uses in-memory transport instead of gRPC and does not require a WebApplication.
+/// Lifetime is managed by the SimulationHarness via Destroy() - do not implement IDisposable.
 /// </summary>
-internal sealed class SimulationNode : IAsyncDisposable, IDisposable
+[SuppressMessage("Reliability", "CA1001:Types that own disposable fields should be disposable",
+    Justification = "Lifetime is managed by SimulationHarness.Destroy() to avoid CA2000 warnings in tests")]
+internal sealed class SimulationNode
 {
     private readonly SimulationHarness _harness;
     private readonly NodeSimulationContext _context;
@@ -231,53 +235,26 @@ internal sealed class SimulationNode : IAsyncDisposable, IDisposable
         }
     }
 
-    public async ValueTask DisposeAsync()
+    /// <summary>
+    /// Destroys the node and releases all resources. Called by the harness during node removal or disposal.
+    /// </summary>
+    internal void Destroy()
     {
         if (_disposed) return;
         _disposed = true;
 
-        _logger.LogDebug("Node {Address} disposing async", RapidUtils.Loggable(Address));
+        _logger.LogDebug("Node {Address} destroying", RapidUtils.Loggable(Address));
 
         // First shutdown shared resources to cancel the ShuttingDownToken
         // This will cause consensus instances to complete and prevent rejoins
         _sharedResources.StartShutdown();
 
-        // Now dispose the membership service asynchronously
-        if (_membershipService != null)
-        {
-            _membershipService.Shutdown();
-            await _membershipService.DisposeAsync();
-        }
+        _membershipService.Shutdown();
 
         _sharedResources.Dispose();
         MessagingClient.Dispose();
-        _harness.UnregisterNode(this);
 
-        _logger.LogDebug("Node {Address} disposed async", RapidUtils.Loggable(Address));
-    }
-
-    public void Dispose()
-    {
-        if (_disposed) return;
-        _disposed = true;
-
-        _logger.LogDebug("Node {Address} disposing", RapidUtils.Loggable(Address));
-
-        // First shutdown shared resources to cancel the ShuttingDownToken
-        // This will cause consensus instances to complete and prevent rejoins
-        _sharedResources.StartShutdown();
-
-        if (_membershipService != null)
-        {
-            _membershipService.Shutdown();
-        }
-        // Note: We cannot await DisposeAsync here, so we skip the async dispose
-        // The shutdown above should have cancelled everything
-        _sharedResources.Dispose();
-        MessagingClient.Dispose();
-        _harness.UnregisterNode(this);
-
-        _logger.LogDebug("Node {Address} disposed", RapidUtils.Loggable(Address));
+        _logger.LogDebug("Node {Address} destroyed", RapidUtils.Loggable(Address));
     }
 
     /// <summary>
