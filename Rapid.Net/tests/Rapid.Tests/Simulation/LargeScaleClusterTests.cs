@@ -1,5 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Text;
 using Rapid.Tests.Simulation;
+using Xunit.v3;
 
 namespace Rapid.Tests.SimulationTests;
 
@@ -61,6 +63,7 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
     [InlineData(50)]
     [InlineData(80)]
     [InlineData(100)]
+    [InlineData(200)]
     public void LargeClusterFormation_Parallel(int clusterSize)
     {
         var nodes = _harness.CreateClusterParallel(size: clusterSize);
@@ -116,6 +119,7 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
     [InlineData(50, 10)]  // 50 nodes in batches of 10
     [InlineData(80, 20)]  // 80 nodes in batches of 20
     [InlineData(100, 25)] // 100 nodes in batches of 25
+    [InlineData(200, 25)] // 100 nodes in batches of 25
     public void LargeClusterFormation_BatchedParallel(int clusterSize, int batchSize)
     {
         var nodes = _harness.CreateClusterParallel(size: clusterSize, batchSize: batchSize);
@@ -161,10 +165,76 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
         var nodesJoined = clusterSize - 1; // Excluding seed node
         var avgNodesPerChange = (double)nodesJoined / configChanges;
         
+        // Log membership transitions summary
+        LogBatchingSummary("ParallelJoins", clusterSize, configChanges, nodesJoined, avgNodesPerChange);
+        
         Assert.True(configChanges <= maxExpectedChanges,
             $"Expected at most {maxExpectedChanges} configuration changes for {clusterSize} nodes, " +
             $"but got {configChanges}. Average nodes per change: {avgNodesPerChange:F1}. " +
             $"Batching is not working correctly - each view change should include multiple nodes.");
+    }
+
+    /// <summary>
+    /// Tests parallel joins with detailed view transition tracking via MembershipViewAccessor.
+    /// This test subscribes to the seed node's view changes to capture exactly what members
+    /// are added in each configuration change, providing visibility into batching behavior.
+    /// </summary>
+    [Theory]
+    [InlineData(20)]
+    [InlineData(50)]
+    public void ParallelJoins_WithDetailedViewTracking(int clusterSize)
+    {
+        // Create seed node first
+        var seedNode = _harness.CreateSeedNode();
+        var viewHistory = new List<MembershipView> { seedNode.CurrentView };
+        var cancellationToken = TestContext.Current.CancellationToken;
+        
+        // Subscribe to view changes on the seed node
+        var viewCollectionComplete = false;
+        var viewCollectionTask = Task.Run(async () =>
+        {
+            await foreach (var view in seedNode.ViewAccessor.ListenForViewUpdatesAsync(cancellationToken))
+            {
+                viewHistory.Add(view);
+                if (view.Size >= clusterSize || viewCollectionComplete)
+                {
+                    break;
+                }
+            }
+        }, cancellationToken);
+
+        // Join remaining nodes in parallel
+        var joinTasks = new List<Task>();
+        for (var i = 1; i < clusterSize; i++)
+        {
+            var node = _harness.CreateUninitializedNode(i);
+            var joinTask = node.JoinClusterAsync(seedNode, cancellationToken: cancellationToken);
+            joinTasks.Add(joinTask);
+        }
+
+        // Drive simulation until all joins complete
+        _harness.DriveToCompletion(() => Task.WhenAll(joinTasks));
+        _harness.WaitForConvergence(expectedSize: clusterSize);
+        
+        // Signal view collection is complete and wait for it
+        viewCollectionComplete = true;
+        _harness.DriveToCompletion(() => viewCollectionTask);
+
+        // Compute and log detailed view transitions
+        var transitions = ComputeViewTransitions(viewHistory);
+        LogViewTransitions("ParallelJoins", transitions);
+
+        // Verify batching occurred
+        var configChanges = transitions.Count;
+        var nodesJoined = clusterSize - 1;
+        var avgNodesPerChange = configChanges > 0 ? (double)nodesJoined / configChanges : 0;
+        
+        LogBatchingSummary("ParallelJoins (detailed)", clusterSize, configChanges, nodesJoined, avgNodesPerChange);
+
+        // Should have fewer config changes than nodes (indicating batching)
+        Assert.True(configChanges < nodesJoined,
+            $"Expected batching (fewer config changes than nodes joined). " +
+            $"Got {configChanges} changes for {nodesJoined} nodes joined.");
     }
 
     /// <summary>
@@ -453,6 +523,8 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
         var nodes = _harness.CreateClusterParallel(size: clusterSize);
         _harness.WaitForConvergence(expectedSize: clusterSize);
 
+        var configVersionBeforeLeaves = nodes[0].CurrentView.ConfigurationId.Version;
+
         // Select nodes to remove (avoiding the seed node at index 0)
         var leavingNodes = nodes.Skip(clusterSize - nodesToRemove).Take(nodesToRemove).ToList();
         
@@ -465,6 +537,11 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
         Assert.All(_harness.Nodes, n => Assert.Equal(expectedSize, n.MembershipSize));
         
         var avgNodesPerChange = (double)nodesToRemove / configChanges;
+        
+        // Log membership transitions summary
+        LogBatchingSummary("ParallelLeaves", nodesToRemove, configChanges, nodesToRemove, avgNodesPerChange, 
+            $"(cluster: {clusterSize} -> {expectedSize})");
+        
         Assert.True(configChanges <= maxExpectedChanges,
             $"Expected at most {maxExpectedChanges} configuration changes for removing {nodesToRemove} nodes, " +
             $"but got {configChanges}. Average nodes per change: {avgNodesPerChange:F1}. " +
@@ -526,6 +603,117 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
         // (At minimum, we should have more than 1 unique config ID)
         Assert.True(configIds.Count > 1,
             $"Expected multiple configuration IDs through cluster lifecycle, got {configIds.Count}");
+    }
+
+    #endregion
+
+    #region Helper Methods
+
+    /// <summary>
+    /// Logs a summary of batching statistics to the test output.
+    /// </summary>
+    private static void LogBatchingSummary(
+        string operationType, 
+        int totalNodes, 
+        long configChanges, 
+        int nodesChanged, 
+        double avgNodesPerChange,
+        string? suffix = null)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine();
+        sb.AppendLine($"=== {operationType} Batching Summary ===");
+        sb.AppendLine($"  Total nodes: {totalNodes}");
+        sb.AppendLine($"  Nodes changed: {nodesChanged}");
+        sb.AppendLine($"  Configuration changes: {configChanges}");
+        sb.AppendLine($"  Avg nodes per change: {avgNodesPerChange:F1}");
+        if (suffix != null)
+        {
+            sb.AppendLine($"  {suffix}");
+        }
+        sb.AppendLine($"================================");
+        
+        TestContext.Current.TestOutputHelper?.WriteLine(sb.ToString());
+    }
+
+    /// <summary>
+    /// Records a view change with transition details.
+    /// </summary>
+    private sealed record ViewTransition(
+        long Version,
+        int PreviousSize,
+        int NewSize,
+        int MembersAdded,
+        int MembersRemoved,
+        IReadOnlyList<string> AddedMembers,
+        IReadOnlyList<string> RemovedMembers);
+
+    /// <summary>
+    /// Logs detailed view transitions to the test output.
+    /// </summary>
+    private static void LogViewTransitions(string operationType, IReadOnlyList<ViewTransition> transitions)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine();
+        sb.AppendLine($"=== {operationType} View Transitions ({transitions.Count} changes) ===");
+        
+        foreach (var t in transitions)
+        {
+            sb.AppendLine($"  Version {t.Version}: {t.PreviousSize} -> {t.NewSize} members");
+            if (t.MembersAdded > 0)
+            {
+                sb.AppendLine($"    + Added ({t.MembersAdded}): {string.Join(", ", t.AddedMembers.Take(5))}{(t.MembersAdded > 5 ? $"... (+{t.MembersAdded - 5} more)" : "")}");
+            }
+            if (t.MembersRemoved > 0)
+            {
+                sb.AppendLine($"    - Removed ({t.MembersRemoved}): {string.Join(", ", t.RemovedMembers.Take(5))}{(t.MembersRemoved > 5 ? $"... (+{t.MembersRemoved - 5} more)" : "")}");
+            }
+        }
+        
+        // Summary statistics
+        var totalAdded = transitions.Sum(t => t.MembersAdded);
+        var totalRemoved = transitions.Sum(t => t.MembersRemoved);
+        var avgAddedPerChange = transitions.Count > 0 ? (double)totalAdded / transitions.Count : 0;
+        var avgRemovedPerChange = transitions.Count > 0 ? (double)totalRemoved / transitions.Count : 0;
+        
+        sb.AppendLine();
+        sb.AppendLine($"  Summary:");
+        sb.AppendLine($"    Total members added: {totalAdded} (avg {avgAddedPerChange:F1} per change)");
+        sb.AppendLine($"    Total members removed: {totalRemoved} (avg {avgRemovedPerChange:F1} per change)");
+        sb.AppendLine($"================================");
+        
+        TestContext.Current.TestOutputHelper?.WriteLine(sb.ToString());
+    }
+
+    /// <summary>
+    /// Computes view transitions from a list of membership views.
+    /// </summary>
+    private static List<ViewTransition> ComputeViewTransitions(List<MembershipView> views)
+    {
+        var transitions = new List<ViewTransition>();
+        
+        for (var i = 1; i < views.Count; i++)
+        {
+            var prev = views[i - 1];
+            var curr = views[i];
+            
+            var prevMembers = prev.Members.Select(m => $"{m.Hostname.ToStringUtf8()}:{m.Port}").ToHashSet();
+            var currMembers = curr.Members.Select(m => $"{m.Hostname.ToStringUtf8()}:{m.Port}").ToHashSet();
+            
+            var added = currMembers.Except(prevMembers).ToList();
+            var removed = prevMembers.Except(currMembers).ToList();
+            
+            transitions.Add(new ViewTransition(
+                curr.ConfigurationId.Version,
+                prev.Size,
+                curr.Size,
+                added.Count,
+                removed.Count,
+                added,
+                removed));
+        }
+        
+        return transitions;
     }
 
     #endregion
