@@ -74,6 +74,65 @@ internal sealed class SimulationNode
     /// </summary>
     internal InMemoryMessagingClient MessagingClient { get; }
 
+    #region Per-Node Execution Control
+
+    /// <summary>
+    /// Gets whether this node is currently suspended.
+    /// </summary>
+    public bool IsSuspended => _context.State == NodeSimulationState.Suspended;
+
+    /// <summary>
+    /// Suspends this node, preventing it from executing tasks.
+    /// Messages sent to the node will be queued but not processed until resumed.
+    /// </summary>
+    public void Suspend()
+    {
+        _context.Suspend();
+        _harness.LogNodeEvent(this, SimulationEventType.NodeSuspended, "Node suspended");
+    }
+
+    /// <summary>
+    /// Resumes this node, allowing it to execute tasks again.
+    /// </summary>
+    public void Resume()
+    {
+        _context.Resume();
+        _harness.LogNodeEvent(this, SimulationEventType.NodeResumed, "Node resumed");
+    }
+
+    /// <summary>
+    /// Suspends this node for the specified duration, then automatically resumes it.
+    /// The resume occurs when simulated time advances past the duration.
+    /// </summary>
+    /// <param name="duration">How long to suspend the node (in simulated time).</param>
+    public void SuspendFor(TimeSpan duration)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(duration, TimeSpan.Zero);
+
+        Suspend();
+
+        // Schedule auto-resume on the harness queue
+        _harness.TaskQueue.EnqueueAfter(() => Resume(), duration);
+
+        _harness.LogNodeEvent(this, SimulationEventType.NodeSuspended, $"Node suspended for {duration}");
+    }
+
+    /// <summary>
+    /// Executes one ready task from this node's queue.
+    /// </summary>
+    /// <returns>True if a task was executed; false if no tasks are ready or the node is suspended.</returns>
+    public bool Step()
+    {
+        if (_context.Step())
+        {
+            _harness.IncrementLogicalTime();
+            return true;
+        }
+        return false;
+    }
+
+    #endregion
+
     internal SimulationNode(
         SimulationHarness harness,
         NodeSimulationContext context,

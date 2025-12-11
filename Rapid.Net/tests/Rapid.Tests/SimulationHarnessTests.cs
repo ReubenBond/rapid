@@ -223,13 +223,13 @@ public sealed class SimulationHarnessTests : IAsyncLifetime
         context.TaskQueue.Enqueue(new ScheduledActionItem(() => executed = true));
 
         // Suspend the node
-        _harness.SuspendNode(seedNode);
+        seedNode.Suspend();
 
         // Try to run the simulation - task should not execute because node is suspended
         _harness.RunUntil(() => false, maxIterations: 10);
 
         Assert.False(executed);
-        Assert.True(_harness.IsNodeSuspended(seedNode));
+        Assert.True(seedNode.IsSuspended);
     }
 
     [Fact]
@@ -243,15 +243,15 @@ public sealed class SimulationHarnessTests : IAsyncLifetime
         context.TaskQueue.Enqueue(new ScheduledActionItem(() => executed = true));
 
         // Suspend and then resume the node
-        _harness.SuspendNode(seedNode);
-        _harness.ResumeNode(seedNode);
+        seedNode.Suspend();
+        seedNode.Resume();
 
         // Step should now execute the task
         var result = _harness.RunUntil(() => executed, maxIterations: 10);
 
         Assert.True(result);
         Assert.True(executed);
-        Assert.False(_harness.IsNodeSuspended(seedNode));
+        Assert.False(seedNode.IsSuspended);
     }
 
     [Fact]
@@ -265,14 +265,14 @@ public sealed class SimulationHarnessTests : IAsyncLifetime
         context.TaskQueue.Enqueue(new ScheduledActionItem(() => executed = true));
 
         // Suspend for 1 second
-        _harness.SuspendNodeFor(seedNode, TimeSpan.FromSeconds(1));
+        seedNode.SuspendFor(TimeSpan.FromSeconds(1));
 
-        Assert.True(_harness.IsNodeSuspended(seedNode));
+        Assert.True(seedNode.IsSuspended);
 
         // Run until idle - should advance time and resume the node
         _harness.RunUntilIdle(maxSimulatedTime: TimeSpan.FromSeconds(2));
 
-        Assert.False(_harness.IsNodeSuspended(seedNode));
+        Assert.False(seedNode.IsSuspended);
         Assert.True(executed);
     }
 
@@ -293,7 +293,7 @@ public sealed class SimulationHarnessTests : IAsyncLifetime
         context.TaskQueue.Enqueue(new ScheduledActionItem(() => executionCount++));
 
         // Step once - should only execute one task
-        var result = _harness.StepNode(seedNode);
+        var result = seedNode.Step();
 
         Assert.True(result);
         Assert.Equal(1, executionCount);
@@ -307,7 +307,7 @@ public sealed class SimulationHarnessTests : IAsyncLifetime
         // Step with no pending tasks (seed node might have some, so run until idle first)
         _harness.RunUntilIdle();
 
-        var result = _harness.StepNode(seedNode);
+        var result = seedNode.Step();
 
         Assert.False(result);
     }
@@ -322,29 +322,29 @@ public sealed class SimulationHarnessTests : IAsyncLifetime
         context.TaskQueue.Enqueue(new ScheduledActionItem(() => { }));
 
         // Suspend the node
-        _harness.SuspendNode(seedNode);
+        seedNode.Suspend();
 
         // Step should fail because node is suspended
-        var result = _harness.StepNode(seedNode);
+        var result = seedNode.Step();
 
         Assert.False(result);
     }
 
     [Fact]
-    public void IsNodeSuspendedReturnsCorrectState()
+    public void IsSuspendedReturnsCorrectState()
     {
         var seedNode = _harness.CreateSeedNode();
 
         // Initially not suspended
-        Assert.False(_harness.IsNodeSuspended(seedNode));
+        Assert.False(seedNode.IsSuspended);
 
         // Suspend
-        _harness.SuspendNode(seedNode);
-        Assert.True(_harness.IsNodeSuspended(seedNode));
+        seedNode.Suspend();
+        Assert.True(seedNode.IsSuspended);
 
         // Resume
-        _harness.ResumeNode(seedNode);
-        Assert.False(_harness.IsNodeSuspended(seedNode));
+        seedNode.Resume();
+        Assert.False(seedNode.IsSuspended);
     }
 
     [Fact]
@@ -371,16 +371,16 @@ public sealed class SimulationHarnessTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 2);
 
         // Suspend the joiner node
-        _harness.SuspendNode(joiner);
+        joiner.Suspend();
 
         // Messages from failure detectors will still be sent to the joiner
         // but they won't be processed until resumed
 
         // Verify the node is suspended
-        Assert.True(_harness.IsNodeSuspended(joiner));
+        Assert.True(joiner.IsSuspended);
 
         // Resume and let the simulation continue
-        _harness.ResumeNode(joiner);
+        joiner.Resume();
 
         // Both nodes should still be in the cluster
         Assert.Equal(2, seed.MembershipSize);
@@ -398,23 +398,23 @@ public sealed class SimulationHarnessTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 3);
 
         // Suspend nodes 1 and 2
-        _harness.SuspendNode(joiner1);
-        _harness.SuspendNode(joiner2);
+        joiner1.Suspend();
+        joiner2.Suspend();
 
-        Assert.True(_harness.IsNodeSuspended(joiner1));
-        Assert.True(_harness.IsNodeSuspended(joiner2));
-        Assert.False(_harness.IsNodeSuspended(seed));
+        Assert.True(joiner1.IsSuspended);
+        Assert.True(joiner2.IsSuspended);
+        Assert.False(seed.IsSuspended);
 
         // Resume only node 1
-        _harness.ResumeNode(joiner1);
+        joiner1.Resume();
 
-        Assert.False(_harness.IsNodeSuspended(joiner1));
-        Assert.True(_harness.IsNodeSuspended(joiner2));
+        Assert.False(joiner1.IsSuspended);
+        Assert.True(joiner2.IsSuspended);
 
         // Resume node 2
-        _harness.ResumeNode(joiner2);
+        joiner2.Resume();
 
-        Assert.False(_harness.IsNodeSuspended(joiner2));
+        Assert.False(joiner2.IsSuspended);
     }
 
     [Fact]
@@ -422,7 +422,7 @@ public sealed class SimulationHarnessTests : IAsyncLifetime
     {
         var seedNode = _harness.CreateSeedNode();
 
-        _harness.SuspendNode(seedNode);
+        seedNode.Suspend();
 
         var events = _harness.EventLog;
         Assert.Contains(events, e => e.Type == SimulationEventType.NodeSuspended);
@@ -433,8 +433,8 @@ public sealed class SimulationHarnessTests : IAsyncLifetime
     {
         var seedNode = _harness.CreateSeedNode();
 
-        _harness.SuspendNode(seedNode);
-        _harness.ResumeNode(seedNode);
+        seedNode.Suspend();
+        seedNode.Resume();
 
         var events = _harness.EventLog;
         Assert.Contains(events, e => e.Type == SimulationEventType.NodeResumed);

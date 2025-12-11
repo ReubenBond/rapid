@@ -176,7 +176,7 @@ public sealed class NodeFailureTests : IAsyncLifetime
         var seedNode = _harness.CreateSeedNode();
 
         // Suspend the seed (simulates crash but keeps node in harness so we can attempt to contact it)
-        _harness.SuspendNode(seedNode);
+        seedNode.Suspend();
 
         // Attempting to join through crashed seed should fail with JoinException
         // The underlying cause is a timeout, but JoinException is the public contract for join failures

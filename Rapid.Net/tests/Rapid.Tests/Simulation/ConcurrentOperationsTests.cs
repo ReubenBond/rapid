@@ -89,13 +89,13 @@ public sealed class ConcurrentOperationsTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 3);
 
         // Suspend one node
-        _harness.SuspendNode(joiner1);
+        joiner1.Suspend();
 
         // Join while node is suspended
         var joiner3 = _harness.CreateJoinerNode(seedNode, nodeId: 3, options: SuspensionTestOptions);
 
         // Resume suspended node
-        _harness.ResumeNode(joiner1);
+        joiner1.Resume();
 
         // All should converge
         _harness.WaitForConvergence(expectedSize: 4);
@@ -113,15 +113,15 @@ public sealed class ConcurrentOperationsTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 5);
 
         // Suspend minority (2 out of 5)
-        _harness.SuspendNode(nodes[3]);
-        _harness.SuspendNode(nodes[4]);
+        nodes[3].Suspend();
+        nodes[4].Suspend();
 
         // Join new node - should succeed with 3 active nodes (quorum)
         var newNode = _harness.CreateJoinerNode(nodes[0], nodeId: 5, options: SuspensionTestOptions);
 
         // Resume suspended nodes
-        _harness.ResumeNode(nodes[3]);
-        _harness.ResumeNode(nodes[4]);
+        nodes[3].Resume();
+        nodes[4].Resume();
 
         // All should converge to 6
         _harness.WaitForConvergence(expectedSize: 6);
@@ -196,15 +196,15 @@ public sealed class ConcurrentOperationsTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 5);
 
         // Suspend nodes to delay consensus
-        _harness.SuspendNode(nodes[3]);
-        _harness.SuspendNode(nodes[4]);
+        nodes[3].Suspend();
+        nodes[4].Suspend();
 
         // Crash a node while some are suspended
         _harness.CrashNode(nodes[2]);
 
         // Resume suspended nodes
-        _harness.ResumeNode(nodes[3]);
-        _harness.ResumeNode(nodes[4]);
+        nodes[3].Resume();
+        nodes[4].Resume();
 
         // Cluster should eventually converge
         _harness.WaitForConvergence(expectedSize: 4, maxIterations: 500000);
@@ -275,8 +275,8 @@ public sealed class ConcurrentOperationsTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 4);
 
         // Suspend one node
-        _harness.SuspendNode(nodes[3]);
-        Assert.True(_harness.IsNodeSuspended(nodes[3]));
+        nodes[3].Suspend();
+        Assert.True(nodes[3].IsSuspended);
 
         // Join a new node - should succeed with 3 active nodes
         var newNode = _harness.CreateJoinerNode(nodes[0], nodeId: 4, options: SuspensionTestOptions);
@@ -290,14 +290,14 @@ public sealed class ConcurrentOperationsTests : IAsyncLifetime
         Assert.Equal(4, nodes[3].MembershipSize);
 
         // Resume and let it catch up
-        _harness.ResumeNode(nodes[3]);
+        nodes[3].Resume();
         _harness.WaitForConvergence(expectedSize: 5);
 
         Assert.All(_harness.Nodes, n => Assert.Equal(5, n.MembershipSize));
     }
 
     /// <summary>
-    /// Tests timed suspension using SuspendNodeFor.
+    /// Tests timed suspension using SuspendFor.
     /// </summary>
     [Fact]
     public void TimedSuspensionWorksCorrectly()
@@ -306,15 +306,15 @@ public sealed class ConcurrentOperationsTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 3);
 
         // Suspend node for a duration
-        _harness.SuspendNodeFor(nodes[2], TimeSpan.FromSeconds(2));
+        nodes[2].SuspendFor(TimeSpan.FromSeconds(2));
 
-        Assert.True(_harness.IsNodeSuspended(nodes[2]));
+        Assert.True(nodes[2].IsSuspended);
 
         // Advance time past suspension duration
         _harness.RunForDuration(TimeSpan.FromSeconds(3));
 
         // Node should be automatically resumed
-        Assert.False(_harness.IsNodeSuspended(nodes[2]));
+        Assert.False(nodes[2].IsSuspended);
     }
 
     /// <summary>
@@ -327,22 +327,22 @@ public sealed class ConcurrentOperationsTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 5);
 
         // Suspend majority (3 out of 5)
-        _harness.SuspendNode(nodes[2]);
-        _harness.SuspendNode(nodes[3]);
-        _harness.SuspendNode(nodes[4]);
+        nodes[2].Suspend();
+        nodes[3].Suspend();
+        nodes[4].Suspend();
 
         // Only 2 nodes are active - cannot reach quorum
         // Operations should not complete until majority is restored
 
         // Resume one node to restore quorum
-        _harness.ResumeNode(nodes[2]);
+        nodes[2].Resume();
 
         // Now operations should work
         var newNode = _harness.CreateJoinerNode(nodes[0], nodeId: 5, options: SuspensionTestOptions);
 
         // Resume remaining
-        _harness.ResumeNode(nodes[3]);
-        _harness.ResumeNode(nodes[4]);
+        nodes[3].Resume();
+        nodes[4].Resume();
 
         _harness.WaitForConvergence(expectedSize: 6);
 
@@ -354,7 +354,7 @@ public sealed class ConcurrentOperationsTests : IAsyncLifetime
     #region Node Stepping Tests (CONC-040 to CONC-045)
 
     /// <summary>
-    /// Tests that StepNode executes exactly one task.
+    /// Tests that Step executes exactly one task.
     /// </summary>
     [Fact]
     public void StepNodeExecutesOneTask()
@@ -363,17 +363,15 @@ public sealed class ConcurrentOperationsTests : IAsyncLifetime
         var initialLogicalTime = _harness.LogicalTime;
 
         // Step the node once
-        var executed = _harness.StepNode(seedNode);
+        var executed = seedNode.Step();
 
-        // If a task was executed, logical time should have increased by 1
-        if (executed)
-        {
-            Assert.Equal(initialLogicalTime + 1, _harness.LogicalTime);
-        }
+        // A task should have been executed, and logical time should have increased by 1
+        Assert.True(executed);
+        Assert.Equal(initialLogicalTime + 1, _harness.LogicalTime);
     }
 
     /// <summary>
-    /// Tests that suspended node's StepNode returns false.
+    /// Tests that suspended node's Step returns false.
     /// </summary>
     [Fact]
     public void StepNodeReturnsFalseWhenSuspended()
@@ -381,14 +379,14 @@ public sealed class ConcurrentOperationsTests : IAsyncLifetime
         var seedNode = _harness.CreateSeedNode(options: SuspensionTestOptions);
 
         // Suspend the node
-        _harness.SuspendNode(seedNode);
+        seedNode.Suspend();
 
         // Step should return false
-        var executed = _harness.StepNode(seedNode);
+        var executed = seedNode.Step();
         Assert.False(executed);
 
         // Resume
-        _harness.ResumeNode(seedNode);
+        seedNode.Resume();
     }
 
     #endregion
@@ -408,8 +406,8 @@ public sealed class ConcurrentOperationsTests : IAsyncLifetime
         var nodeIdCounter = 6;
 
         // Suspend some nodes
-        _harness.SuspendNode(nodes[4]);
-        _harness.SuspendNode(nodes[5]);
+        nodes[4].Suspend();
+        nodes[5].Suspend();
 
         // Crash one node
         _harness.CrashNode(nodes[3]);
@@ -417,7 +415,7 @@ public sealed class ConcurrentOperationsTests : IAsyncLifetime
         // At this point: 3 active nodes (0,1,2) out of 6 in membership view.
         // Classic Paxos needs majority (4) for n=6, so we can't form quorum yet.
         // Resume one suspended node to enable quorum (4 active nodes).
-        _harness.ResumeNode(nodes[4]);
+        nodes[4].Resume();
 
         // Join a new node - should succeed with 4 active nodes (quorum for n=6)
         var newNode1 = _harness.CreateJoinerNode(nodes[0], nodeId: nodeIdCounter++, options: SuspensionTestOptions);
@@ -426,7 +424,7 @@ public sealed class ConcurrentOperationsTests : IAsyncLifetime
         var newNode2 = _harness.CreateJoinerNode(nodes[0], nodeId: nodeIdCounter++, options: SuspensionTestOptions);
 
         // Resume the last suspended node
-        _harness.ResumeNode(nodes[5]);
+        nodes[5].Resume();
 
         // Wait for convergence
         _harness.WaitForConvergence(expectedSize: 7, maxIterations: 500000);
@@ -480,8 +478,8 @@ public sealed class ConcurrentOperationsTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 5);
 
         // Suspend 2 nodes - leaving exactly 3 (quorum for 5-node cluster)
-        _harness.SuspendNode(nodes[3]);
-        _harness.SuspendNode(nodes[4]);
+        nodes[3].Suspend();
+        nodes[4].Suspend();
 
         // Operations should still succeed with quorum
         var newNode = _harness.CreateJoinerNode(nodes[0], nodeId: 5, options: SuspensionTestOptions);
@@ -492,8 +490,8 @@ public sealed class ConcurrentOperationsTests : IAsyncLifetime
         Assert.Equal(6, nodes[2].MembershipSize);
 
         // Resume suspended nodes
-        _harness.ResumeNode(nodes[3]);
-        _harness.ResumeNode(nodes[4]);
+        nodes[3].Resume();
+        nodes[4].Resume();
 
         _harness.WaitForConvergence(expectedSize: 6);
     }

@@ -797,13 +797,13 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 5);
 
         // Suspend one node (not the one leaving)
-        _harness.SuspendNode(nodes[3]);
+        nodes[3].Suspend();
 
         // Act: Different node leaves gracefully
         _harness.RemoveNodeGracefully(nodes[4]);
 
         // Resume suspended node
-        _harness.ResumeNode(nodes[3]);
+        nodes[3].Resume();
 
         // Wait for convergence
         _harness.WaitForConvergence(expectedSize: 4, maxIterations: 200000);
@@ -822,13 +822,13 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         var suspendedNode = nodes[2];
 
         // A suspended node is effectively down - it won't respond to failure detector probes
-        _harness.SuspendNode(suspendedNode);
+        suspendedNode.Suspend();
 
         // Act: Another node leaves gracefully
         _harness.RemoveNodeGracefully(nodes[4]);
 
         // Resume suspended node - it will detect it was kicked and automatically rejoin
-        _harness.ResumeNode(suspendedNode);
+        suspendedNode.Resume();
 
         // Wait for convergence - expect size 4 because:
         // - Node 4 left gracefully
@@ -849,13 +849,13 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
 
         // Suspend a node - this makes it effectively down (won't respond to probes)
         var suspendedNode = nodes[1];
-        _harness.SuspendNode(suspendedNode);
+        suspendedNode.Suspend();
 
         // Act: Another node leaves while one is suspended
         _harness.RemoveNodeGracefully(nodes[4]);
 
         // Resume the node - it will detect it was kicked and automatically rejoin
-        _harness.ResumeNode(suspendedNode);
+        suspendedNode.Resume();
 
         // Wait for convergence - expect size 4 because:
         // - Node 4 left gracefully

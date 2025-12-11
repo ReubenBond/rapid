@@ -160,79 +160,22 @@ internal sealed class SimulationHarness : IAsyncDisposable
 
     #endregion
 
-    #region Per-Node Execution Control
+    #region Per-Node Execution Control (Internal Helpers)
 
     /// <summary>
-    /// Executes one ready task from the specified node's queue.
+    /// Logs an event related to a specific node. Called by SimulationNode.
     /// </summary>
-    /// <param name="node">The node to step.</param>
-    /// <returns>True if a task was executed; false if no tasks are ready or the node is suspended.</returns>
-    public bool StepNode(SimulationNode node)
+    internal void LogNodeEvent(SimulationNode node, SimulationEventType type, string description)
     {
-        ArgumentNullException.ThrowIfNull(node);
-        var context = GetNodeContext(node);
-        if (context.Step())
-        {
-            LogicalTime++;
-            return true;
-        }
-        return false;
+        LogEvent(type, $"[{RapidUtils.Loggable(node.Address)}] {description}");
     }
 
     /// <summary>
-    /// Suspends a node, preventing it from executing tasks.
-    /// Messages sent to the node will be queued but not processed until resumed.
+    /// Increments the logical time counter. Called by SimulationNode.Step().
     /// </summary>
-    /// <param name="node">The node to suspend.</param>
-    public void SuspendNode(SimulationNode node)
+    internal void IncrementLogicalTime()
     {
-        ArgumentNullException.ThrowIfNull(node);
-        var context = GetNodeContext(node);
-        context.Suspend();
-        LogEvent(SimulationEventType.NodeSuspended, $"Node suspended");
-    }
-
-    /// <summary>
-    /// Resumes a suspended node, allowing it to execute tasks again.
-    /// </summary>
-    /// <param name="node">The node to resume.</param>
-    public void ResumeNode(SimulationNode node)
-    {
-        ArgumentNullException.ThrowIfNull(node);
-        var context = GetNodeContext(node);
-        context.Resume();
-        LogEvent(SimulationEventType.NodeResumed, $"Node resumed");
-    }
-
-    /// <summary>
-    /// Suspends a node for the specified duration, then automatically resumes it.
-    /// The resume occurs when simulated time advances past the duration.
-    /// </summary>
-    /// <param name="node">The node to suspend.</param>
-    /// <param name="duration">How long to suspend the node (in simulated time).</param>
-    public void SuspendNodeFor(SimulationNode node, TimeSpan duration)
-    {
-        ArgumentNullException.ThrowIfNull(node);
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(duration, TimeSpan.Zero);
-
-        SuspendNode(node);
-
-        // Schedule auto-resume on the harness queue
-        TaskQueue.EnqueueAfter(() => ResumeNode(node), duration);
-
-        LogEvent(SimulationEventType.NodeSuspended, $"Node suspended for {duration}");
-    }
-
-    /// <summary>
-    /// Gets whether a node is currently suspended.
-    /// </summary>
-    /// <param name="node">The node to check.</param>
-    /// <returns>True if the node is suspended; false otherwise.</returns>
-    public bool IsNodeSuspended(SimulationNode node)
-    {
-        ArgumentNullException.ThrowIfNull(node);
-        var context = GetNodeContext(node);
-        return context.State == NodeSimulationState.Suspended;
+        LogicalTime++;
     }
 
     #endregion
