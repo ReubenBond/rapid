@@ -66,28 +66,21 @@ public interface IRapidCluster
 /// <summary>
 /// Implementation of IRapidCluster that delegates to the membership service and view accessor.
 /// </summary>
-internal sealed class RapidCluster(RapidClusterService clusterService, IMembershipViewAccessor viewAccessor) : IRapidCluster
+internal sealed class RapidCluster(MembershipService membershipService, IMembershipViewAccessor viewAccessor) : IRapidCluster
 {
-    private static readonly BroadcastChannel<ClusterEventNotification> EmptyChannel = new();
-
     public IReadOnlyList<Endpoint> GetMemberlist() => viewAccessor.CurrentView.Members;
 
     public int GetMembershipSize() => viewAccessor.CurrentView.Size;
 
-    public Dictionary<Endpoint, Metadata> GetClusterMetadata() => clusterService.MembershipService?.GetMetadata() ?? [];
+    public Dictionary<Endpoint, Metadata> GetClusterMetadata() => membershipService.GetMetadata();
 
-    public IAsyncEnumerable<ClusterEventNotification> EventStream
-        => clusterService.MembershipService?.EventStream ?? EmptyChannel.Reader;
+    public IAsyncEnumerable<ClusterEventNotification> EventStream => membershipService.EventStream;
 
-    public IObservable<ClusterEventNotification> Events
-        => clusterService.MembershipService?.Events ?? EmptyChannel.Reader;
+    public IObservable<ClusterEventNotification> Events => membershipService.Events;
 
     public async Task LeaveGracefullyAsync(CancellationToken cancellationToken = default)
     {
-        if (clusterService.MembershipService != null)
-        {
-            await clusterService.MembershipService.LeaveAsync(cancellationToken).ConfigureAwait(true);
-        }
+        await membershipService.LeaveAsync(cancellationToken).ConfigureAwait(true);
     }
 
     public IMembershipViewAccessor ViewAccessor => viewAccessor;

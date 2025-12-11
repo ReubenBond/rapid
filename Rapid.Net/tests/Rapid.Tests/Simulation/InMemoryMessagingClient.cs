@@ -112,7 +112,22 @@ internal sealed class InMemoryMessagingClient : IMessagingClient
 #pragma warning restore CA1068
     {
         // Get the target node's context for message delivery
-        var targetContext = _harness.GetNodeContext(targetNode);
+        // If the target node was crashed/disposed, this will fail - handle gracefully
+        NodeSimulationContext targetContext;
+        try
+        {
+            targetContext = _harness.GetNodeContext(targetNode);
+        }
+        catch (ArgumentException)
+        {
+            // Node was crashed/disposed between GetNode and GetNodeContext
+            _logger.LogDebug("Target node {Remote} was crashed before message delivery from {Local}",
+                remoteAddr, localAddr);
+            responseTcs.TrySetException(
+                new InvalidOperationException($"Target node {remoteAddr} is no longer available"));
+            return;
+        }
+        
         var targetQueue = targetContext.TaskQueue;
 
         // Get the source node's context for timeout scheduling

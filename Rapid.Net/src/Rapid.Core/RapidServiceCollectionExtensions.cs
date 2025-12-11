@@ -83,15 +83,11 @@ public static class RapidServiceCollectionExtensions
         services.AddSingleton<MembershipViewAccessor>();
         services.AddSingleton<IMembershipViewAccessor>(sp => sp.GetRequiredService<MembershipViewAccessor>());
 
-        // Register MembershipService factory
-        services.AddSingleton<IMembershipServiceFactory, MembershipServiceFactory>();
+        // Register MembershipService directly (InitializeAsync is called by RapidClusterService)
+        services.AddSingleton<MembershipService>();
 
         // Register the membership service handler
-        services.AddSingleton<IMembershipServiceHandler>(sp =>
-        {
-            var clusterService = sp.GetRequiredService<RapidClusterService>();
-            return clusterService.MembershipService ?? throw new InvalidOperationException("Cluster service not initialized");
-        });
+        services.AddSingleton<IMembershipServiceHandler>(sp => sp.GetRequiredService<MembershipService>());
 
         // Register the gRPC service implementation
         services.AddSingleton<MembershipServiceImpl>();

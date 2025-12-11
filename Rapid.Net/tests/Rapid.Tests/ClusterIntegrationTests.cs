@@ -481,26 +481,15 @@ public sealed class ClusterIntegrationTests(ITestOutputHelper outputHelper) : IA
 
         await TestCluster.WaitForClusterSizeAsync(seed, 2, TimeSpan.FromSeconds(10)).ConfigureAwait(true);
 
-        var i = 0;
-        do
-        {
-            // Find view changes
-            var viewChanges = collector.Items
-                .Where(n => n.Event == ClusterEvents.ViewChange)
-                .Select(n => n.Change)
-                .ToList();
+        // Find view changes
+        var viewChanges = collector.Items
+            .Where(n => n.Event == ClusterEvents.ViewChange)
+            .Select(n => n.Change)
+            .ToList();
 
-            var lastChange = viewChanges.LastOrDefault();
-            if (lastChange?.Membership.Count >= 2)
-            {
-                break;
-            }
-            await Task.Delay(1000, TestContext.Current.CancellationToken);
-            if (i++ > 10)
-            {
-                Debugger.Launch();
-            }
-        } while (true);
+        Assert.NotEmpty(viewChanges);
+        var lastChange = viewChanges.Last();
+        Assert.True(lastChange.Membership.Count >= 2);
     }
 
     #endregion

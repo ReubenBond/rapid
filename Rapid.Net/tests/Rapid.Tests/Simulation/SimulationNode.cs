@@ -15,7 +15,7 @@ internal sealed class SimulationNode : IAsyncDisposable, IDisposable
 {
     private readonly SimulationHarness _harness;
     private readonly NodeSimulationContext _context;
-    private readonly IOptions<RapidProtocolOptions> _protocolOptions;
+    private readonly RapidProtocolOptions _protocolOptions;
     private readonly ILoggerFactory? _loggerFactory;
     private readonly ILogger<SimulationNode> _logger;
     
@@ -84,8 +84,7 @@ internal sealed class SimulationNode : IAsyncDisposable, IDisposable
             ?? NullLogger<MembershipService>.Instance;
 
         // Create protocol options
-        var options = protocolOptions ?? new RapidProtocolOptions();
-        _protocolOptions = Options.Create(options);
+        _protocolOptions = protocolOptions ?? new RapidProtocolOptions();
 
         // Create shared resources with the node's time provider and task scheduler
         var sharedResourcesLogger = _loggerFactory?.CreateLogger<SharedResources>()
@@ -96,7 +95,7 @@ internal sealed class SimulationNode : IAsyncDisposable, IDisposable
         // For tests with suspended nodes requiring Classic Paxos fallback,
         // a longer timeout (e.g., 30 seconds) may be needed to allow
         // for the random jitter delay before Classic Paxos starts.
-        MessagingClient = new InMemoryMessagingClient(harness, this, address, options);
+        MessagingClient = new InMemoryMessagingClient(harness, this, address, _protocolOptions);
 
         // Create view accessor
         _viewAccessor = new MembershipViewAccessor();
@@ -108,7 +107,7 @@ internal sealed class SimulationNode : IAsyncDisposable, IDisposable
             address,
             MessagingClient,
             _sharedResources,
-            _protocolOptions,
+            Options.Create(_protocolOptions),
             failureDetectorLogger);
 
         // Create consensus coordinator factory
@@ -120,7 +119,7 @@ internal sealed class SimulationNode : IAsyncDisposable, IDisposable
             ?? NullLogger<Paxos>.Instance;
         _consensusCoordinatorFactory = new ConsensusCoordinatorFactory(
             MessagingClient,
-            _protocolOptions,
+            Options.Create(_protocolOptions),
             _sharedResources,
             consensusCoordinatorLogger,
             fastPaxosLogger,
@@ -131,7 +130,7 @@ internal sealed class SimulationNode : IAsyncDisposable, IDisposable
             ?? NullLogger<SimpleCutDetector>.Instance;
         var multiNodeCutDetectorLogger = _loggerFactory?.CreateLogger<MultiNodeCutDetector>()
             ?? NullLogger<MultiNodeCutDetector>.Instance;
-        _cutDetectorFactory = new CutDetectorFactory(_protocolOptions, simpleCutDetectorLogger, multiNodeCutDetectorLogger);
+        _cutDetectorFactory = new CutDetectorFactory(Options.Create(_protocolOptions), simpleCutDetectorLogger, multiNodeCutDetectorLogger);
 
         // Register with the simulation harness
         harness.RegisterNode(this);
@@ -165,9 +164,43 @@ internal sealed class SimulationNode : IAsyncDisposable, IDisposable
         ILoggerFactory? loggerFactory = null) => Create(harness, context, "node", nodeId, protocolOptions, loggerFactory);
 
     /// <summary>
+    /// Creates a MembershipService with the given seed address and initializes it.
+    /// </summary>
+    private async Task<MembershipService> CreateAndInitializeMembershipServiceAsync(
+        Endpoint? seedAddress,
+        Metadata? metadata,
+        CancellationToken cancellationToken)
+    {
+        var rapidOptions = new RapidOptions
+        {
+            ListenAddress = Address,
+            SeedAddress = seedAddress,
+            Metadata = metadata ?? new Metadata()
+        };
+
+        var broadcasterFactory = new UnicastToAllBroadcasterFactory(MessagingClient);
+
+        var membershipService = new MembershipService(
+            Options.Create(rapidOptions),
+            Options.Create(_protocolOptions),
+            MessagingClient,
+            broadcasterFactory,
+            _failureDetectorFactory,
+            _consensusCoordinatorFactory,
+            _cutDetectorFactory,
+            _viewAccessor,
+            _sharedResources,
+            _membershipServiceLogger);
+
+        await membershipService.InitializeAsync(cancellationToken).ConfigureAwait(true);
+
+        return membershipService;
+    }
+
+    /// <summary>
     /// Starts this node as a new single-node cluster (seed node).
     /// </summary>
-    public void StartCluster(Metadata? metadata = null)
+    public async Task StartClusterAsync(Metadata? metadata = null, CancellationToken cancellationToken = default)
     {
         _logger.LogInformation("Starting cluster for node {Address}", RapidUtils.Loggable(Address));
 
@@ -177,45 +210,31 @@ internal sealed class SimulationNode : IAsyncDisposable, IDisposable
             throw new InvalidOperationException("Node is already initialized");
         }
 
-        var nodeId = RapidUtils.NodeIdFromUuid(Random.NextGuid());
-        var actualMetadata = metadata ?? new Metadata();
-
-        _logger.LogDebug("Node {Address} generated node ID {NodeId}", RapidUtils.Loggable(Address), nodeId);
-
-        var opts = _protocolOptions.Value;
-        var membershipView = new MembershipViewBuilder(opts.ObserversPerSubject, [nodeId], [Address]).Build();
-
-        // Use factory to create appropriate cut detector for single-node cluster
-        var cutDetector = _cutDetectorFactory.Create(membershipView);
-        var metadataMap = new Dictionary<Endpoint, Metadata> { { Address, actualMetadata } };
-        var broadcaster = new UnicastToAllBroadcaster(MessagingClient);
-
-        _membershipService = new MembershipService(
-            Address,
-            cutDetector,
-            membershipView,
-            _sharedResources,
-            _protocolOptions,
-            MessagingClient,
-            broadcaster,
-            _failureDetectorFactory,
-            _consensusCoordinatorFactory,
-            _cutDetectorFactory,
-            _viewAccessor,
-            metadataMap,
-            _membershipServiceLogger);
+        // seedAddress = null means start a new cluster
+        _membershipService = await CreateAndInitializeMembershipServiceAsync(
+            seedAddress: null,
+            metadata,
+            cancellationToken).ConfigureAwait(true);
 
         // Signal that the node is now initialized and ready to handle requests
         _membershipServiceTcs.TrySetResult(_membershipService);
 
         _logger.LogInformation("Cluster started for node {Address} with {MembershipSize} members",
-            RapidUtils.Loggable(Address), membershipView.Size);
+            RapidUtils.Loggable(Address), CurrentView.Size);
+    }
+
+    /// <summary>
+    /// Starts this node as a new single-node cluster (seed node).
+    /// Synchronous wrapper for backwards compatibility with existing tests.
+    /// </summary>
+    public void StartCluster(Metadata? metadata = null)
+    {
+        // Run synchronously on the simulation's task scheduler
+        StartClusterAsync(metadata, CancellationToken.None).GetAwaiter().GetResult();
     }
 
     /// <summary>
     /// Joins this node to an existing cluster through the specified seed node.
-    /// Implements retry logic with exponential backoff for resilience against transient failures.
-    /// Retry behavior is controlled by RapidProtocolOptions.
     /// </summary>
     public async Task JoinClusterAsync(SimulationNode seedNode, Metadata? metadata = null, CancellationToken cancellationToken = default)
     {
@@ -231,212 +250,16 @@ internal sealed class SimulationNode : IAsyncDisposable, IDisposable
             throw new InvalidOperationException("Node is already initialized");
         }
 
-        var nodeId = RapidUtils.NodeIdFromUuid(Random.NextGuid());
-        var actualMetadata = metadata ?? new Metadata();
-
-        _logger.LogDebug("Node {Address} generated node ID {NodeId} for join", RapidUtils.Loggable(Address), nodeId);
-
-        var opts = _protocolOptions.Value;
-        var maxRetries = opts.GrpcDefaultRetries;
-        var retryDelay = opts.JoinRetryBaseDelay;
-        JoinResponse? successfulResponse = null;
-
-        for (var attempt = 0; attempt <= maxRetries; attempt++)
-        {
-            try
-            {
-                _logger.LogDebug("Node {Address} join attempt {Attempt} of {MaxRetries}", RapidUtils.Loggable(Address), attempt, maxRetries);
-                successfulResponse = await TryJoinClusterAsync(seedNode, nodeId, actualMetadata, cancellationToken).ConfigureAwait(true);
-                if (successfulResponse != null)
-                {
-                    break;
-                }
-            }
-            catch (Exception ex) when (CanRetry(attempt, maxRetries, ex))
-            {
-                _logger.LogWarning("Node {Address} join attempt {Attempt} failed: {Message}. Retrying in {Delay}ms",
-                    RapidUtils.Loggable(Address), attempt + 1, ex.Message, retryDelay.TotalMilliseconds);
-                await Task.Delay(retryDelay, _context.TimeProvider, cancellationToken).ConfigureAwait(true);
-                retryDelay = TimeSpan.FromTicks((long)(retryDelay.Ticks * opts.JoinRetryBackoffMultiplier));
-                
-                // Cap at maximum delay
-                if (retryDelay > opts.JoinRetryMaxDelay)
-                {
-                    retryDelay = opts.JoinRetryMaxDelay;
-                }
-            }
-        }
-
-        if (successfulResponse == null)
-        {
-            _logger.LogError("Node {Address} failed to join cluster after {MaxRetries} retries",
-                RapidUtils.Loggable(Address), maxRetries + 1);
-            throw new InvalidOperationException($"Failed to join cluster after {maxRetries + 1} attempts");
-        }
-
-        // Initialize membership from response
-        var metadataMap = new Dictionary<Endpoint, Metadata>();
-        for (var i = 0; i < successfulResponse.MetadataKeys.Count && i < successfulResponse.MetadataValues.Count; i++)
-        {
-            var endpoint = successfulResponse.MetadataKeys[i];
-            var m = successfulResponse.MetadataValues[i];
-            metadataMap[endpoint] = m;
-        }
-
-        var membershipView = new MembershipViewBuilder(
-            opts.ObserversPerSubject,
-            [.. successfulResponse.Identifiers],
-            [.. successfulResponse.Endpoints]).BuildWithConfigurationId(new ConfigurationId(successfulResponse.ConfigurationId));
-
-        // Use factory to create appropriate cut detector based on actual cluster size
-        var cutDetector = _cutDetectorFactory.Create(membershipView);
-        var broadcaster = new UnicastToAllBroadcaster(MessagingClient);
-
-        _membershipService = new MembershipService(
-            Address,
-            cutDetector,
-            membershipView,
-            _sharedResources,
-            _protocolOptions,
-            MessagingClient,
-            broadcaster,
-            _failureDetectorFactory,
-            _consensusCoordinatorFactory,
-            _cutDetectorFactory,
-            _viewAccessor,
-            metadataMap,
-            _membershipServiceLogger);
+        _membershipService = await CreateAndInitializeMembershipServiceAsync(
+            seedAddress: seedNode.Address,
+            metadata,
+            cancellationToken).ConfigureAwait(true);
 
         // Signal that the node is now initialized and ready to handle requests
         _membershipServiceTcs.TrySetResult(_membershipService);
 
         _logger.LogInformation("Node {Address} successfully joined cluster with {MembershipSize} members, ConfigId={ConfigId}",
-            RapidUtils.Loggable(Address), membershipView.Size, membershipView.ConfigurationId);
-    }
-
-    /// <summary>
-    /// Attempts a single join operation. Returns the successful JoinResponse or null if retry is needed.
-    /// </summary>
-    private async Task<JoinResponse?> TryJoinClusterAsync(SimulationNode seedNode, NodeId nodeId, Metadata metadata, CancellationToken cancellationToken)
-    {
-        // Phase 1: Contact seed for observers
-        _logger.LogDebug("Node {Address} sending PreJoinMessage to seed {SeedAddress}",
-            RapidUtils.Loggable(Address), RapidUtils.Loggable(seedNode.Address));
-
-        var preJoinMessage = new PreJoinMessage
-        {
-            Sender = Address,
-            NodeId = nodeId
-        };
-
-        var preJoinResponse = await MessagingClient.SendMessageAsync(
-            seedNode.Address,
-            RapidUtils.ToRapidRequest(preJoinMessage),
-            cancellationToken).ConfigureAwait(true);
-
-        var joinResponse = preJoinResponse.JoinResponse;
-
-        _logger.LogDebug("Node {Address} received join response with status {StatusCode} and {ObserverCount} observers",
-            RapidUtils.Loggable(Address), joinResponse.StatusCode, joinResponse.Endpoints.Count);
-
-        if (joinResponse.StatusCode != JoinStatusCode.SafeToJoin &&
-            joinResponse.StatusCode != JoinStatusCode.HostnameAlreadyInRing)
-        {
-            _logger.LogError("Node {Address} join failed with status: {StatusCode}",
-                RapidUtils.Loggable(Address), joinResponse.StatusCode);
-            throw new InvalidOperationException($"Join failed with status: {joinResponse.StatusCode}");
-        }
-
-        var observers = joinResponse.Endpoints.ToList();
-        if (observers.Count == 0)
-        {
-            _logger.LogError("Node {Address} received no observers from seed", RapidUtils.Loggable(Address));
-            throw new InvalidOperationException("No observers returned from seed");
-        }
-
-        // Phase 2: Contact observers
-        _logger.LogDebug("Node {Address} contacting {ObserverCount} observers",
-            RapidUtils.Loggable(Address), observers.Count);
-
-        var ringNumbersPerObserver = new Dictionary<Endpoint, List<int>>();
-        for (var ringNumber = 0; ringNumber < observers.Count; ringNumber++)
-        {
-            var observer = observers[ringNumber];
-            if (!ringNumbersPerObserver.TryGetValue(observer, out var value))
-            {
-                ringNumbersPerObserver[observer] = value = [];
-            }
-
-            value.Add(ringNumber);
-        }
-
-        var tasks = ringNumbersPerObserver.Select(async entry =>
-        {
-            var joinMessageForObserver = new JoinMessage
-            {
-                Sender = Address,
-                NodeId = nodeId,
-                Metadata = metadata,
-                ConfigurationId = joinResponse.ConfigurationId
-            };
-            joinMessageForObserver.RingNumber.AddRange(entry.Value);
-
-            _logger.LogTrace("Node {Address} sending JoinMessage to observer {Observer} for rings {Rings}",
-                RapidUtils.Loggable(Address), RapidUtils.Loggable(entry.Key), string.Join(",", entry.Value));
-
-            // Use best-effort for observer messages - some may be dropped but we only need one success
-            return await MessagingClient.SendMessageBestEffortAsync(
-                entry.Key,
-                RapidUtils.ToRapidRequest(joinMessageForObserver),
-                cancellationToken).ConfigureAwait(true);
-        });
-
-        var responses = await Task.WhenAll(tasks).ConfigureAwait(true);
-        var successfulResponse = responses.FirstOrDefault(r => r?.JoinResponse?.StatusCode == JoinStatusCode.SafeToJoin)?.JoinResponse;
-
-        if (successfulResponse == null)
-        {
-            // Check if we got a ConfigChanged response - this means we should retry
-            var configChangedResponse = responses.FirstOrDefault(r => r?.JoinResponse?.StatusCode == JoinStatusCode.ConfigChanged);
-            if (configChangedResponse != null)
-            {
-                _logger.LogDebug("Node {Address} received ConfigChanged response, will retry", RapidUtils.Loggable(Address));
-                throw new InvalidOperationException("Configuration changed during join, retry needed");
-            }
-
-            _logger.LogWarning("Node {Address} failed to get successful response from any observer", RapidUtils.Loggable(Address));
-            throw new InvalidOperationException("Failed to get successful response from any observer");
-        }
-
-        _logger.LogDebug("Node {Address} received successful join response with {MemberCount} members",
-            RapidUtils.Loggable(Address), successfulResponse.Endpoints.Count);
-
-        return successfulResponse;
-    }
-
-    /// <summary>
-    /// Determines if a join error is retryable (transient network issues vs permanent errors).
-    /// </summary>
-    private static bool IsRetryableJoinError(Exception ex)
-    {
-        // Timeouts are always retryable
-        if (ex is TimeoutException)
-        {
-            return true;
-        }
-
-        // Check for retryable error messages
-        var message = ex.Message;
-        return message.Contains("Network partition", StringComparison.OrdinalIgnoreCase) ||
-               message.Contains("cannot reach", StringComparison.OrdinalIgnoreCase) ||
-               message.Contains("Configuration changed", StringComparison.OrdinalIgnoreCase) ||
-               message.Contains("Failed to get successful response", StringComparison.OrdinalIgnoreCase) ||
-               message.Contains("dropped", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static bool CanRetry(int attempt, int maxRetries, Exception ex)
-    {
-        return attempt < maxRetries && IsRetryableJoinError(ex);
+            RapidUtils.Loggable(Address), CurrentView.Size, CurrentView.ConfigurationId);
     }
 
     /// <summary>
@@ -550,5 +373,13 @@ internal sealed class SimulationNode : IAsyncDisposable, IDisposable
         _harness.UnregisterNode(this);
 
         _logger.LogDebug("Node {Address} disposed", RapidUtils.Loggable(Address));
+    }
+
+    /// <summary>
+    /// Simple broadcaster factory that creates UnicastToAllBroadcaster instances.
+    /// </summary>
+    private sealed class UnicastToAllBroadcasterFactory(IMessagingClient messagingClient) : IBroadcasterFactory
+    {
+        public IBroadcaster Create() => new UnicastToAllBroadcaster(messagingClient);
     }
 }

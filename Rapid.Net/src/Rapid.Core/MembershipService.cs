@@ -3,6 +3,7 @@ using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 
 using Microsoft.Extensions.Options;
+using Rapid.Exceptions;
 using Rapid.Messaging;
 using Rapid.Monitoring;
 using Rapid.Pb;
@@ -18,7 +19,7 @@ namespace Rapid;
 internal sealed partial class MembershipService : IMembershipServiceHandler, IAsyncDisposable, IDisposable
 {
     private readonly ILogger<MembershipService> _logger;
-    private ICutDetector _cutDetection;
+    private ICutDetector _cutDetection = null!;
     private readonly ICutDetectorFactory _cutDetectorFactory;
     private readonly Endpoint _myAddr;
     private readonly IBroadcaster _broadcaster;
@@ -28,7 +29,7 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     private readonly IMessagingClient _messagingClient;
     private readonly MetadataManager _metadataManager;
     private readonly IConsensusCoordinatorFactory _consensusCoordinatorFactory;
-    private MembershipView _membershipView;
+    private MembershipView _membershipView = null!;
 
     // Event subscriptions (IAsyncEnumerable and IObservable-based using BroadcastChannel)
     private readonly BroadcastChannel<ClusterEventNotification> _eventChannel;
@@ -46,7 +47,14 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     private readonly Lock _membershipUpdateLock = new();
     private readonly RapidProtocolOptions _options;
     private bool _announcedProposal;
-    private ConsensusCoordinator _consensusInstance;
+    private ConsensusCoordinator _consensusInstance = null!;
+    
+    // Initialization state
+    private bool _initialized;
+    
+    // Configuration for join - stored from RapidOptions
+    private readonly Endpoint? _seedAddress;
+    private readonly Metadata _nodeMetadata;
 
     // Buffer for consensus messages from future configurations
     // Key: configurationId, Value: list of messages waiting for that config
@@ -250,51 +258,51 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     [LoggerMessage(Level = LogLevel.Debug, Message = "Node {MyAddr} rejoin skipped (already rejoining or disposed)")]
     private partial void LogRejoinSkipped(LoggableEndpoint MyAddr);
 
+    [LoggerMessage(Level = LogLevel.Information, Message = "Starting new cluster at {MyAddr}")]
+    private partial void LogStartingNewCluster(LoggableEndpoint MyAddr);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Joining cluster through seed {Seed} at {MyAddr}")]
+    private partial void LogJoiningCluster(LoggableEndpoint Seed, LoggableEndpoint MyAddr);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Join attempt {Attempt} failed: {Message}. Retrying in {DelayMs}ms")]
+    private partial void LogJoinRetry(int Attempt, string Message, double DelayMs);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Failed to join cluster after {Attempts} attempts")]
+    private partial void LogJoinFailed(int Attempts);
+
     private readonly struct LoggableRingNumbers(IEnumerable<int> ringNumbers)
     {
         private readonly IEnumerable<int> _ringNumbers = ringNumbers;
         public override readonly string ToString() => string.Join(",", _ringNumbers);
     }
 
+    /// <summary>
+    /// Creates a new MembershipService instance.
+    /// Call <see cref="InitializeAsync"/> after construction to start or join a cluster.
+    /// </summary>
     public MembershipService(
-        Endpoint myAddr,
-        ICutDetector cutDetection,
-        MembershipView membershipView,
-        SharedResources sharedResources,
-        IOptions<RapidProtocolOptions> options,
+        IOptions<RapidOptions> rapidOptions,
+        IOptions<RapidProtocolOptions> protocolOptions,
         IMessagingClient messagingClient,
-        IBroadcaster broadcaster,
+        IBroadcasterFactory broadcasterFactory,
         IEdgeFailureDetectorFactory edgeFailureDetector,
         IConsensusCoordinatorFactory consensusCoordinatorFactory,
         ICutDetectorFactory cutDetectorFactory,
         MembershipViewAccessor viewAccessor,
+        SharedResources sharedResources,
         ILogger<MembershipService> logger)
-        : this(myAddr, cutDetection, membershipView, sharedResources, options, messagingClient,
-              broadcaster, edgeFailureDetector, consensusCoordinatorFactory, cutDetectorFactory, viewAccessor, [], logger)
     {
-    }
-
-    public MembershipService(Endpoint myAddr, ICutDetector cutDetection,
-                            MembershipView membershipView, SharedResources sharedResources,
-                            IOptions<RapidProtocolOptions> options, IMessagingClient messagingClient,
-                            IBroadcaster broadcaster,
-                            IEdgeFailureDetectorFactory edgeFailureDetector,
-                            IConsensusCoordinatorFactory consensusCoordinatorFactory,
-                            ICutDetectorFactory cutDetectorFactory,
-                            MembershipViewAccessor viewAccessor,
-                            Dictionary<Endpoint, Metadata> metadataMap,
-                            ILogger<MembershipService> logger)
-    {
-        _myAddr = myAddr;
-        _options = options.Value;
-        _membershipView = membershipView;
-        _cutDetection = cutDetection;
+        var opts = rapidOptions.Value;
+        _myAddr = opts.ListenAddress;
+        _seedAddress = opts.SeedAddress;
+        _nodeMetadata = opts.Metadata;
+        _options = protocolOptions.Value;
+        _membershipView = MembershipView.Empty;
         _cutDetectorFactory = cutDetectorFactory;
         _sharedResources = sharedResources;
         _metadataManager = new MetadataManager();
-        _metadataManager.AddMetadata(metadataMap);
         _messagingClient = messagingClient;
-        _broadcaster = broadcaster;
+        _broadcaster = broadcasterFactory.Create();
         _fdFactory = edgeFailureDetector;
         _consensusCoordinatorFactory = consensusCoordinatorFactory;
         _viewAccessor = viewAccessor;
@@ -307,33 +315,369 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
         {
             pingPongFactory.OnKickedDetected = OnKickedDetected;
         }
+    }
 
-        // Start background jobs and track them
+    /// <summary>
+    /// Initializes the membership service by either starting a new cluster or joining an existing one.
+    /// This must be called after construction before the service can handle messages.
+    /// </summary>
+    public async Task InitializeAsync(CancellationToken cancellationToken)
+    {
+        if (_initialized)
+        {
+            throw new InvalidOperationException("MembershipService is already initialized");
+        }
+
+        if (_seedAddress == null || _myAddr.Equals(_seedAddress))
+        {
+            // Start a new cluster
+            StartNewCluster();
+        }
+        else
+        {
+            // Join an existing cluster
+            await JoinClusterAsync(cancellationToken).ConfigureAwait(true);
+        }
+
+        // Start background jobs after initialization
         var alertBatcherTask = Task.Factory.StartNew(AlertBatcherAsync, _sharedResources.ShuttingDownToken, TaskCreationOptions.None, _sharedResources.TaskScheduler).Unwrap();
         _sharedResources.TrackBackgroundTask(alertBatcherTask);
 
-        _broadcaster.SetMembership([.. _membershipView.GetRing(0)]);
-        // this::edgeFailureNotification is invoked by the failure detector whenever an edge
-        // to an observer is marked faulty.
+        _initialized = true;
+    }
 
-        // Prepare consensus instance
+    /// <summary>
+    /// Starts a new cluster with this node as the only member.
+    /// </summary>
+    private void StartNewCluster()
+    {
+        LogStartingNewCluster(new LoggableEndpoint(_myAddr));
+
+        var nodeId = RapidUtils.NodeIdFromUuid(_sharedResources.NewGuid());
+        _membershipView = new MembershipViewBuilder(_options.ObserversPerSubject, [nodeId], [_myAddr]).Build();
+        _cutDetection = _cutDetectorFactory.Create(_membershipView);
+
+        _metadataManager.Add(_myAddr, _nodeMetadata);
+
+        FinalizeInitialization();
+    }
+
+    /// <summary>
+    /// Joins an existing cluster through the configured seed node.
+    /// </summary>
+    private async Task JoinClusterAsync(CancellationToken cancellationToken)
+    {
+        LogJoiningCluster(new LoggableEndpoint(_seedAddress!), new LoggableEndpoint(_myAddr));
+
+        var maxRetries = _options.GrpcDefaultRetries;
+        var retryDelay = _options.JoinRetryBaseDelay;
+        JoinResponse? successfulResponse = null;
+
+        for (var attempt = 0; attempt <= maxRetries; attempt++)
+        {
+            try
+            {
+                successfulResponse = await TryJoinClusterAsync(cancellationToken).ConfigureAwait(true);
+                if (successfulResponse != null)
+                {
+                    break;
+                }
+            }
+            catch (Exception ex) when (attempt < maxRetries && IsRetryableJoinError(ex))
+            {
+                LogJoinRetry(attempt + 1, ex.Message, retryDelay.TotalMilliseconds);
+                await Task.Delay(retryDelay, _sharedResources.TimeProvider, cancellationToken).ConfigureAwait(true);
+                retryDelay = TimeSpan.FromTicks((long)(retryDelay.Ticks * _options.JoinRetryBackoffMultiplier));
+
+                // Cap at maximum delay
+                if (retryDelay > _options.JoinRetryMaxDelay)
+                {
+                    retryDelay = _options.JoinRetryMaxDelay;
+                }
+            }
+        }
+
+        if (successfulResponse == null)
+        {
+            LogJoinFailed(maxRetries + 1);
+            throw new JoinException($"Failed to join cluster after {maxRetries + 1} attempts");
+        }
+
+        // Initialize membership from response
+        var metadataMap = new Dictionary<Endpoint, Metadata>();
+        for (var i = 0; i < successfulResponse.MetadataKeys.Count && i < successfulResponse.MetadataValues.Count; i++)
+        {
+            var endpoint = successfulResponse.MetadataKeys[i];
+            var metadata = successfulResponse.MetadataValues[i];
+            metadataMap[endpoint] = metadata;
+        }
+
+        _membershipView = new MembershipViewBuilder(
+            _options.ObserversPerSubject,
+            [.. successfulResponse.Identifiers],
+            [.. successfulResponse.Endpoints]).BuildWithConfigurationId(new ConfigurationId(successfulResponse.ConfigurationId));
+        _cutDetection = _cutDetectorFactory.Create(_membershipView);
+        _metadataManager.AddMetadata(metadataMap);
+
+        FinalizeInitialization();
+    }
+
+    /// <summary>
+    /// Attempts a single join operation. Generates a new NodeId and handles UUID collisions internally.
+    /// </summary>
+    private async Task<JoinResponse?> TryJoinClusterAsync(CancellationToken cancellationToken)
+    {
+        var currentIdentifier = RapidUtils.NodeIdFromUuid(_sharedResources.NewGuid());
+
+        // Phase 1: Contact seed for observers (with retry on UUID collision)
+        JoinResponse joinResponse;
+        while (true)
+        {
+            var preJoinMessage = new PreJoinMessage
+            {
+                Sender = _myAddr,
+                NodeId = currentIdentifier
+            };
+
+            var preJoinResponse = await _messagingClient.SendMessageAsync(
+                _seedAddress!,
+                RapidUtils.ToRapidRequest(preJoinMessage),
+                cancellationToken).ConfigureAwait(true);
+            joinResponse = preJoinResponse.JoinResponse;
+
+            if (joinResponse.StatusCode == JoinStatusCode.UuidAlreadyInRing)
+            {
+                // UUID collision - generate a new identifier and retry (matches Java behavior)
+                currentIdentifier = RapidUtils.NodeIdFromUuid(_sharedResources.NewGuid());
+                continue;
+            }
+
+            break;
+        }
+
+        if (joinResponse.StatusCode != JoinStatusCode.SafeToJoin &&
+            joinResponse.StatusCode != JoinStatusCode.HostnameAlreadyInRing)
+        {
+            throw new JoinException($"Join failed with status: {joinResponse.StatusCode}");
+        }
+
+        var observers = joinResponse.Endpoints.ToList();
+        if (observers.Count == 0)
+        {
+            throw new JoinException("No observers returned from seed");
+        }
+
+        // Phase 2: Contact observers
+        var ringNumbersPerObserver = new Dictionary<Endpoint, List<int>>();
+        for (var ringNumber = 0; ringNumber < observers.Count; ringNumber++)
+        {
+            var observer = observers[ringNumber];
+            if (!ringNumbersPerObserver.TryGetValue(observer, out var value))
+            {
+                ringNumbersPerObserver[observer] = value = [];
+            }
+            ringNumbersPerObserver[observer].Add(ringNumber);
+        }
+
+        var tasks = ringNumbersPerObserver.Select(async entry =>
+        {
+            var joinMessageForObserver = new JoinMessage
+            {
+                Sender = _myAddr,
+                NodeId = currentIdentifier,
+                Metadata = _nodeMetadata,
+                ConfigurationId = joinResponse.ConfigurationId
+            };
+            joinMessageForObserver.RingNumber.AddRange(entry.Value);
+
+            return await _messagingClient.SendMessageAsync(
+                entry.Key,
+                RapidUtils.ToRapidRequest(joinMessageForObserver),
+                cancellationToken).WithDefaultOnException().ConfigureAwait(true);
+        });
+
+        var responses = await Task.WhenAll(tasks).ConfigureAwait(true);
+        var successfulResponse = responses.FirstOrDefault(r => r?.JoinResponse?.StatusCode == JoinStatusCode.SafeToJoin)?.JoinResponse;
+
+        if (successfulResponse == null)
+        {
+            // Check if we got a ConfigChanged response - this means we should retry
+            var configChangedResponse = responses.FirstOrDefault(r => r?.JoinResponse?.StatusCode == JoinStatusCode.ConfigChanged);
+            if (configChangedResponse != null)
+            {
+                throw new JoinException("Configuration changed during join, retry needed");
+            }
+
+            throw new JoinException("Failed to get successful response from any observer");
+        }
+
+        return successfulResponse;
+    }
+
+    /// <summary>
+    /// Determines if a join error is retryable (transient network issues vs permanent errors).
+    /// </summary>
+    private static bool IsRetryableJoinError(Exception ex)
+    {
+        // Timeouts and certain JoinExceptions are retryable
+        if (ex is TimeoutException)
+        {
+            return true;
+        }
+
+        if (ex is JoinException)
+        {
+            var message = ex.Message;
+            return message.Contains("Configuration changed", StringComparison.OrdinalIgnoreCase) ||
+                   message.Contains("Failed to get successful response", StringComparison.OrdinalIgnoreCase) ||
+                   message.Contains("Network partition", StringComparison.OrdinalIgnoreCase) ||
+                   message.Contains("cannot reach", StringComparison.OrdinalIgnoreCase) ||
+                   message.Contains("dropped", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Finalizes initialization after the membership view is established.
+    /// Sets up broadcaster, consensus, failure detectors, and publishes initial view.
+    /// </summary>
+    private void FinalizeInitialization()
+    {
+        lock (_membershipUpdateLock)
+        {
+            // Get metadata map from the manager (was populated by StartNewCluster or JoinClusterAsync)
+            var metadataMap = new Dictionary<Endpoint, Metadata>(_metadataManager.GetAllMetadata());
+            
+            // SetMembershipView handles all the setup - for initial join, nodeStatusChanges is null
+            // which causes GetInitialViewChange() to be used (all nodes marked as Up)
+            SetMembershipView(_membershipView, metadataMap, nodeStatusChanges: null, addedNodes: null);
+        }
+        
+        LogMembershipServiceInitialized(new LoggableEndpoint(_myAddr), new CurrentConfigId(_membershipView), new MembershipSize(_membershipView));
+    }
+
+    /// <summary>
+    /// Centralized method for updating the membership view. All view changes flow through here.
+    /// This method handles:
+    /// - Updating the membership view
+    /// - Recreating the cut detector
+    /// - Updating the broadcaster
+    /// - Disposing old and creating new failure detectors  
+    /// - Creating new consensus instance
+    /// - Publishing the view to the accessor
+    /// - Publishing VIEW_CHANGE event
+    /// </summary>
+    /// <param name="newView">The new membership view to apply.</param>
+    /// <param name="metadataMap">Metadata for nodes in the view. If null, existing metadata is preserved.</param>
+    /// <param name="nodeStatusChanges">The status changes to publish. If null, all nodes are treated as Up (initial join).</param>
+    /// <param name="addedNodes">Nodes that were added (for notifying waiting joiners). Can be null.</param>
+    /// <returns>The previous consensus instance that should be disposed by the caller.</returns>
+    private ConsensusCoordinator? SetMembershipView(
+        MembershipView newView,
+        Dictionary<Endpoint, Metadata>? metadataMap,
+        List<NodeStatusChange>? nodeStatusChanges,
+        List<Endpoint>? addedNodes)
+    {
+        // Must be called under _membershipUpdateLock
+        var previousConsensusInstance = _initialized ? _consensusInstance : null;
+        
+        // Update the view
+        _membershipView = newView;
+        
+        // Update metadata if provided
+        if (metadataMap != null)
+        {
+            _metadataManager.Clear();
+            _metadataManager.AddMetadata(metadataMap);
+        }
+        
+        // Recreate cut detector for the new cluster size
+        _cutDetection = _cutDetectorFactory.Create(_membershipView);
+        
+        // Update broadcaster membership
+        _broadcaster.SetMembership([.. _membershipView.GetRing(0)]);
+        
+        // Dispose old failure detectors and create new ones
+        foreach (var fd in _failureDetectors)
+        {
+            fd.Dispose();
+        }
+        _failureDetectors.Clear();
+        
+        // Create new consensus instance
         _consensusInstance = _consensusCoordinatorFactory.Create(_myAddr, _membershipView.ConfigurationId, _membershipView.Size, _broadcaster);
         RegisterConsensusDecidedContinuation(_consensusInstance);
-
+        _announcedProposal = false;
+        
+        // Replay any buffered consensus messages for this configuration
+        ReplayBufferedConsensusMessages(_membershipView.ConfigurationId, _sharedResources.ShuttingDownToken);
+        
+        // Create new failure detectors
         CreateFailureDetectorsForCurrentConfiguration();
-
-        // Publish initial VIEW_CHANGE event. This informs applications that a start/join has successfully completed.
-        var configurationId = _membershipView.ConfigurationId;
-        var currentMembership = _membershipView.GetRing(0);
-        var nodeStatusChanges = GetInitialViewChange();
-        var clusterStatusChange = new ClusterStatusChange(configurationId, [.. currentMembership], nodeStatusChanges);
-
-        // Publish the initial view to the accessor
+        
+        // Notify waiting joiners if any nodes were added
+        if (addedNodes != null)
+        {
+            NotifyWaitingJoiners(addedNodes);
+        }
+        
+        // Publish the new view to the accessor
         _viewAccessor.PublishView(_membershipView);
-
+        
+        // Publish VIEW_CHANGE event
+        var statusChanges = nodeStatusChanges ?? GetInitialViewChange();
+        var currentMembership = _membershipView.GetRing(0);
+        var clusterStatusChange = new ClusterStatusChange(_membershipView.ConfigurationId, [.. currentMembership], statusChanges);
+        
+        LogPublishingViewChange(new CurrentConfigId(_membershipView), new MembershipSize(_membershipView));
         PublishEvent(ClusterEvents.ViewChange, clusterStatusChange);
+        
+        // Clear pending joiner data that's no longer needed
+        _pendingConsensusMessages.Keys
+            .Where(k => k < _membershipView.ConfigurationId)
+            .ToList()
+            .ForEach(k => _pendingConsensusMessages.Remove(k));
+        
+        return previousConsensusInstance;
+    }
+    
+    /// <summary>
+    /// Notifies joiners waiting for their join to complete.
+    /// </summary>
+    private void NotifyWaitingJoiners(List<Endpoint> addedNodes)
+    {
+        foreach (var node in addedNodes)
+        {
+            if (_joinersToRespondTo.TryGetValue(node, out var channel))
+            {
+                var waitingCount = 0;
+                var config = _membershipView.Configuration;
+                var response = new JoinResponse
+                {
+                    Sender = _myAddr,
+                    StatusCode = JoinStatusCode.SafeToJoin,
+                    ConfigurationId = _membershipView.ConfigurationId
+                };
+                response.Endpoints.AddRange(config.Endpoints);
+                response.Identifiers.AddRange(config.NodeIds);
+                var allMetadata = _metadataManager.GetAllMetadata();
+                response.MetadataKeys.AddRange(allMetadata.Keys);
+                response.MetadataValues.AddRange(allMetadata.Values);
 
-        LogMembershipServiceInitialized(new LoggableEndpoint(myAddr), new CurrentConfigId(_membershipView), new MembershipSize(_membershipView));
+                var rapidResponse = RapidUtils.ToRapidResponse(response);
+
+                // Send response to all waiting tasks
+                while (channel.Reader.TryRead(out var tcs))
+                {
+                    waitingCount++;
+                    tcs.SetResult(rapidResponse);
+                }
+
+                LogNotifyingJoiners(waitingCount, new LoggableEndpoint(node));
+                _joinersToRespondTo.Remove(node);
+            }
+        }
     }
 
     /// <summary>
@@ -663,10 +1007,9 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     {
         LogDecideViewChange(proposal.Count);
 
-        ConsensusCoordinator previousConsensusInstance;
+        ConsensusCoordinator? previousConsensusInstance;
         lock (_membershipUpdateLock)
         {
-            previousConsensusInstance = _consensusInstance;
             _announcedProposal = false;
 
             // Track nodes that were added so we can notify their joiners after ALL nodes are processed
@@ -715,77 +1058,18 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
             }
 
             // Build the new immutable view with incremented version
-            _membershipView = builder.Build(_membershipView.ConfigurationId);
-
-            // Publish the new view to the accessor
-            _viewAccessor.PublishView(_membershipView);
-
-            // Now that ALL nodes have been added, notify all joiners with the complete configuration
-            foreach (var node in addedNodes)
-            {
-                if (_joinersToRespondTo.TryGetValue(node, out var channel))
-                {
-                    var waitingCount = 0;
-                    var config = _membershipView.Configuration;
-                    var response = new JoinResponse
-                    {
-                        Sender = _myAddr,
-                        StatusCode = JoinStatusCode.SafeToJoin,
-                        ConfigurationId = _membershipView.ConfigurationId
-                    };
-                    response.Endpoints.AddRange(config.Endpoints);
-                    response.Identifiers.AddRange(config.NodeIds);
-                    var allMetadata = _metadataManager.GetAllMetadata();
-                    response.MetadataKeys.AddRange(allMetadata.Keys);
-                    response.MetadataValues.AddRange(allMetadata.Values);
-
-                    var rapidResponse = RapidUtils.ToRapidResponse(response);
-
-                    // Send response to all waiting tasks
-                    while (channel.Reader.TryRead(out var tcs))
-                    {
-                        waitingCount++;
-                        tcs.SetResult(rapidResponse);
-                    }
-
-                    LogNotifyingJoiners(waitingCount, new LoggableEndpoint(node));
-                    _joinersToRespondTo.Remove(node);
-                }
-            }
-
-            // Recreate cut detector for the new cluster size.
-            // This ensures we use the appropriate detector (Simple vs MultiNode) based on effective K.
-            _cutDetection = _cutDetectorFactory.Create(_membershipView);
-            _broadcaster.SetMembership([.. _membershipView.GetRing(0)]);
-
-            // Recreate failure detectors
-            foreach (var fd in _failureDetectors)
-            {
-                fd.Dispose();
-            }
-            _failureDetectors.Clear();
+            var newView = builder.Build(_membershipView.ConfigurationId);
 
             LogDecideViewChangeCleanup();
-            _consensusInstance = _consensusCoordinatorFactory.Create(_myAddr, _membershipView.ConfigurationId, _membershipView.Size, _broadcaster);
-            RegisterConsensusDecidedContinuation(_consensusInstance);
-
-            // Replay any buffered consensus messages for this configuration
-            ReplayBufferedConsensusMessages(_membershipView.ConfigurationId, _sharedResources.ShuttingDownToken);
-
-            // Inform EdgeFailureDetector about membership change
-            CreateFailureDetectorsForCurrentConfiguration();
-
-            // Publish an event to the listeners.
-            var configurationId = _membershipView.ConfigurationId;
-            var currentMembership = _membershipView.GetRing(0);
-            var clusterStatusChange = new ClusterStatusChange(configurationId, [.. currentMembership], nodeStatusChanges);
-
-            LogPublishingViewChange(new CurrentConfigId(_membershipView), new MembershipSize(_membershipView));
-
-            PublishEvent(ClusterEvents.ViewChange, clusterStatusChange);
+            
+            // Use SetMembershipView to apply all changes - pass null for metadataMap to preserve existing
+            previousConsensusInstance = SetMembershipView(newView, metadataMap: null, nodeStatusChanges, addedNodes);
         }
 
-        await previousConsensusInstance.DisposeAsync();
+        if (previousConsensusInstance != null)
+        {
+            await previousConsensusInstance.DisposeAsync();
+        }
     }
 
     /// <summary>
@@ -1183,66 +1467,38 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
     /// </summary>
     private void ResetStateAfterRejoin(JoinResponse response, NodeId nodeId)
     {
+        ConsensusCoordinator? oldConsensus;
         lock (_membershipUpdateLock)
         {
-            // Stop old failure detectors
-            foreach (var fd in _failureDetectors)
-            {
-                fd.Dispose();
-            }
-            _failureDetectors.Clear();
-
-            // Clear pending data
+            // Clear pending data before setting new view
             _joinersToRespondTo.Clear();
             _joinerUuid.Clear();
             _joinerMetadata.Clear();
             _pendingConsensusMessages.Clear();
 
-            // Build new membership view
+            // Build new membership view from response
             var metadataMap = new Dictionary<Endpoint, Metadata>();
             for (var i = 0; i < response.MetadataKeys.Count && i < response.MetadataValues.Count; i++)
             {
                 metadataMap[response.MetadataKeys[i]] = response.MetadataValues[i];
             }
 
-            _membershipView = new MembershipViewBuilder(
+            var newView = new MembershipViewBuilder(
                 _options.ObserversPerSubject,
                 [.. response.Identifiers],
                 [.. response.Endpoints]).BuildWithConfigurationId(new ConfigurationId(response.ConfigurationId));
 
-            // Reset metadata
-            _metadataManager.Clear();
-            _metadataManager.AddMetadata(metadataMap);
-
-            // Recreate cut detector
-            _cutDetection = _cutDetectorFactory.Create(_membershipView);
-
-            // Update broadcaster
-            _broadcaster.SetMembership([.. _membershipView.GetRing(0)]);
-
-            // Recreate consensus instance
-            var oldConsensus = _consensusInstance;
-            _consensusInstance = _consensusCoordinatorFactory.Create(_myAddr, _membershipView.ConfigurationId, _membershipView.Size, _broadcaster);
-            RegisterConsensusDecidedContinuation(_consensusInstance);
-            _announcedProposal = false;
-
-            // Dispose old consensus (fire and forget)
-            _ = oldConsensus.DisposeAsync();
-
             // Reset flags
             _kickedEventPublished = false;
 
-            // Publish the new view
-            _viewAccessor.PublishView(_membershipView);
-
-            // Create new failure detectors
-            CreateFailureDetectorsForCurrentConfiguration();
-
-            // Publish VIEW_CHANGE event to notify subscribers of the rejoin
-            var currentMembership = _membershipView.GetRing(0);
-            var nodeStatusChanges = GetInitialViewChange();
-            var clusterStatusChange = new ClusterStatusChange(_membershipView.ConfigurationId, [.. currentMembership], nodeStatusChanges);
-            PublishEvent(ClusterEvents.ViewChange, clusterStatusChange);
+            // Use SetMembershipView to apply all changes - for rejoin, all nodes are treated as Up
+            oldConsensus = SetMembershipView(newView, metadataMap, nodeStatusChanges: null, addedNodes: null);
+        }
+        
+        // Dispose old consensus (fire and forget)
+        if (oldConsensus != null)
+        {
+            _ = oldConsensus.DisposeAsync();
         }
     }
 

@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using Rapid.Exceptions;
 using Rapid.Tests.Simulation;
 
 namespace Rapid.Tests.SimulationTests;
@@ -287,7 +288,7 @@ public sealed class JoinProtocolTests : IAsyncLifetime
 
         // Attempting to join should fail because consensus cannot be reached
         // The join will timeout after exhausting retries
-        Assert.Throws<InvalidOperationException>(() =>
+        Assert.Throws<JoinException>(() =>
         {
             _harness.CreateJoinerNode(seedNode, nodeId: 2);
         });
