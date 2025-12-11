@@ -1,6 +1,8 @@
+using System.Text;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Rapid.Tests.Simulation;
 
 namespace Rapid.Tests;
 
@@ -8,15 +10,28 @@ namespace Rapid.Tests;
 /// Represents a test cluster that tracks and manages nodes for integration tests.
 /// Automatically shuts down all nodes when disposed.
 /// </summary>
-internal sealed class TestCluster(ITestOutputHelper outputHelper) : IAsyncDisposable
+internal sealed class TestCluster : IAsyncDisposable
 {
     private readonly List<WebApplication> _apps = [];
-    private readonly ILoggerFactory _loggerFactory = LoggerFactory.Create(builder => builder
-            .AddXUnit(outputHelper)
+    private readonly ILoggerFactory _loggerFactory;
+    private readonly TestClusterPortAllocator _portAllocator = new();
+    private readonly string _logFilePath;
+
+    public TestCluster(ITestOutputHelper outputHelper)
+    {
+        var context = TestContext.Current;
+        var testName = context.Test?.TestDisplayName ?? "unknown_test";
+        _logFilePath = GenerateLogFilePath(testName);
+
+        _loggerFactory = LoggerFactory.Create(builder => builder
+            .AddProvider(new FileLoggerProvider(_logFilePath))
             .AddFilter("Microsoft.AspNetCore", LogLevel.Warning)
             .AddFilter("Grpc.AspNetCore", LogLevel.Warning)
             .SetMinimumLevel(LogLevel.Debug));
-    private readonly TestClusterPortAllocator _portAllocator = new();
+
+        // Log the file path to xUnit so users know where to find detailed logs
+        outputHelper.WriteLine($"Integration test logs: {_logFilePath}");
+    }
 
     /// <summary>
     /// Gets the next available port for a node.
@@ -215,6 +230,45 @@ internal sealed class TestCluster(ITestOutputHelper outputHelper) : IAsyncDispos
         _apps.Clear();
         _loggerFactory.Dispose();
         _portAllocator.Dispose();
+
+        // Attach log file to test context
+        var context = TestContext.Current;
+        if (File.Exists(_logFilePath))
+        {
+            var logFileName = Path.GetFileName(_logFilePath);
+            context.AddAttachment(logFileName, _logFilePath);
+        }
+
         GC.SuppressFinalize(this);
+    }
+
+    /// <summary>
+    /// Generates a unique log file path for integration tests.
+    /// </summary>
+    private static string GenerateLogFilePath(string testName)
+    {
+        var sanitizedTestName = SanitizeFileName(testName);
+        var uniqueId = Guid.NewGuid().ToString("N")[..8];
+
+        var assemblyLocation = typeof(TestCluster).Assembly.Location;
+        var baseDirectory = Path.GetDirectoryName(assemblyLocation) ?? AppContext.BaseDirectory;
+        var logsDirectory = Path.Combine(baseDirectory, "logs");
+
+        return Path.Combine(logsDirectory, $"rapid_integration_{sanitizedTestName}_{uniqueId}.log");
+    }
+
+    /// <summary>
+    /// Sanitizes a string to be used as a file name.
+    /// </summary>
+    private static string SanitizeFileName(string name)
+    {
+        var invalidChars = Path.GetInvalidFileNameChars();
+        var sanitized = new StringBuilder();
+        foreach (var c in name)
+        {
+            sanitized.Append(invalidChars.Contains(c) ? '_' : c);
+        }
+        var result = sanitized.ToString();
+        return result.Length > 100 ? result[..100] : result;
     }
 }

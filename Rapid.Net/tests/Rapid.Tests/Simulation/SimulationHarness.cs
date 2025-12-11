@@ -55,18 +55,17 @@ internal sealed class SimulationHarness : IAsyncDisposable
 
         Network = new SimulationNetwork(this, Random);
 
-        // Create logger factory with file and xUnit providers
+        // Create logger factory with file provider only (xUnit output is too verbose)
         var testName = context.Test?.TestDisplayName;
         _logFilePath = GenerateLogFilePath(testName, seed);
         LoggerFactory = Microsoft.Extensions.Logging.LoggerFactory.Create(builder =>
         {
             builder.AddProvider(new FileLoggerProvider(_logFilePath, _timeProvider));
-            if (context.TestOutputHelper is { } outputHelper)
-            {
-                builder.AddXUnit(outputHelper);
-            }
             builder.SetMinimumLevel(LogLevel.Debug);
         });
+
+        // Log the file path to xUnit so users know where to find detailed logs
+        context.TestOutputHelper?.WriteLine($"Simulation logs: {_logFilePath}");
 
         _logger = LoggerFactory.CreateLogger<SimulationHarness>();
         _timeProvider.SetLogger(LoggerFactory.CreateLogger<SimulationTimeProvider>());

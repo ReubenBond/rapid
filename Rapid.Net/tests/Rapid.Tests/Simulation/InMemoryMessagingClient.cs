@@ -87,6 +87,10 @@ internal sealed class InMemoryMessagingClient : IMessagingClient
         // Create a TCS for the response
         var responseTcs = new TaskCompletionSource<RapidResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        // Ensure any exception on the task is observed to prevent UnobservedTaskException
+        // if the caller abandons the task or the simulation tears down.
+        responseTcs.Task.Ignore();
+
         _logger.LogTrace("Scheduling delivery of {MessageType} from {Local} to {Remote}",
             request.ContentCase, localAddr, remoteAddr);
 
@@ -196,8 +200,8 @@ internal sealed class InMemoryMessagingClient : IMessagingClient
 
         // Cancel timeout when response is received
         responseTcs.Task.ContinueWith(
-            (t, _) => timeoutItem.Dispose(),
-            state: null,
+            static (_, state) => ((IDisposable)state!).Dispose(),
+            state: timeoutItem,
             CancellationToken.None,
             TaskContinuationOptions.ExecuteSynchronously,
             sourceContext.TaskScheduler);

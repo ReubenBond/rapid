@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using Rapid.Exceptions;
 using Rapid.Tests.Simulation;
 
 namespace Rapid.Tests.SimulationTests;
@@ -177,11 +178,13 @@ public sealed class NodeFailureTests : IAsyncLifetime
         // Suspend the seed (simulates crash but keeps node in harness so we can attempt to contact it)
         _harness.SuspendNode(seedNode);
 
-        // Attempting to join through crashed seed should timeout
-        Assert.Throws<TimeoutException>(() =>
+        // Attempting to join through crashed seed should fail with JoinException
+        // The underlying cause is a timeout, but JoinException is the public contract for join failures
+        var ex = Assert.Throws<JoinException>(() =>
         {
             _harness.CreateJoinerNode(seedNode, nodeId: 1);
         });
+        Assert.Contains("Timeout", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
