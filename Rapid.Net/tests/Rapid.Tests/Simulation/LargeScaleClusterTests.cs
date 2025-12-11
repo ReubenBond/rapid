@@ -28,14 +28,15 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
     #region Large Cluster Formation (SCALE-001 to SCALE-005)
 
     /// <summary>
-    /// Tests formation of a 10-node cluster.
-    /// Verifies all nodes initialize and converge to the same membership view.
+    /// Tests formation of a cluster using sequential joins.
+    /// Each node joins and waits for consensus before the next node joins.
+    /// This is slower but guarantees deterministic, one-at-a-time behavior.
     /// </summary>
     [Theory]
     [InlineData(10)]
     [InlineData(15)]
     [InlineData(20)]
-    public void LargeClusterFormation(int clusterSize)
+    public void LargeClusterFormation_Sequential(int clusterSize)
     {
         var nodes = _harness.CreateCluster(size: clusterSize);
 
@@ -44,6 +45,126 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
         Assert.Equal(clusterSize, nodes.Count);
         Assert.All(nodes, n => Assert.True(n.IsInitialized));
         Assert.All(nodes, n => Assert.Equal(clusterSize, n.MembershipSize));
+    }
+
+    /// <summary>
+    /// Tests formation of a cluster using parallel joins.
+    /// Multiple nodes join concurrently, allowing the multi-node cut detection
+    /// to batch them into fewer consensus rounds (O(log N) instead of O(N)).
+    /// This matches the Rapid paper's approach where 2000 nodes bootstrapped
+    /// with only 8 configuration changes.
+    /// </summary>
+    [Theory]
+    [InlineData(10)]
+    [InlineData(15)]
+    [InlineData(20)]
+    [InlineData(50)]
+    [InlineData(80)]
+    [InlineData(100)]
+    public void LargeClusterFormation_Parallel(int clusterSize)
+    {
+        var nodes = _harness.CreateClusterParallel(size: clusterSize);
+
+        _harness.WaitForConvergence(expectedSize: clusterSize);
+
+        Assert.Equal(clusterSize, nodes.Count);
+        Assert.All(nodes, n => Assert.True(n.IsInitialized));
+        Assert.All(nodes, n => Assert.Equal(clusterSize, n.MembershipSize));
+    }
+
+    /// <summary>
+    /// Tests formation of very large clusters (200-500 nodes) using parallel joins.
+    /// This validates the O(log N) scaling described in the Rapid paper.
+    /// 
+    /// The paper achieved 2000 nodes with only 8 configuration changes, implying
+    /// ~250 nodes per view change. For our test sizes:
+    /// - 200 nodes: expect ~10-15 changes (at least 13-20 nodes per change)
+    /// - 500 nodes: expect ~12-20 changes (at least 25-40 nodes per change)
+    /// </summary>
+    [Theory]
+    [InlineData(200, 30)]  // 200 nodes should have at most 30 config changes
+    [InlineData(500, 50)]  // 500 nodes should have at most 50 config changes
+    public void VeryLargeClusterFormation_Parallel(int clusterSize, int maxExpectedChanges)
+    {
+        var nodes = _harness.CreateClusterParallel(size: clusterSize);
+
+        // Use higher max iterations for very large clusters
+        _harness.WaitForConvergence(expectedSize: clusterSize, maxIterations: 5000000);
+
+        Assert.Equal(clusterSize, nodes.Count);
+        Assert.All(nodes, n => Assert.True(n.IsInitialized));
+        Assert.All(nodes, n => Assert.Equal(clusterSize, n.MembershipSize));
+        
+        // Verify batching occurred - should have significantly fewer config changes than nodes
+        var finalConfigId = nodes[0].CurrentView.ConfigurationId;
+        var configChanges = finalConfigId.Version - 1;
+        var nodesJoined = clusterSize - 1;
+        var avgNodesPerChange = (double)nodesJoined / configChanges;
+        
+        Assert.True(configChanges <= maxExpectedChanges,
+            $"Expected at most {maxExpectedChanges} configuration changes for {clusterSize} nodes, " +
+            $"but got {configChanges}. Average nodes per change: {avgNodesPerChange:F1}. " +
+            $"Batching is not working correctly.");
+    }
+
+    /// <summary>
+    /// Tests formation of a cluster using batched parallel joins.
+    /// Nodes join in batches of the specified size, providing a middle ground
+    /// between fully sequential and fully parallel joining.
+    /// </summary>
+    [Theory]
+    [InlineData(50, 10)]  // 50 nodes in batches of 10
+    [InlineData(80, 20)]  // 80 nodes in batches of 20
+    [InlineData(100, 25)] // 100 nodes in batches of 25
+    public void LargeClusterFormation_BatchedParallel(int clusterSize, int batchSize)
+    {
+        var nodes = _harness.CreateClusterParallel(size: clusterSize, batchSize: batchSize);
+
+        _harness.WaitForConvergence(expectedSize: clusterSize);
+
+        Assert.Equal(clusterSize, nodes.Count);
+        Assert.All(nodes, n => Assert.True(n.IsInitialized));
+        Assert.All(nodes, n => Assert.Equal(clusterSize, n.MembershipSize));
+    }
+
+    /// <summary>
+    /// Tests that parallel joins result in batched view changes.
+    /// This validates the O(log N) scaling from the Rapid paper where 2000 nodes
+    /// were bootstrapped with only 8 configuration changes.
+    /// 
+    /// For batching to work correctly:
+    /// - Multiple alerts should be batched into single BatchedAlertMessage broadcasts
+    /// - Multiple nodes should be added in a single view change (configuration change)
+    /// - The total number of configuration changes should be significantly less than N-1
+    /// 
+    /// Expected behavior per the paper:
+    /// - 2000 nodes bootstrapped with 8 configuration changes
+    /// - This implies ~250 nodes per view change on average
+    /// - For 50 nodes, we should see ~6-10 changes (allowing for smaller batches)
+    /// - For 80 nodes, we should see ~8-12 changes
+    /// </summary>
+    [Theory]
+    [InlineData(20, 10)]   // 20 nodes should have at most 10 config changes (at least 2 nodes per change on average)
+    [InlineData(50, 15)]   // 50 nodes should have at most 15 config changes (at least 3-4 nodes per change on average)
+    [InlineData(80, 20)]   // 80 nodes should have at most 20 config changes (at least 4 nodes per change on average)
+    public void ParallelJoins_BatchMultipleNodesPerViewChange(int clusterSize, int maxExpectedChanges)
+    {
+        var nodes = _harness.CreateClusterParallel(size: clusterSize);
+        _harness.WaitForConvergence(expectedSize: clusterSize);
+
+        // Get the final configuration ID which represents the number of view changes
+        var finalConfigId = nodes[0].CurrentView.ConfigurationId;
+        
+        // The configuration version starts at 1 for the seed node, so the number of
+        // configuration changes (view changes) is version - 1
+        var configChanges = finalConfigId.Version - 1;
+        var nodesJoined = clusterSize - 1; // Excluding seed node
+        var avgNodesPerChange = (double)nodesJoined / configChanges;
+        
+        Assert.True(configChanges <= maxExpectedChanges,
+            $"Expected at most {maxExpectedChanges} configuration changes for {clusterSize} nodes, " +
+            $"but got {configChanges}. Average nodes per change: {avgNodesPerChange:F1}. " +
+            $"Batching is not working correctly - each view change should include multiple nodes.");
     }
 
     /// <summary>
@@ -315,6 +436,39 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 7);
 
         Assert.All(_harness.Nodes, n => Assert.Equal(7, n.MembershipSize));
+    }
+
+    /// <summary>
+    /// Tests that parallel graceful leaves result in batched view changes.
+    /// Similar to parallel joins, multiple concurrent leaves should be batched
+    /// into fewer configuration changes than sequential leaves.
+    /// </summary>
+    [Theory]
+    [InlineData(20, 10, 5)]   // Remove 10 from 20 nodes, expect at most 5 config changes
+    [InlineData(30, 15, 8)]   // Remove 15 from 30 nodes, expect at most 8 config changes
+    [InlineData(50, 20, 10)]  // Remove 20 from 50 nodes, expect at most 10 config changes
+    public void ParallelLeaves_BatchMultipleNodesPerViewChange(int clusterSize, int nodesToRemove, int maxExpectedChanges)
+    {
+        // Create the cluster using parallel joins for speed
+        var nodes = _harness.CreateClusterParallel(size: clusterSize);
+        _harness.WaitForConvergence(expectedSize: clusterSize);
+
+        // Select nodes to remove (avoiding the seed node at index 0)
+        var leavingNodes = nodes.Skip(clusterSize - nodesToRemove).Take(nodesToRemove).ToList();
+        
+        // Remove nodes in parallel and measure configuration changes
+        var configChanges = _harness.RemoveNodesGracefullyParallel(leavingNodes);
+
+        var expectedSize = clusterSize - nodesToRemove;
+        _harness.WaitForConvergence(expectedSize: expectedSize);
+
+        Assert.All(_harness.Nodes, n => Assert.Equal(expectedSize, n.MembershipSize));
+        
+        var avgNodesPerChange = (double)nodesToRemove / configChanges;
+        Assert.True(configChanges <= maxExpectedChanges,
+            $"Expected at most {maxExpectedChanges} configuration changes for removing {nodesToRemove} nodes, " +
+            $"but got {configChanges}. Average nodes per change: {avgNodesPerChange:F1}. " +
+            $"Leave batching is not working correctly.");
     }
 
     #endregion

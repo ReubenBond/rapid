@@ -357,6 +357,412 @@ public class PropertyBasedTests
             });
     }
 
+    /// <summary>
+    /// Property: Reaching exactly H reports for a single node (with no other nodes in preProposal)
+    /// should trigger a proposal containing that node.
+    /// </summary>
+    [Fact]
+    public void MultiNodeCutDetector_H_Reports_Triggers_Single_Proposal()
+    {
+        Gen.Select(GenK.Where(k => k >= 4), GenUniqueNodes(5, 15))
+            .Sample((k, nodes) =>
+            {
+                var h = k - 1;
+                var l = 1;
+                var builder = new MembershipViewBuilder(k);
+                foreach (var (endpoint, nodeId) in nodes)
+                {
+                    builder.RingAdd(endpoint, nodeId);
+                }
+                var view = builder.Build();
+
+                var detector = new MultiNodeCutDetector(h, l, view);
+                var subject = nodes[0].Endpoint;
+
+                // Send exactly H reports on different rings
+                List<Endpoint> lastResult = [];
+                for (var i = 0; i < h; i++)
+                {
+                    lastResult = detector.AggregateForProposal(
+                        new AlertMessage
+                        {
+                            EdgeSrc = nodes[(i % (nodes.Count - 1)) + 1].Endpoint,
+                            EdgeDst = subject,
+                            EdgeStatus = EdgeStatus.Up,
+                            RingNumber = { i }
+                        });
+                }
+
+                // The H-th report should trigger a proposal
+                return lastResult.Count == 1 && lastResult[0].Equals(subject);
+            });
+    }
+
+    /// <summary>
+    /// Property: Nodes between L and H reports block other nodes from being proposed.
+    /// When multiple nodes are at L &lt;= reports &lt; H, no proposals should be generated
+    /// until all reach H or fall below L.
+    /// </summary>
+    [Fact]
+    public void MultiNodeCutDetector_PreProposal_Blocks_Proposal()
+    {
+        Gen.Select(GenK.Where(k => k >= 5), GenUniqueNodes(5, 15))
+            .Sample((k, nodes) =>
+            {
+                // Use H=k-1 and L=2 so we have a meaningful range
+                var h = k - 1;
+                var l = 2;
+                var builder = new MembershipViewBuilder(k);
+                foreach (var (endpoint, nodeId) in nodes)
+                {
+                    builder.RingAdd(endpoint, nodeId);
+                }
+                var view = builder.Build();
+
+                var detector = new MultiNodeCutDetector(h, l, view);
+                var subject1 = nodes[0].Endpoint;
+                var subject2 = nodes[1].Endpoint;
+
+                // Bring subject1 to H-1 reports (just below H, in preProposal)
+                for (var i = 0; i < h - 1; i++)
+                {
+                    detector.AggregateForProposal(
+                        new AlertMessage
+                        {
+                            EdgeSrc = nodes[(i % (nodes.Count - 2)) + 2].Endpoint,
+                            EdgeDst = subject1,
+                            EdgeStatus = EdgeStatus.Up,
+                            RingNumber = { i }
+                        });
+                }
+
+                // Bring subject2 to L reports (in preProposal)
+                for (var i = 0; i < l; i++)
+                {
+                    detector.AggregateForProposal(
+                        new AlertMessage
+                        {
+                            EdgeSrc = nodes[(i % (nodes.Count - 2)) + 2].Endpoint,
+                            EdgeDst = subject2,
+                            EdgeStatus = EdgeStatus.Up,
+                            RingNumber = { i }
+                        });
+                }
+
+                // Now push subject1 to H - should NOT trigger proposal because subject2 is in preProposal
+                var result = detector.AggregateForProposal(
+                    new AlertMessage
+                    {
+                        EdgeSrc = nodes[2].Endpoint,
+                        EdgeDst = subject1,
+                        EdgeStatus = EdgeStatus.Up,
+                        RingNumber = { h - 1 }
+                    });
+
+                // subject2 is still in preProposal (L <= reports < H), so no proposal yet
+                return result.Count == 0;
+            });
+    }
+
+    /// <summary>
+    /// Property: When all nodes in preProposal reach H, they are all proposed together.
+    /// This is the batching behavior.
+    /// </summary>
+    [Fact]
+    public void MultiNodeCutDetector_Batches_Multiple_Nodes()
+    {
+        Gen.Select(GenK.Where(k => k >= 5), GenUniqueNodes(10, 20))
+            .Sample((k, nodes) =>
+            {
+                var h = k - 1;
+                var l = 2;
+                var builder = new MembershipViewBuilder(k);
+                foreach (var (endpoint, nodeId) in nodes)
+                {
+                    builder.RingAdd(endpoint, nodeId);
+                }
+                var view = builder.Build();
+
+                var detector = new MultiNodeCutDetector(h, l, view);
+                var subject1 = nodes[0].Endpoint;
+                var subject2 = nodes[1].Endpoint;
+                var subject3 = nodes[2].Endpoint;
+
+                // Bring all three subjects to H-1 reports
+                foreach (var subject in new[] { subject1, subject2, subject3 })
+                {
+                    for (var i = 0; i < h - 1; i++)
+                    {
+                        detector.AggregateForProposal(
+                            new AlertMessage
+                            {
+                                EdgeSrc = nodes[(i % (nodes.Count - 3)) + 3].Endpoint,
+                                EdgeDst = subject,
+                                EdgeStatus = EdgeStatus.Up,
+                                RingNumber = { i }
+                            });
+                    }
+                }
+
+                // Push first two to H - should not trigger (subject3 still blocking)
+                detector.AggregateForProposal(
+                    new AlertMessage
+                    {
+                        EdgeSrc = nodes[3].Endpoint,
+                        EdgeDst = subject1,
+                        EdgeStatus = EdgeStatus.Up,
+                        RingNumber = { h - 1 }
+                    });
+
+                var result2 = detector.AggregateForProposal(
+                    new AlertMessage
+                    {
+                        EdgeSrc = nodes[3].Endpoint,
+                        EdgeDst = subject2,
+                        EdgeStatus = EdgeStatus.Up,
+                        RingNumber = { h - 1 }
+                    });
+
+                // Still blocked by subject3
+                if (result2.Count != 0)
+                    return false;
+
+                // Push subject3 to H - now all three should be proposed together
+                var finalResult = detector.AggregateForProposal(
+                    new AlertMessage
+                    {
+                        EdgeSrc = nodes[3].Endpoint,
+                        EdgeDst = subject3,
+                        EdgeStatus = EdgeStatus.Up,
+                        RingNumber = { h - 1 }
+                    });
+
+                // All three should be in the proposal
+                return finalResult.Count == 3 &&
+                       finalResult.Contains(subject1) &&
+                       finalResult.Contains(subject2) &&
+                       finalResult.Contains(subject3);
+            });
+    }
+
+    /// <summary>
+    /// Property: Processing by ring number (interleaved) produces same or fewer proposals than
+    /// processing all rings for each node sequentially.
+    /// This verifies the batching optimization works correctly.
+    /// </summary>
+    [Fact]
+    public void MultiNodeCutDetector_RingInterleaving_Enables_Batching()
+    {
+        Gen.Select(GenK.Where(k => k >= 5), GenUniqueNodes(10, 20))
+            .Sample((k, nodes) =>
+            {
+                var h = k - 1;
+                var l = 2;
+                var builder = new MembershipViewBuilder(k);
+                foreach (var (endpoint, nodeId) in nodes)
+                {
+                    builder.RingAdd(endpoint, nodeId);
+                }
+                var view = builder.Build();
+
+                // Create messages for 3 subjects, each with all K ring numbers
+                var subjects = nodes.Take(3).Select(n => n.Endpoint).ToList();
+                var messages = new List<AlertMessage>();
+                foreach (var subject in subjects)
+                {
+                    var msg = new AlertMessage
+                    {
+                        EdgeSrc = nodes[3].Endpoint,
+                        EdgeDst = subject,
+                        EdgeStatus = EdgeStatus.Up
+                    };
+                    for (var r = 0; r < k; r++)
+                    {
+                        msg.RingNumber.Add(r);
+                    }
+                    messages.Add(msg);
+                }
+
+                // Method 1: Process all rings for each message (sequential, non-batching)
+                var detector1 = new MultiNodeCutDetector(h, l, view);
+                var proposals1 = 0;
+                foreach (var msg in messages)
+                {
+                    var result = detector1.AggregateForProposal(msg);
+                    if (result.Count > 0)
+                        proposals1++;
+                }
+
+                // Method 2: Process by ring number across all messages (interleaved, batching)
+                var detector2 = new MultiNodeCutDetector(h, l, view);
+                var proposals2 = 0;
+                for (var ringNumber = 0; ringNumber < k; ringNumber++)
+                {
+                    foreach (var msg in messages)
+                    {
+                        var result = detector2.AggregateForProposalSingleRing(msg, ringNumber);
+                        if (result.Count > 0)
+                            proposals2++;
+                    }
+                }
+
+                // Interleaved processing should produce same or fewer proposal events
+                // (potentially batching multiple nodes into single proposal)
+                return proposals2 <= proposals1;
+            });
+    }
+
+    /// <summary>
+    /// Property: AggregateForProposal and AggregateForProposalSingleRing produce the same
+    /// final state when processing the same messages.
+    /// </summary>
+    [Fact]
+    public void MultiNodeCutDetector_SingleRing_Equivalent_To_Full_When_Sequential()
+    {
+        Gen.Select(GenK.Where(k => k >= 4), GenUniqueNodes(5, 15))
+            .Sample((k, nodes) =>
+            {
+                var h = k - 1;
+                var l = 1;
+                var builder = new MembershipViewBuilder(k);
+                foreach (var (endpoint, nodeId) in nodes)
+                {
+                    builder.RingAdd(endpoint, nodeId);
+                }
+                var view = builder.Build();
+
+                var subject = nodes[0].Endpoint;
+
+                // Create a message with multiple ring numbers
+                var msg = new AlertMessage
+                {
+                    EdgeSrc = nodes[1].Endpoint,
+                    EdgeDst = subject,
+                    EdgeStatus = EdgeStatus.Up
+                };
+                for (var r = 0; r < h; r++)
+                {
+                    msg.RingNumber.Add(r);
+                }
+
+                // Method 1: Use AggregateForProposal
+                var detector1 = new MultiNodeCutDetector(h, l, view);
+                var result1 = detector1.AggregateForProposal(msg);
+
+                // Method 2: Use AggregateForProposalSingleRing for each ring
+                var detector2 = new MultiNodeCutDetector(h, l, view);
+                var result2 = new List<Endpoint>();
+                foreach (var ringNumber in msg.RingNumber)
+                {
+                    result2.AddRange(detector2.AggregateForProposalSingleRing(msg, ringNumber));
+                }
+
+                // Both methods should produce the same final result
+                return result1.Count == result2.Count &&
+                       result1.All(e => result2.Contains(e)) &&
+                       detector1.GetNumProposals() == detector2.GetNumProposals();
+            });
+    }
+
+    /// <summary>
+    /// Property: Nodes below L threshold do not block proposals.
+    /// </summary>
+    [Fact]
+    public void MultiNodeCutDetector_Below_L_Does_Not_Block()
+    {
+        Gen.Select(GenK.Where(k => k >= 5), GenUniqueNodes(10, 20))
+            .Sample((k, nodes) =>
+            {
+                var h = k - 1;
+                var l = 3; // Use L=3 so we have room below L
+                if (l > h - 1) l = h - 1; // Ensure L < H
+                var builder = new MembershipViewBuilder(k);
+                foreach (var (endpoint, nodeId) in nodes)
+                {
+                    builder.RingAdd(endpoint, nodeId);
+                }
+                var view = builder.Build();
+
+                var detector = new MultiNodeCutDetector(h, l, view);
+                var subject1 = nodes[0].Endpoint;
+                var subject2 = nodes[1].Endpoint;
+
+                // subject2 gets L-1 reports (below L, should not block)
+                for (var i = 0; i < l - 1; i++)
+                {
+                    detector.AggregateForProposal(
+                        new AlertMessage
+                        {
+                            EdgeSrc = nodes[(i % (nodes.Count - 2)) + 2].Endpoint,
+                            EdgeDst = subject2,
+                            EdgeStatus = EdgeStatus.Up,
+                            RingNumber = { i }
+                        });
+                }
+
+                // subject1 reaches H reports
+                List<Endpoint> lastResult = [];
+                for (var i = 0; i < h; i++)
+                {
+                    lastResult = detector.AggregateForProposal(
+                        new AlertMessage
+                        {
+                            EdgeSrc = nodes[(i % (nodes.Count - 2)) + 2].Endpoint,
+                            EdgeDst = subject1,
+                            EdgeStatus = EdgeStatus.Up,
+                            RingNumber = { i }
+                        });
+                }
+
+                // subject1 should be proposed (subject2 with L-1 reports doesn't block)
+                return lastResult.Count == 1 && lastResult[0].Equals(subject1);
+            });
+    }
+
+    /// <summary>
+    /// Property: Proposal count increments correctly.
+    /// </summary>
+    [Fact]
+    public void MultiNodeCutDetector_ProposalCount_Increments()
+    {
+        Gen.Select(GenK.Where(k => k >= 4), GenUniqueNodes(10, 20))
+            .Sample((k, nodes) =>
+            {
+                var h = k - 1;
+                var l = 1;
+                var builder = new MembershipViewBuilder(k);
+                foreach (var (endpoint, nodeId) in nodes)
+                {
+                    builder.RingAdd(endpoint, nodeId);
+                }
+                var view = builder.Build();
+
+                var detector = new MultiNodeCutDetector(h, l, view);
+
+                // Generate proposals for 3 different subjects
+                var expectedProposals = 0;
+                for (var s = 0; s < 3; s++)
+                {
+                    var subject = nodes[s].Endpoint;
+                    for (var i = 0; i < h; i++)
+                    {
+                        var result = detector.AggregateForProposal(
+                            new AlertMessage
+                            {
+                                EdgeSrc = nodes[(i % (nodes.Count - 3)) + 3].Endpoint,
+                                EdgeDst = subject,
+                                EdgeStatus = EdgeStatus.Up,
+                                RingNumber = { i }
+                            });
+                        if (result.Count > 0)
+                            expectedProposals++;
+                    }
+                }
+
+                return detector.GetNumProposals() == expectedProposals;
+            });
+    }
+
     #endregion
 
     #region Rank Properties (using protobuf Rank)

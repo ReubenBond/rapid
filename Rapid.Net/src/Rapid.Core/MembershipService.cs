@@ -507,17 +507,35 @@ internal sealed partial class MembershipService : IMembershipServiceHandler, IAs
             // Use SortedSet for deduplication and consistent ordering across all nodes.
             // This ensures all nodes propose the same set in the same order.
             var proposals = new SortedSet<Endpoint>(EndpointComparer.Instance);
-            foreach (var msg in messageBatch.Messages)
+            
+            // Process alerts by ring number to enable proper batching.
+            // This ensures multiple nodes can accumulate in the preProposal set
+            // before any of them reaches the H threshold, allowing them to be
+            // batched into a single view change proposal.
+            //
+            // Without this interleaving, if a single observer sends alerts for
+            // multiple nodes with all ring numbers, each node would go from
+            // 0 -> L -> H reports atomically, triggering individual proposals.
+            var maxRingNumber = _membershipView.RingCount;
+            for (var ringNumber = 0; ringNumber < maxRingNumber; ringNumber++)
             {
-                LogProcessingAlert(new LoggableEndpoint(msg.EdgeSrc), new LoggableEndpoint(msg.EdgeDst), msg.EdgeStatus);
-                // For valid UP alerts, extract the joiner details (UUID and metadata) which is going to be needed
-                // when the node is added to the rings
-                var extractedMessage = ExtractJoinerUuidAndMetadata(msg);
-                var cutProposals = _cutDetection.AggregateForProposal(extractedMessage);
-                LogCutDetectionProposals(cutProposals.Count);
-                foreach (var proposal in cutProposals)
+                foreach (var msg in messageBatch.Messages)
                 {
-                    proposals.Add(proposal);
+                    if (!msg.RingNumber.Contains(ringNumber))
+                    {
+                        continue;
+                    }
+                    
+                    LogProcessingAlert(new LoggableEndpoint(msg.EdgeSrc), new LoggableEndpoint(msg.EdgeDst), msg.EdgeStatus);
+                    // For valid UP alerts, extract the joiner details (UUID and metadata) which is going to be needed
+                    // when the node is added to the rings
+                    var extractedMessage = ExtractJoinerUuidAndMetadata(msg);
+                    var cutProposals = _cutDetection.AggregateForProposalSingleRing(extractedMessage, ringNumber);
+                    LogCutDetectionProposals(cutProposals.Count);
+                    foreach (var proposal in cutProposals)
+                    {
+                        proposals.Add(proposal);
+                    }
                 }
             }
 

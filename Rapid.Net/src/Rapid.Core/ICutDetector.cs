@@ -25,6 +25,20 @@ internal interface ICutDetector
     /// <param name="msg">An AlertMessage to apply against the detector</param>
     /// <returns>A list of endpoints about which a view change has been recorded. Empty list if there is no proposal.</returns>
     List<Endpoint> AggregateForProposal(AlertMessage msg);
+    
+    /// <summary>
+    /// Apply a single ring's report from an AlertMessage against the cut detector.
+    /// This allows callers to control the order of ring processing across multiple
+    /// messages, enabling proper batching of view changes.
+    /// 
+    /// When processing a batch of alerts, callers should iterate by ring number
+    /// (outer loop) and then by message (inner loop) to allow multiple nodes to
+    /// accumulate reports together before any reaches the threshold.
+    /// </summary>
+    /// <param name="msg">An AlertMessage containing the edge information</param>
+    /// <param name="ringNumber">The specific ring number to process</param>
+    /// <returns>A list of endpoints about which a view change has been recorded. Empty list if there is no proposal.</returns>
+    List<Endpoint> AggregateForProposalSingleRing(AlertMessage msg, int ringNumber);
 
     /// <summary>
     /// Invalidates edges between nodes that are failing or have failed. This step may be skipped safely

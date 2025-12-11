@@ -367,8 +367,14 @@ internal sealed class SimulationHarness : IAsyncDisposable
     }
 
     /// <summary>
-    /// Creates a cluster of the specified size.
+    /// Creates a cluster of the specified size using sequential joins.
+    /// Each node joins and waits for consensus before the next node joins.
+    /// This results in O(N) consensus rounds but guarantees deterministic behavior.
     /// </summary>
+    /// <remarks>
+    /// For large clusters (50+ nodes), consider using <see cref="CreateClusterParallel"/>
+    /// which batches joins together for O(log N) consensus rounds.
+    /// </remarks>
     public IReadOnlyList<SimulationNode> CreateCluster(int size, RapidProtocolOptions? options = null)
     {
         if (size < 1)
@@ -387,6 +393,97 @@ internal sealed class SimulationHarness : IAsyncDisposable
         {
             var joiner = CreateJoinerNode(seedNode, i, options);
             result.Add(joiner);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Creates a cluster of the specified size using parallel joins.
+    /// Multiple nodes join concurrently, allowing the multi-node cut detection
+    /// to batch them into fewer consensus rounds (O(log N) instead of O(N)).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This matches the behavior described in the Rapid paper where 2000 nodes
+    /// were bootstrapped with only 8 configuration changes. The multi-node cut
+    /// detection aggregates pending JOIN alerts and proposes them together.
+    /// </para>
+    /// <para>
+    /// For small clusters or when deterministic single-node-at-a-time behavior
+    /// is needed, use <see cref="CreateCluster"/> instead.
+    /// </para>
+    /// </remarks>
+    /// <param name="size">The number of nodes in the cluster.</param>
+    /// <param name="options">Optional protocol options.</param>
+    /// <param name="batchSize">
+    /// Number of nodes to initiate joining simultaneously. Default is 0 which means all nodes.
+    /// Smaller batch sizes provide more control over join ordering while still enabling batching.
+    /// </param>
+    /// <returns>List of all nodes in the cluster.</returns>
+    public IReadOnlyList<SimulationNode> CreateClusterParallel(
+        int size,
+        RapidProtocolOptions? options = null,
+        int batchSize = 0)
+    {
+        if (size < 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(size), "Cluster size must be at least 1");
+        }
+
+        var result = new List<SimulationNode>(size);
+
+        // Create seed node first
+        var seedNode = CreateSeedNode(0, options);
+        result.Add(seedNode);
+
+        if (size == 1)
+        {
+            return result;
+        }
+
+        // Use all remaining nodes as batch size if not specified or invalid
+        var effectiveBatchSize = batchSize <= 0 ? size - 1 : batchSize;
+
+        // Process nodes in batches
+        var remainingNodes = size - 1;
+        var nodeId = 1;
+
+        while (remainingNodes > 0)
+        {
+            var currentBatchSize = Math.Min(effectiveBatchSize, remainingNodes);
+            var batchNodes = new List<SimulationNode>(currentBatchSize);
+            var joinTasks = new List<Task>(currentBatchSize);
+
+            // Create all nodes in this batch and initiate their joins
+            for (var i = 0; i < currentBatchSize; i++)
+            {
+                var opts = ConfigureOptions(options);
+                var context = CreateNodeContext();
+                var node = SimulationNode.Create(this, context, nodeId++, opts, LoggerFactory);
+                RegisterNodeContext(node, context);
+
+                LogEvent(SimulationEventType.NodeJoining, $"Node {node.Address} joining via seed (parallel batch)");
+
+                // Start the join but don't wait - this allows batching
+                var joinTask = node.JoinClusterAsync(seedNode);
+                
+                batchNodes.Add(node);
+                joinTasks.Add(joinTask);
+                _nodes.Add(node);
+            }
+
+            // Drive the simulation until all joins in this batch complete
+            DriveToCompletion(() => Task.WhenAll(joinTasks));
+
+            // Log completion
+            foreach (var node in batchNodes)
+            {
+                LogEvent(SimulationEventType.NodeJoined, $"Node {node.Address} joined cluster (parallel batch)");
+            }
+
+            result.AddRange(batchNodes);
+            remainingNodes -= currentBatchSize;
         }
 
         return result;
@@ -445,10 +542,78 @@ internal sealed class SimulationHarness : IAsyncDisposable
         LogEvent(SimulationEventType.NodeLeft, $"Node left gracefully");
     }
 
+    /// <summary>
+    /// Gracefully removes multiple nodes from the cluster in parallel.
+    /// This allows the multi-node cut detection to batch multiple leaves into
+    /// fewer consensus rounds, similar to how parallel joins work.
+    /// 
+    /// All leaving nodes initiate their leave concurrently, enabling the
+    /// batching mechanism to combine their alerts into single view changes.
+    /// </summary>
+    /// <param name="nodesToRemove">The nodes to remove from the cluster.</param>
+    /// <returns>The number of configuration changes that occurred during the parallel leave.</returns>
+    public int RemoveNodesGracefullyParallel(IReadOnlyList<SimulationNode> nodesToRemove)
+    {
+        ArgumentNullException.ThrowIfNull(nodesToRemove);
+        if (nodesToRemove.Count == 0)
+        {
+            return 0;
+        }
+
+        // Get the starting configuration version to measure changes
+        var remainingNodes = _nodes.Where(n => !nodesToRemove.Contains(n)).ToList();
+        var startingConfigVersion = remainingNodes[0].CurrentView.ConfigurationId.Version;
+        var targetSize = remainingNodes.Count;
+
+        LogEvent(SimulationEventType.NodeLeaving, $"{nodesToRemove.Count} nodes beginning parallel graceful leave");
+
+        // Initiate all leaves concurrently
+        var leaveTasks = new List<Task>(nodesToRemove.Count);
+        foreach (var node in nodesToRemove)
+        {
+            LogEvent(SimulationEventType.NodeLeaving, $"Node {node.Address} initiating leave (parallel batch)");
+            leaveTasks.Add(node.LeaveAsync());
+        }
+
+        // Drive the simulation until all leave operations complete
+        DriveToCompletion(() => Task.WhenAll(leaveTasks));
+
+        // Wait for remaining nodes to converge to the new size
+        var converged = RunUntil(
+            () => remainingNodes.All(n => n.MembershipSize == targetSize),
+            maxIterations: 500000);
+
+        if (!converged)
+        {
+            var sizes = string.Join(", ", remainingNodes.Select(n => n.MembershipSize));
+            _logger?.LogWarning(
+                "RemoveNodesGracefullyParallel: remaining nodes did not converge to size {TargetSize}. Current sizes: [{Sizes}]",
+                targetSize, sizes);
+        }
+
+        // Clean up leaving nodes
+        foreach (var node in nodesToRemove)
+        {
+            UnregisterNodeContext(node);
+            node.Shutdown();
+            node.Dispose();
+            _nodes.Remove(node);
+            LogEvent(SimulationEventType.NodeLeft, $"Node {node.Address} left gracefully (parallel batch)");
+        }
+
+        // Calculate configuration changes
+        var endingConfigVersion = remainingNodes[0].CurrentView.ConfigurationId.Version;
+        var configChanges = (int)(endingConfigVersion - startingConfigVersion);
+
+        LogEvent(SimulationEventType.NodeLeft, 
+            $"Parallel leave completed: {nodesToRemove.Count} nodes removed in {configChanges} configuration changes");
+
+        return configChanges;
+    }
+
     private static RapidProtocolOptions ConfigureOptions(RapidProtocolOptions? options)
     {
         var opts = options ?? new RapidProtocolOptions();
-        opts.BatchingWindow = TimeSpan.Zero; // Immediate processing
         opts.FailureDetectorInterval = TimeSpan.FromSeconds(1);
         return opts;
     }

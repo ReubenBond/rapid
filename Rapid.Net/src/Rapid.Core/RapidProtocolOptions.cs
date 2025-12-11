@@ -69,6 +69,25 @@ public sealed class RapidProtocolOptions
     /// <summary>
     /// Window for batching alert messages before broadcasting. Default: 100 milliseconds
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A longer batching window allows more JOIN/REMOVE alerts to accumulate before
+    /// triggering consensus, resulting in fewer configuration changes. This is especially
+    /// beneficial for large cluster bootstrapping.
+    /// </para>
+    /// <para>
+    /// The Rapid paper achieved 2000-node bootstrap with only 8 configuration changes
+    /// by batching multiple joins into single view changes.
+    /// </para>
+    /// <para>
+    /// Recommended values:
+    /// <list type="bullet">
+    ///   <item><description>Small clusters (&lt;50 nodes): 100ms (default)</description></item>
+    ///   <item><description>Medium clusters (50-200 nodes): 200-300ms</description></item>
+    ///   <item><description>Large clusters (200+ nodes): 300-500ms</description></item>
+    /// </list>
+    /// </para>
+    /// </remarks>
     public TimeSpan BatchingWindow { get; set; } = TimeSpan.FromMilliseconds(100);
 
     /// <summary>

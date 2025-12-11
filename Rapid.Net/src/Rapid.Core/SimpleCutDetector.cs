@@ -113,13 +113,22 @@ internal sealed partial class SimpleCutDetector : ICutDetector
         var proposals = new List<Endpoint>();
         foreach (var ringNumber in msg.RingNumber)
         {
-            proposals.AddRange(AggregateForProposal(msg.EdgeSrc, msg.EdgeDst, msg.EdgeStatus, ringNumber));
+            proposals.AddRange(AggregateForProposalSingleRing(msg, ringNumber));
         }
         return proposals;
     }
 
-    private List<Endpoint> AggregateForProposal(Endpoint linkSrc, Endpoint linkDst,
-                                                EdgeStatus edgeStatus, int ringNumber)
+    /// <summary>
+    /// Apply a single ring's report from an AlertMessage against the cut detector.
+    /// </summary>
+    public List<Endpoint> AggregateForProposalSingleRing(AlertMessage msg, int ringNumber)
+    {
+        ArgumentNullException.ThrowIfNull(msg);
+        return AggregateForProposalCore(msg.EdgeSrc, msg.EdgeDst, msg.EdgeStatus, ringNumber);
+    }
+
+    private List<Endpoint> AggregateForProposalCore(Endpoint linkSrc, Endpoint linkDst,
+                                                    EdgeStatus edgeStatus, int ringNumber)
     {
         if (ringNumber < 0 || ringNumber >= ObserversPerSubject)
         {
@@ -210,7 +219,7 @@ internal sealed partial class SimpleCutDetector : ICutDetector
                         LogImplicitEdge(new LoggableEndpoint(observer), new LoggableEndpoint(nodeInFlux));
                         // Implicit detection of edges between observer and nodeInFlux
                         var edgeStatus = _membershipView.IsHostPresent(nodeInFlux) ? EdgeStatus.Down : EdgeStatus.Up;
-                        proposalsToReturn.AddRange(AggregateForProposal(observer, nodeInFlux, edgeStatus, ringNumber));
+                        proposalsToReturn.AddRange(AggregateForProposalCore(observer, nodeInFlux, edgeStatus, ringNumber));
                     }
                     ringNumber++;
                 }
