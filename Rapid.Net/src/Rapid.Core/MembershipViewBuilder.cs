@@ -367,27 +367,4 @@ internal sealed class MembershipViewBuilder
         }
     }
 
-    private sealed class NodeIdComparer : IComparer<NodeId>
-    {
-        public static readonly NodeIdComparer Instance = new();
-
-        private NodeIdComparer() { }
-
-        public int Compare(NodeId? x, NodeId? y)
-        {
-            if (x == null && y == null) return 0;
-            if (x == null) return -1;
-            if (y == null) return 1;
-
-            // First, compare high bits
-            if (x.High < y.High) return -1;
-            if (x.High > y.High) return 1;
-
-            // High bits are equal, so compare low bits
-            if (x.Low < y.Low) return -1;
-            if (x.Low > y.Low) return 1;
-
-            return 0;
-        }
-    }
 }

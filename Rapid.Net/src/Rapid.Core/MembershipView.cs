@@ -19,8 +19,8 @@ public sealed class MembershipView
     public static MembershipView Empty { get; } = CreateEmpty(ringCount: 0);
 
     private readonly ImmutableArray<ImmutableArray<Endpoint>> _rings;
-    private readonly ImmutableHashSet<Endpoint> _allNodes;
-    private readonly ImmutableHashSet<NodeId> _identifiersSeen;
+    private readonly ImmutableSortedSet<Endpoint> _allNodes;
+    private readonly ImmutableSortedSet<NodeId> _identifiersSeen;
 
     /// <summary>
     /// Initializes a new immutable MembershipView instance.
@@ -53,9 +53,9 @@ public sealed class MembershipView
     public ConfigurationId ConfigurationId { get; }
 
     /// <summary>
-    /// Gets the list of member endpoints in the cluster (from ring 0).
+    /// Gets the list of member endpoints in the cluster.
     /// </summary>
-    public ImmutableArray<Endpoint> Members => _rings[0];
+    public ImmutableArray<Endpoint> Members => _rings.Length > 0 ? _rings[0] : [];
 
     /// <summary>
     /// Gets the number of members in the cluster.
