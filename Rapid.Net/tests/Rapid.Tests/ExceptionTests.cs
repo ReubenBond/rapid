@@ -8,7 +8,6 @@ namespace Rapid.Tests;
 /// </summary>
 public class ExceptionTests
 {
-    #region JoinException Tests
 
     [Fact]
     public void JoinExceptionDefaultConstructorWorks()
@@ -35,9 +34,7 @@ public class ExceptionTests
         Assert.Same(inner, ex.InnerException);
     }
 
-    #endregion
 
-    #region NodeAlreadyInRingException Tests
 
     [Fact]
     public void NodeAlreadyInRingExceptionDefaultConstructorWorks()
@@ -76,9 +73,7 @@ public class ExceptionTests
     [Fact]
     public void NodeAlreadyInRingExceptionNullEndpointThrowsArgumentNull() => Assert.Throws<ArgumentNullException>(() => new NodeAlreadyInRingException((Endpoint)null!));
 
-    #endregion
 
-    #region NodeNotInRingException Tests
 
     [Fact]
     public void NodeNotInRingExceptionDefaultConstructorWorks()
@@ -117,9 +112,7 @@ public class ExceptionTests
     [Fact]
     public void NodeNotInRingExceptionNullEndpointThrowsArgumentNull() => Assert.Throws<ArgumentNullException>(() => new NodeNotInRingException((Endpoint)null!));
 
-    #endregion
 
-    #region UuidAlreadySeenException Tests
 
     [Fact]
     public void UuidAlreadySeenExceptionDefaultConstructorWorks()
@@ -169,9 +162,7 @@ public class ExceptionTests
         Assert.Throws<ArgumentNullException>(() => new UuidAlreadySeenException(endpoint, null!));
     }
 
-    #endregion
 
-    #region Exception Inheritance Tests
 
     [Fact]
     public void JoinExceptionInheritsFromException()
@@ -201,9 +192,7 @@ public class ExceptionTests
         Assert.IsAssignableFrom<Exception>(ex);
     }
 
-    #endregion
 
-    #region Exception Throwing and Catching Tests
 
     [Fact]
     public void JoinExceptionCanBeThrownAndCaught()
@@ -265,5 +254,4 @@ public class ExceptionTests
         Assert.True(thrown);
     }
 
-    #endregion
 }

@@ -16,6 +16,10 @@ internal sealed class SimulationTaskScheduler(SimulationTaskQueue taskQueue) : T
     // All tasks go through the queue
     protected override bool TryExecuteTaskInline(Task task, bool taskWasPreviouslyQueued) => false;
 
+    public object UnderlyingScheduler => taskQueue;
+
+    public bool IsSameScheduler(SynchronizationContext syncCtx) => syncCtx is SimulationSynchronizationContext simSyncCtx && simSyncCtx.UnderlyingScheduler.Equals(UnderlyingScheduler);
+
     private sealed class ScheduledTaskItem(Task task, SimulationTaskScheduler scheduler) : ScheduledItem
     {
         public Task Task => task;

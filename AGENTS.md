@@ -18,6 +18,7 @@ dotnet test Rapid.Net/Rapid.slnx --filter "FullyQualifiedName!~Integration"    #
 - **Imports**: Sort System directives first, remove unused usings
 - **Async**: Forward CancellationToken, avoid ConfigureAwait
 - **Error handling**: Use throw helpers (ArgumentNullException.ThrowIfNull), rethrow to preserve stack
+- **Regions**: Do not use `#region`/`#endregion` directives
 
 ## Project Structure
 - `Rapid.Net/src/Rapid.Core/` - Main library

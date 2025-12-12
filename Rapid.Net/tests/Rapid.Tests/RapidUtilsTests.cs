@@ -7,7 +7,6 @@ namespace Rapid.Tests;
 /// </summary>
 public class RapidUtilsTests
 {
-    #region NodeIdFromUuid Tests
 
     [Fact]
     public void NodeIdFromUuidConvertsGuidCorrectly()
@@ -51,9 +50,7 @@ public class RapidUtilsTests
         Assert.Equal(0, nodeId.Low);
     }
 
-    #endregion
 
-    #region HostFromString Tests
 
     [Fact]
     public void HostFromStringValidInputParsesCorrectly()
@@ -97,9 +94,7 @@ public class RapidUtilsTests
     [Fact]
     public void HostFromStringInvalidFormatMultipleColonsThrows() => Assert.Throws<ArgumentException>(() => RapidUtils.HostFromString("127.0.0.1:8080:extra"));
 
-    #endregion
 
-    #region HostFromParts Tests
 
     [Fact]
     public void HostFromPartsValidInputCreatesEndpoint()
@@ -128,9 +123,7 @@ public class RapidUtilsTests
         Assert.Equal(-1, endpoint.Port);
     }
 
-    #endregion
 
-    #region Loggable Tests
 
     [Fact]
     public void LoggableSingleEndpointFormatsCorrectly()
@@ -183,9 +176,7 @@ public class RapidUtilsTests
         Assert.Equal("[127.0.0.1:1234]", result);
     }
 
-    #endregion
 
-    #region ToRapidRequest Tests
 
     [Fact]
     public void ToRapidRequestPreJoinMessageWrapsCorrectly()
@@ -348,9 +339,7 @@ public class RapidUtilsTests
         Assert.Equal(msg.Sender, request.LeaveMessage.Sender);
     }
 
-    #endregion
 
-    #region ToRapidResponse Tests
 
     [Fact]
     public void ToRapidResponseJoinResponseWrapsCorrectly()
@@ -389,5 +378,4 @@ public class RapidUtilsTests
         Assert.Equal(NodeStatus.Ok, response.ProbeResponse.Status);
     }
 
-    #endregion
 }

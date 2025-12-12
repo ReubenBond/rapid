@@ -25,7 +25,6 @@ public sealed class NodeRejoinTests : IAsyncLifetime
         await _harness.DisposeAsync();
     }
 
-    #region Single Node Rejoin (REJOIN-001 to REJOIN-005)
 
     /// <summary>
     /// Tests that a node can rejoin the cluster after graceful leave.
@@ -173,9 +172,7 @@ public sealed class NodeRejoinTests : IAsyncLifetime
         Assert.Equal(4, seedNode.MembershipSize);
     }
 
-    #endregion
 
-    #region Rejoin Timing Edge Cases (REJOIN-010 to REJOIN-014)
 
     /// <summary>
     /// Tests that a new node with a different ID can join while the cluster is
@@ -267,9 +264,7 @@ public sealed class NodeRejoinTests : IAsyncLifetime
         Assert.Equal(3, joiner4.MembershipSize);
     }
 
-    #endregion
 
-    #region Rejoin After Network Partition (REJOIN-020 to REJOIN-023)
 
     /// <summary>
     /// Tests that an isolated node can rejoin after the partition heals.
@@ -331,9 +326,7 @@ public sealed class NodeRejoinTests : IAsyncLifetime
         Assert.Equal(4, joiner1.MembershipSize);
     }
 
-    #endregion
 
-    #region Cluster Recovery Scenarios (REJOIN-030 to REJOIN-033)
 
     /// <summary>
     /// Tests that a cluster can recover from losing half its nodes (but maintaining quorum).
@@ -399,5 +392,4 @@ public sealed class NodeRejoinTests : IAsyncLifetime
         Assert.All(_harness.Nodes, n => Assert.Equal(4, n.MembershipSize));
     }
 
-    #endregion
 }

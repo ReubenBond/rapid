@@ -9,7 +9,6 @@ public class ListEndpointComparerTests
 {
     private static readonly ListEndpointComparer Comparer = ListEndpointComparer.Instance;
 
-    #region Equals Tests
 
     [Fact]
     public void EqualsBothNullReturnsTrue() => Assert.True(Comparer.Equals(null, null));
@@ -118,9 +117,7 @@ public class ListEndpointComparerTests
         Assert.True(Comparer.Equals(list1, list2));
     }
 
-    #endregion
 
-    #region GetHashCode Tests
 
     [Fact]
     public void GetHashCodeEqualListsReturnsSameHashCode()
@@ -169,9 +166,7 @@ public class ListEndpointComparerTests
         Assert.False(Comparer.Equals(list1, list2));
     }
 
-    #endregion
 
-    #region Dictionary Usage Tests
 
     [Fact]
     public void DictionaryCanUseListAsKey()
@@ -217,9 +212,7 @@ public class ListEndpointComparerTests
         Assert.Equal(200, dict[key1]);
     }
 
-    #endregion
 
-    #region Singleton Instance Tests
 
     [Fact]
     public void InstanceReturnsSameInstance()
@@ -230,5 +223,4 @@ public class ListEndpointComparerTests
         Assert.Same(instance1, instance2);
     }
 
-    #endregion
 }

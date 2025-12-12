@@ -28,17 +28,6 @@ public sealed class SimulationHarnessTests : IAsyncLifetime
     }
 
     [Fact]
-    public void EventLogRecordsEvents()
-    {
-        _harness.CreateSeedNode();
-
-        var events = _harness.EventLog;
-
-        Assert.Contains(events, e => e.Type == SimulationEventType.HarnessCreated);
-        Assert.Contains(events, e => e.Type == SimulationEventType.NodeCreated);
-    }
-
-    [Fact]
     public void TimeProviderIsAvailable() => Assert.NotNull(_harness.TimeProvider);
 
     [Fact]
@@ -87,40 +76,43 @@ public sealed class SimulationHarnessTests : IAsyncLifetime
     public void NetworkIsAvailable() => Assert.NotNull(_harness.Network);
 
     [Fact]
-    public void PartitionNodesRecordsEvent()
+    public void IsolateNodeDoesNotThrow()
     {
         var seed = _harness.CreateSeedNode(0);
+        var joiner = _harness.CreateJoinerNode(seed, nodeId: 1);
+        _harness.WaitForConvergence(2);
 
-        // Create a second harness to get a second node since we can't await in the test
         // Just test that the method doesn't throw
-        _harness.IsolateNode(seed);
+        _harness.IsolateNode(joiner);
 
-        var events = _harness.EventLog;
-        Assert.Contains(events, e => e.Type == SimulationEventType.NodeIsolated);
+        // Verify isolation was recorded in network
+        Assert.True(_harness.Network.IsNodeIsolated(RapidUtils.Loggable(joiner.Address)));
     }
 
     [Fact]
-    public void ReconnectNodeRecordsEvent()
+    public void ReconnectNodeDoesNotThrow()
     {
         var seed = _harness.CreateSeedNode(0);
-        _harness.IsolateNode(seed);
-        _harness.ReconnectNode(seed);
+        var joiner = _harness.CreateJoinerNode(seed, nodeId: 1);
+        _harness.WaitForConvergence(2);
 
-        var events = _harness.EventLog;
-        Assert.Contains(events, e => e.Type == SimulationEventType.NodeReconnected);
+        _harness.IsolateNode(joiner);
+        _harness.ReconnectNode(joiner);
+
+        // Verify node is no longer isolated
+        Assert.False(_harness.Network.IsNodeIsolated(RapidUtils.Loggable(joiner.Address)));
     }
 
     [Fact]
-    public void CrashNodeRecordsEvent()
+    public void CrashNodeRemovesNodeFromHarness()
     {
         var seed = _harness.CreateSeedNode(0);
         _harness.CrashNode(seed);
 
-        var events = _harness.EventLog;
-        Assert.Contains(events, e => e.Type == SimulationEventType.NodeCrashed);
+        // Verify node is removed from harness
+        Assert.Empty(_harness.Nodes);
     }
 
-    #region RunUntilIdle Tests
 
     [Fact]
     public void RunUntilIdleReturnsZeroWhenNoTasks()
@@ -197,9 +189,7 @@ public sealed class SimulationHarnessTests : IAsyncLifetime
         Assert.False(_harness.TaskQueue.HasItems);
     }
 
-    #endregion
 
-    #region Per-Node Simulation Control Tests
 
     [Fact]
     public void SuspendNodePreventsTaskExecution()
@@ -406,28 +396,4 @@ public sealed class SimulationHarnessTests : IAsyncLifetime
         Assert.False(joiner2.IsSuspended);
     }
 
-    [Fact]
-    public void SuspendNodeRecordsEvent()
-    {
-        var seedNode = _harness.CreateSeedNode();
-
-        seedNode.Suspend();
-
-        var events = _harness.EventLog;
-        Assert.Contains(events, e => e.Type == SimulationEventType.NodeSuspended);
-    }
-
-    [Fact]
-    public void ResumeNodeRecordsEvent()
-    {
-        var seedNode = _harness.CreateSeedNode();
-
-        seedNode.Suspend();
-        seedNode.Resume();
-
-        var events = _harness.EventLog;
-        Assert.Contains(events, e => e.Type == SimulationEventType.NodeResumed);
-    }
-
-    #endregion
 }

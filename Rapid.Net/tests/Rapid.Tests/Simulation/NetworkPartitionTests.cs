@@ -24,7 +24,6 @@ public sealed class NetworkPartitionTests : IAsyncLifetime
         await _harness.DisposeAsync();
     }
 
-    #region Simple Partitions (PART-001 to PART-004)
 
     [Fact]
     public void BidirectionalPartitionBlocksMessages()
@@ -103,9 +102,7 @@ public sealed class NetworkPartitionTests : IAsyncLifetime
         Assert.True(_harness.Network.CanDeliver(joinerAddr, seedAddr));
     }
 
-    #endregion
 
-    #region Isolation Scenarios (PART-010 to PART-013)
 
     [Fact]
     public void IsolatedNodeCannotCommunicate()
@@ -178,9 +175,7 @@ public sealed class NetworkPartitionTests : IAsyncLifetime
         Assert.False(_harness.Network.CanDeliver(joiner3Addr, seedAddr));
     }
 
-    #endregion
 
-    #region Split-Brain Prevention (PART-020 to PART-023)
 
     [Fact]
     public async Task InvariantCheckerDetectsSplitBrainAttempt()
@@ -196,9 +191,7 @@ public sealed class NetworkPartitionTests : IAsyncLifetime
         Assert.False(checker.HasViolations);
     }
 
-    #endregion
 
-    #region Partition and Heal Sequences (PART-030 to PART-033)
 
     [Fact]
     public void PartitionThenHealBeforeDetection()
@@ -261,5 +254,4 @@ public sealed class NetworkPartitionTests : IAsyncLifetime
         Assert.True(_harness.Network.CanDeliver(seedAddr, "fake:3"));
     }
 
-    #endregion
 }

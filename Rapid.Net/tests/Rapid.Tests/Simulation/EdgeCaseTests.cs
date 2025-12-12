@@ -23,7 +23,6 @@ public sealed class EdgeCaseTests : IAsyncLifetime
         await _harness.DisposeAsync();
     }
 
-    #region Boundary Conditions (EDGE-001 to EDGE-004)
 
     [Fact]
     public void ZeroBatchingWindowWorks()
@@ -76,9 +75,7 @@ public sealed class EdgeCaseTests : IAsyncLifetime
         Assert.True(seedNode.IsInitialized);
     }
 
-    #endregion
 
-    #region Timing Edge Cases (EDGE-010 to EDGE-013)
 
     [Fact]
     public void BackToBackJoinsSucceed()
@@ -115,9 +112,7 @@ public sealed class EdgeCaseTests : IAsyncLifetime
         Assert.DoesNotContain(joiner, _harness.Nodes);
     }
 
-    #endregion
 
-    #region Resource Edge Cases (EDGE-020 to EDGE-023)
 
     [Fact]
     public void DoubleShutdownIsSafe()
@@ -155,9 +150,7 @@ public sealed class EdgeCaseTests : IAsyncLifetime
         });
     }
 
-    #endregion
 
-    #region Protocol Edge Cases (EDGE-030 to EDGE-033)
 
     [Fact]
     public void UninitializedNodeThrowsOnHandleRequest()
@@ -203,9 +196,7 @@ public sealed class EdgeCaseTests : IAsyncLifetime
         Assert.True(joiner.IsInitialized);
     }
 
-    #endregion
 
-    #region Maximum Cluster Size Tests (EDGE-002)
 
     /// <summary>
     /// Tests that the cluster can scale to a large size (20 nodes) and maintain
@@ -239,9 +230,7 @@ public sealed class EdgeCaseTests : IAsyncLifetime
         Assert.All(nodes, n => Assert.True(n.IsInitialized));
     }
 
-    #endregion
 
-    #region Random and Determinism Edge Cases
 
     [Fact]
     public void SimulationRandomForkProducesDifferentSequences()
@@ -317,7 +306,6 @@ public sealed class EdgeCaseTests : IAsyncLifetime
         Assert.True(duration < maxDuration);
     }
 
-    #endregion
 }
 
 

@@ -8,7 +8,6 @@ namespace Rapid.Tests;
 /// </summary>
 public class MetadataManagerTests
 {
-    #region Add Tests
 
     [Fact]
     public void AddSingleEndpointStoresMetadata()
@@ -85,9 +84,7 @@ public class MetadataManagerTests
         Assert.Equal("us-west", result.Metadata_["datacenter"].ToStringUtf8());
     }
 
-    #endregion
 
-    #region AddMetadata Tests
 
     [Fact]
     public void AddMetadataBulkAddStoresAll()
@@ -137,9 +134,7 @@ public class MetadataManagerTests
         Assert.Equal("follower", manager.Get(endpoint)!.Metadata_["role"].ToStringUtf8());
     }
 
-    #endregion
 
-    #region Get Tests
 
     [Fact]
     public void GetExistingEndpointReturnsMetadata()
@@ -178,9 +173,7 @@ public class MetadataManagerTests
         Assert.Null(result);
     }
 
-    #endregion
 
-    #region RemoveNode Tests
 
     [Fact]
     public void RemoveNodeExistingEndpointRemoves()
@@ -234,9 +227,7 @@ public class MetadataManagerTests
         Assert.Null(manager.Get(endpoint));
     }
 
-    #endregion
 
-    #region GetAllMetadata Tests
 
     [Fact]
     public void GetAllMetadataEmptyReturnsEmptyDictionary()
@@ -297,7 +288,6 @@ public class MetadataManagerTests
         Assert.True(result.ContainsKey(endpoint2));
     }
 
-    #endregion
 
     private static Metadata CreateMetadata(string key, string value)
     {

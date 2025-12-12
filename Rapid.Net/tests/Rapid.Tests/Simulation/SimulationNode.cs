@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using Rapid.Messaging;
 using Rapid.Monitoring;
 using Rapid.Pb;
+using Rapid.Tests.Simulation.Logging;
 
 namespace Rapid.Tests.Simulation;
 
@@ -21,7 +22,7 @@ internal sealed class SimulationNode
     private readonly SimulationNodeContext _context;
     private readonly RapidProtocolOptions _protocolOptions;
     private readonly ILoggerFactory _loggerFactory;
-    private readonly ILogger<SimulationNode> _logger;
+    private readonly SimulationNodeLogger _log;
     private readonly MembershipService _membershipService;
     private readonly SharedResources _sharedResources;
     private readonly PingPongFailureDetectorFactory _failureDetectorFactory;
@@ -71,7 +72,6 @@ internal sealed class SimulationNode
     /// </summary>
     internal InMemoryMessagingClient MessagingClient { get; }
 
-    #region Per-Node Execution Control
 
     /// <summary>
     /// Gets whether this node is currently suspended.
@@ -85,7 +85,7 @@ internal sealed class SimulationNode
     public void Suspend()
     {
         _context.Suspend();
-        _harness.LogNodeEvent(this, SimulationEventType.NodeSuspended, "Node suspended");
+        _log.NodeSuspended();
     }
 
     /// <summary>
@@ -94,7 +94,7 @@ internal sealed class SimulationNode
     public void Resume()
     {
         _context.Resume();
-        _harness.LogNodeEvent(this, SimulationEventType.NodeResumed, "Node resumed");
+        _log.NodeResumed();
     }
 
     /// <summary>
@@ -111,7 +111,7 @@ internal sealed class SimulationNode
         // Schedule auto-resume on the harness queue
         _harness.TaskQueue.EnqueueAfter(Resume, duration);
 
-        _harness.LogNodeEvent(this, SimulationEventType.NodeSuspended, $"Node suspended for {duration}");
+        _log.NodeSuspendedFor(duration);
     }
 
     /// <summary>
@@ -120,15 +120,9 @@ internal sealed class SimulationNode
     /// <returns>True if a task was executed; false if no tasks are ready or the node is suspended.</returns>
     public bool Step()
     {
-        if (_context.Step())
-        {
-            _harness.IncrementLogicalTime();
-            return true;
-        }
-        return false;
+        return _context.Step();
     }
 
-    #endregion
 
     internal SimulationNode(
         SimulationHarness harness,
@@ -148,7 +142,7 @@ internal sealed class SimulationNode
         _loggerFactory = baseLoggerFactory != null
             ? new NodePrefixedLoggerFactory(baseLoggerFactory, nodeName)
             : NullLoggerFactory.Instance;
-        _logger = _loggerFactory.CreateLogger<SimulationNode>();
+        _log = new SimulationNodeLogger(_loggerFactory.CreateLogger<SimulationNode>());
         _membershipServiceLogger = _loggerFactory.CreateLogger<MembershipService>();
 
         // Create protocol options
@@ -222,8 +216,7 @@ internal sealed class SimulationNode
         await _membershipService.InitializeAsync(cancellationToken).ConfigureAwait(true);
         IsInitialized = true;
 
-        _logger.LogInformation("Node {Address} initialized with {MembershipSize} members, ConfigId={ConfigId}",
-            RapidUtils.Loggable(Address), CurrentView.Size, CurrentView.ConfigurationId);
+        _log.NodeInitialized(RapidUtils.Loggable(Address), CurrentView.Size, CurrentView.ConfigurationId);
     }
 
     /// <summary>
@@ -231,8 +224,7 @@ internal sealed class SimulationNode
     /// </summary>
     internal async Task<RapidResponse> HandleRequestAsync(RapidRequest request, CancellationToken cancellationToken)
     {
-        _logger.LogTrace("Node {Address} handling request of type {RequestType}",
-            RapidUtils.Loggable(Address), request.ContentCase);
+        _log.HandlingRequest(RapidUtils.Loggable(Address), request.ContentCase);
 
         return await _membershipService.HandleMessageAsync(request, cancellationToken).ConfigureAwait(true);
     }
@@ -261,9 +253,9 @@ internal sealed class SimulationNode
             throw new InvalidOperationException("Membership service has not been initialized.");
         }
 
-        _logger.LogInformation("Node {Address} leaving cluster gracefully", RapidUtils.Loggable(Address));
+        _log.NodeLeaving(RapidUtils.Loggable(Address));
         await _membershipService.LeaveAsync().ConfigureAwait(true);
-        _logger.LogInformation("Node {Address} completed graceful leave", RapidUtils.Loggable(Address));
+        _log.NodeLeftGracefully(RapidUtils.Loggable(Address));
     }
 
     /// <summary>
@@ -276,12 +268,12 @@ internal sealed class SimulationNode
 
         if (_membershipService != null)
         {
-            _logger.LogInformation("Node {Address} shutting down", RapidUtils.Loggable(Address));
+            _log.NodeShuttingDown(RapidUtils.Loggable(Address));
             _membershipService.Shutdown();
         }
         else
         {
-            _logger.LogDebug("Node {Address} Shutdown called but node is not initialized", RapidUtils.Loggable(Address));
+            _log.ShutdownCalledNotInitialized(RapidUtils.Loggable(Address));
         }
     }
 
@@ -293,7 +285,7 @@ internal sealed class SimulationNode
         if (_disposed) return;
         _disposed = true;
 
-        _logger.LogDebug("Node {Address} destroying", RapidUtils.Loggable(Address));
+        _log.NodeDestroying(RapidUtils.Loggable(Address));
 
         // First shutdown shared resources to cancel the ShuttingDownToken
         // This will cause consensus instances to complete and prevent rejoins
@@ -304,7 +296,7 @@ internal sealed class SimulationNode
         _sharedResources.Dispose();
         MessagingClient.Dispose();
 
-        _logger.LogDebug("Node {Address} destroyed", RapidUtils.Loggable(Address));
+        _log.NodeDestroyed(RapidUtils.Loggable(Address));
     }
 
     /// <summary>

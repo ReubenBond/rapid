@@ -24,7 +24,6 @@ public sealed class MessageDeliveryTests : IAsyncLifetime
         await _harness.DisposeAsync();
     }
 
-    #region Message Delays (MSG-001 to MSG-004)
 
     [Fact]
     public void DelayConfigurationWorks()
@@ -79,9 +78,7 @@ public sealed class MessageDeliveryTests : IAsyncLifetime
         Assert.Equal(2, joiner.MembershipSize);
     }
 
-    #endregion
 
-    #region Message Loss (MSG-010 to MSG-014)
 
     [Fact]
     public void MessageDropRateConfiguration()
@@ -187,9 +184,7 @@ public sealed class MessageDeliveryTests : IAsyncLifetime
         Assert.All(_harness.Nodes, n => Assert.Equal(3, n.MembershipSize));
     }
 
-    #endregion
 
-    #region Message Ordering (MSG-020 to MSG-022)
 
     [Fact]
     public void SimulationMessageQueueOrdersByDeliveryTime()
@@ -263,5 +258,4 @@ public sealed class MessageDeliveryTests : IAsyncLifetime
         Assert.False(queue.HasPendingMessages);
     }
 
-    #endregion
 }

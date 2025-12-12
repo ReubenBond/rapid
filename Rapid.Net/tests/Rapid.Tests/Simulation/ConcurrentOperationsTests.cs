@@ -55,7 +55,6 @@ public sealed class ConcurrentOperationsTests : IAsyncLifetime
         await _harness.DisposeAsync();
     }
 
-    #region Concurrent Joins (CONC-001 to CONC-005)
 
     /// <summary>
     /// Tests that multiple nodes can join the cluster in rapid succession.
@@ -129,9 +128,7 @@ public sealed class ConcurrentOperationsTests : IAsyncLifetime
         Assert.All(_harness.Nodes, n => Assert.Equal(6, n.MembershipSize));
     }
 
-    #endregion
 
-    #region Concurrent Joins and Failures (CONC-010 to CONC-015)
 
     /// <summary>
     /// Tests that the cluster handles joins during node failures.
@@ -212,9 +209,7 @@ public sealed class ConcurrentOperationsTests : IAsyncLifetime
         Assert.All(_harness.Nodes, n => Assert.Equal(4, n.MembershipSize));
     }
 
-    #endregion
 
-    #region Concurrent Leaves and Joins (CONC-020 to CONC-025)
 
     /// <summary>
     /// Tests that leaves and joins happening close together are handled.
@@ -261,9 +256,7 @@ public sealed class ConcurrentOperationsTests : IAsyncLifetime
         Assert.All(_harness.Nodes, n => Assert.Equal(5, n.MembershipSize));
     }
 
-    #endregion
 
-    #region Suspension-Based Concurrency Tests (CONC-030 to CONC-035)
 
     /// <summary>
     /// Tests that a suspended node doesn't participate in consensus.
@@ -349,9 +342,7 @@ public sealed class ConcurrentOperationsTests : IAsyncLifetime
         Assert.All(_harness.Nodes, n => Assert.Equal(6, n.MembershipSize));
     }
 
-    #endregion
 
-    #region Node Stepping Tests (CONC-040 to CONC-045)
 
     /// <summary>
     /// Tests that Step executes exactly one task.
@@ -360,14 +351,12 @@ public sealed class ConcurrentOperationsTests : IAsyncLifetime
     public void StepNodeExecutesOneTask()
     {
         var seedNode = _harness.CreateSeedNode();
-        var initialLogicalTime = _harness.LogicalTime;
 
         // Step the node once
         var executed = seedNode.Step();
 
-        // A task should have been executed, and logical time should have increased by 1
+        // A task should have been executed
         Assert.True(executed);
-        Assert.Equal(initialLogicalTime + 1, _harness.LogicalTime);
     }
 
     /// <summary>
@@ -389,9 +378,7 @@ public sealed class ConcurrentOperationsTests : IAsyncLifetime
         seedNode.Resume();
     }
 
-    #endregion
 
-    #region Complex Concurrent Scenarios (CONC-050 to CONC-055)
 
     /// <summary>
     /// Tests a complex scenario with mixed concurrent operations.
@@ -496,5 +483,4 @@ public sealed class ConcurrentOperationsTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 6);
     }
 
-    #endregion
 }

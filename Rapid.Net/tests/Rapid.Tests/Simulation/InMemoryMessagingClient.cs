@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using Rapid.Messaging;
 using Rapid.Pb;
+using Rapid.Tests.Simulation.Logging;
 
 namespace Rapid.Tests.Simulation;
 
@@ -21,7 +22,7 @@ internal sealed class InMemoryMessagingClient : IMessagingClient
     private readonly SimulationNode _sourceNode;
     private readonly Endpoint _localEndpoint;
     private readonly TimeSpan _messageTimeout;
-    private readonly ILogger<InMemoryMessagingClient> _logger;
+    private readonly InMemoryMessagingClientLogger _log;
     private readonly ConcurrentDictionary<int, Task> _pendingTasks = new();
     private int _taskIdCounter;
     private bool _disposed;
@@ -39,8 +40,8 @@ internal sealed class InMemoryMessagingClient : IMessagingClient
         _sourceNode = sourceNode;
         _localEndpoint = localEndpoint;
         _messageTimeout = options.GrpcTimeout;
-        _logger = harness.LoggerFactory?.CreateLogger<InMemoryMessagingClient>()
-            ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<InMemoryMessagingClient>.Instance;
+        _log = new InMemoryMessagingClientLogger(harness.LoggerFactory?.CreateLogger<InMemoryMessagingClient>()
+            ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<InMemoryMessagingClient>.Instance);
     }
 
     public Task<RapidResponse> SendMessageAsync(Endpoint remote, RapidRequest request, CancellationToken cancellationToken)
@@ -50,22 +51,19 @@ internal sealed class InMemoryMessagingClient : IMessagingClient
         var localAddr = RapidUtils.Loggable(_localEndpoint);
         var remoteAddr = RapidUtils.Loggable(remote);
 
-        _logger.LogTrace("Attempting to send {MessageType} from {Local} to {Remote}",
-            request.ContentCase, localAddr, remoteAddr);
+        _log.AttemptingSend(request.ContentCase, localAddr, remoteAddr);
 
         // Check delivery status (partitions, random drops)
         var deliveryStatus = _harness.Network.CheckDelivery(localAddr, remoteAddr);
         switch (deliveryStatus)
         {
             case DeliveryStatus.Partitioned:
-                _logger.LogTrace("Message {MessageType} from {Local} to {Remote} blocked by network partition",
-                    request.ContentCase, localAddr, remoteAddr);
+                _log.MessageBlockedByPartition(request.ContentCase, localAddr, remoteAddr);
                 return Task.FromException<RapidResponse>(
                     new SimulatedNetworkException($"Network partition: {localAddr} cannot reach {remoteAddr}"));
 
             case DeliveryStatus.Dropped:
-                _logger.LogTrace("Message {MessageType} from {Local} to {Remote} dropped (simulated packet loss)",
-                    request.ContentCase, localAddr, remoteAddr);
+                _log.MessageDroppedPacketLoss(request.ContentCase, localAddr, remoteAddr);
                 return Task.FromException<RapidResponse>(
                     new SimulatedNetworkException($"Message from {localAddr} to {remoteAddr} was dropped (simulated packet loss)"));
 
@@ -78,8 +76,7 @@ internal sealed class InMemoryMessagingClient : IMessagingClient
         var targetNode = _harness.GetNode(remoteAddr);
         if (targetNode == null)
         {
-            _logger.LogError("Target node {Remote} not found when sending from {Local}",
-                remoteAddr, localAddr);
+            _log.TargetNodeNotFound(remoteAddr, localAddr);
             return Task.FromException<RapidResponse>(
                 new SimulatedNetworkException($"Target node not found: {remoteAddr}"));
         }
@@ -91,8 +88,7 @@ internal sealed class InMemoryMessagingClient : IMessagingClient
         // if the caller abandons the task or the simulation tears down.
         responseTcs.Task.Ignore();
 
-        _logger.LogTrace("Scheduling delivery of {MessageType} from {Local} to {Remote}",
-            request.ContentCase, localAddr, remoteAddr);
+        _log.SchedulingDelivery(request.ContentCase, localAddr, remoteAddr);
 
         // Schedule message delivery on the target node's task queue
         ScheduleMessageDelivery(targetNode, request, responseTcs, cancellationToken, localAddr, remoteAddr);
@@ -125,8 +121,7 @@ internal sealed class InMemoryMessagingClient : IMessagingClient
         catch (ArgumentException)
         {
             // Node was crashed/disposed between GetNode and GetNodeContext
-            _logger.LogDebug("Target node {Remote} was crashed before message delivery from {Local}",
-                remoteAddr, localAddr);
+            _log.TargetNodeCrashedBeforeDelivery(remoteAddr, localAddr);
             responseTcs.TrySetException(
                 new SimulatedNetworkException($"Target node {remoteAddr} is no longer available"));
             return;
@@ -153,8 +148,7 @@ internal sealed class InMemoryMessagingClient : IMessagingClient
 
             try
             {
-                _logger.LogTrace("Delivering {MessageType} from {Local} to {Remote}",
-                    request.ContentCase, localAddr, remoteAddr);
+                _log.DeliveringMessage(request.ContentCase, localAddr, remoteAddr);
 
                 // Handle the request synchronously within the simulation context
                 // The task returned by HandleRequestAsync will be driven by the simulation
@@ -177,8 +171,7 @@ internal sealed class InMemoryMessagingClient : IMessagingClient
             }
             catch (Exception ex)
             {
-                _logger.LogDebug("Message {MessageType} from {Local} to {Remote} failed: {Error}",
-                    request.ContentCase, localAddr, remoteAddr, ex.Message);
+                _log.MessageDeliveryFailed(request.ContentCase, localAddr, remoteAddr, ex.Message);
                 responseTcs.TrySetException(ex);
             }
         }
@@ -191,8 +184,7 @@ internal sealed class InMemoryMessagingClient : IMessagingClient
             {
                 if (!responseTcs.Task.IsCompleted)
                 {
-                    _logger.LogWarning("Message {MessageType} from {Local} to {Remote} timed out after {Timeout}",
-                        request.ContentCase, localAddr, remoteAddr, _messageTimeout);
+                    _log.MessageTimedOut(request.ContentCase, localAddr, remoteAddr, _messageTimeout);
                     responseTcs.TrySetException(new TimeoutException($"Message to {remoteAddr} timed out after {_messageTimeout}"));
                 }
             }),
@@ -209,8 +201,7 @@ internal sealed class InMemoryMessagingClient : IMessagingClient
         // Schedule the delivery (with optional delay)
         if (delay > TimeSpan.Zero)
         {
-            _logger.LogTrace("Simulating {Delay}ms delay for message from {Local} to {Remote}",
-                delay.TotalMilliseconds, localAddr, remoteAddr);
+            _log.SimulatingDelay(delay.TotalMilliseconds, localAddr, remoteAddr);
             targetQueue.EnqueueAfter(DeliverMessage, delay);
         }
         else
@@ -229,14 +220,12 @@ internal sealed class InMemoryMessagingClient : IMessagingClient
         }
         catch (TimeoutException ex)
         {
-            _logger.LogDebug("Best-effort message to {Remote} timed out: {Message}",
-                RapidUtils.Loggable(remote), ex.Message);
+            _log.BestEffortTimedOut(RapidUtils.Loggable(remote), ex.Message);
             return RapidResponse.Parser.ParseFrom([]);
         }
         catch (Exception ex)
         {
-            _logger.LogTrace("Best-effort message to {Remote} failed: {Message}",
-                RapidUtils.Loggable(remote), ex.Message);
+            _log.BestEffortFailed(RapidUtils.Loggable(remote), ex.Message);
             return RapidResponse.Parser.ParseFrom([]);
         }
 #pragma warning restore CA1031

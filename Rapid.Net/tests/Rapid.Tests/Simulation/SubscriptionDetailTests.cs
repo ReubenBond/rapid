@@ -67,7 +67,6 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
         }
     }
 
-    #region Callback Count Verification (SUB-001 to SUB-005)
 
     /// <summary>
     /// Verifies that the seed node receives view change callbacks for membership changes.
@@ -207,9 +206,7 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
             $"Joiner2 should receive at least 1 callback, got {joiner2CallbackLog.Count}");
     }
 
-    #endregion
 
-    #region Membership Log Verification (SUB-010 to SUB-015)
 
     /// <summary>
     /// Verifies that the membership list in callbacks grows as nodes join.
@@ -302,9 +299,7 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
         Assert.Contains(2, sizes);
     }
 
-    #endregion
 
-    #region Delta Log Verification (SUB-020 to SUB-025)
 
     /// <summary>
     /// Verifies that delta information contains endpoint data for joins with correct Up status.
@@ -413,9 +408,7 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
         Assert.Equal(EdgeStatus.Up, joiner2Delta.Status);
     }
 
-    #endregion
 
-    #region Metadata in Callbacks (SUB-030 to SUB-035)
 
     /// <summary>
     /// Verifies that metadata is propagated in join notifications.
@@ -447,9 +440,7 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
         Assert.NotEmpty(allDeltas);
     }
 
-    #endregion
 
-    #region Configuration ID Verification (SUB-040 to SUB-043)
 
     /// <summary>
     /// Verifies that configuration ID changes with each membership change.
@@ -523,9 +514,7 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
         Assert.Equal(seedConfigId, joiner1ConfigId);
     }
 
-    #endregion
 
-    #region Subscription Timing (SUB-050 to SUB-053)
 
     /// <summary>
     /// Verifies that subscriptions added after join still receive future events.
@@ -591,9 +580,7 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
         }
     }
 
-    #endregion
 
-    #region Edge Cases (SUB-060 to SUB-063)
 
     /// <summary>
     /// Verifies that callback exceptions don't crash the membership service.
@@ -656,5 +643,4 @@ public sealed class SubscriptionDetailTests : IAsyncLifetime
         }
     }
 
-    #endregion
 }

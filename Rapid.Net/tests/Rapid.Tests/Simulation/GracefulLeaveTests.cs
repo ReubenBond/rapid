@@ -97,7 +97,6 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
     private static List<int> CollectViewChangeMembershipSizes(ObservableCollector<ClusterEventNotification> collector)
         => [.. collector.Items.Where(n => n.Event == ClusterEvents.ViewChange).Select(n => n.Change.Membership.Count)];
 
-    #region Basic Graceful Leave (LEAVE-001 to LEAVE-005)
 
     [Fact]
     public void GracefulLeave_SingleNode_RemainingNodesConverge()
@@ -187,9 +186,7 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         Assert.All(remainingNodes, n => Assert.Equal(3, n.MembershipSize));
     }
 
-    #endregion
 
-    #region Sequential Graceful Leaves (LEAVE-010 to LEAVE-015)
 
     [Fact]
     public void GracefulLeave_TwoNodesSequentially()
@@ -296,9 +293,7 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         Assert.Contains(nodes[3], _harness.Nodes);
     }
 
-    #endregion
 
-    #region Graceful Leave with Subscriptions (LEAVE-020 to LEAVE-025)
 
     [Fact]
     public void GracefulLeave_TriggersSubscriptionCallback()
@@ -409,9 +404,7 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         }
     }
 
-    #endregion
 
-    #region Graceful Leave Under Network Conditions (LEAVE-030 to LEAVE-035)
 
     [Fact]
     public void GracefulLeave_WithMessageDrops()
@@ -507,9 +500,7 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         Assert.Equal(3, _harness.Nodes.Count);
     }
 
-    #endregion
 
-    #region Graceful Leave with Concurrent Operations (LEAVE-040 to LEAVE-045)
 
     [Fact]
     public void GracefulLeave_FollowedByJoin()
@@ -616,9 +607,7 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         Assert.Equal(3, _harness.Nodes.Count);
     }
 
-    #endregion
 
-    #region Edge Cases (LEAVE-050 to LEAVE-055)
 
     [Fact]
     public void GracefulLeave_MinimumClusterSize()
@@ -713,9 +702,7 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         Assert.Single(configIds);
     }
 
-    #endregion
 
-    #region Observer-Subject Relationship Tests (LEAVE-060 to LEAVE-065)
 
     [Fact]
     public void GracefulLeave_ObservedNodeLeaves_ObserverUpdated()
@@ -780,9 +767,7 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         Assert.All(_harness.Nodes, n => Assert.Equal(3, n.MembershipSize));
     }
 
-    #endregion
 
-    #region Graceful Leave with Suspended Nodes (LEAVE-070 to LEAVE-075)
 
     [Fact]
     public void GracefulLeave_WithSuspendedNode()
@@ -867,5 +852,4 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         Assert.Contains(suspendedNode, _harness.Nodes);
     }
 
-    #endregion
 }

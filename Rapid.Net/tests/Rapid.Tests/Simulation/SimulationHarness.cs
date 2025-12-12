@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using Rapid.Tests.Simulation.Logging;
 
 namespace Rapid.Tests.Simulation;
 
@@ -12,23 +13,17 @@ namespace Rapid.Tests.Simulation;
 /// - Simulated network with partition injection via <see cref="SimulationNetwork"/>
 /// - Node lifecycle management (create, join, crash, leave)
 /// - Per-node execution control (suspend, resume, step)
-/// - Event logging for debugging and verification
-/// - Simulation driving APIs (Step, RunUntil, DriveToCompletion)
+/// - Simulation driving APIs (Step, RunUntil, Run)
 /// </summary>
 internal sealed class SimulationHarness : IAsyncDisposable
 {
     private readonly SortedDictionary<string, SimulationNode> _nodes = new(StringComparer.Ordinal);
-    private readonly SingleThreadedGuard _lock = new();
-    private readonly List<SimulationEvent> _eventLog = [];
-    private readonly ILogger<SimulationHarness>? _logger;
-    private readonly InMemoryLoggerProvider _inMemoryLoggerProvider;
+    private readonly SimulationLogManager _logManager;
+    private readonly ILogger<SimulationHarness> _logger;
+    private readonly SimulationHarnessLogger _log;
+    private readonly SimulationTimeProvider _timeProvider;
+    private readonly CancellationTokenSource _teardownCts;
     private bool _disposed;
-
-    /// <summary>
-    /// Maximum size in bytes for full log attachment (1 MB).
-    /// If logs exceed this size, only Information level and above will be attached.
-    /// </summary>
-    private const long MaxFullLogSizeBytes = 100 * 1024 * 1024;
 
     /// <summary>
     /// Creates a new simulation harness with the specified seed.
@@ -38,7 +33,8 @@ internal sealed class SimulationHarness : IAsyncDisposable
     public SimulationHarness(int seed)
     {
         var context = TestContext.Current;
-        TeardownCancellationToken = context.CancellationToken;
+        _teardownCts = CancellationTokenSource.CreateLinkedTokenSource(context.CancellationToken);
+        TeardownCancellationToken = _teardownCts.Token;
         Seed = seed;
         StartDateTime = DateTimeOffset.UtcNow;
 
@@ -46,7 +42,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
 
         // Create shared clock and harness-level queue
         Clock = new SimulationClock(StartDateTime);
-        TaskQueue = new SimulationTaskQueue(Clock, _lock);
+        TaskQueue = new SimulationTaskQueue(Clock, Guard);
         TaskScheduler = new SimulationTaskScheduler(TaskQueue);
 
         // Create time provider using harness queue (for GetUtcNow queries)
@@ -54,26 +50,32 @@ internal sealed class SimulationHarness : IAsyncDisposable
 
         Network = new SimulationNetwork(this, Random);
 
-        // Create logger factory with in-memory provider for attachment to test context
-        _inMemoryLoggerProvider = new InMemoryLoggerProvider(_timeProvider);
-        LoggerFactory = Microsoft.Extensions.Logging.LoggerFactory.Create(builder =>
-        {
-            builder.AddProvider(_inMemoryLoggerProvider);
-            builder.SetMinimumLevel(LogLevel.Debug);
-        });
+        // Create log manager for logger factory and log attachment
+        _logManager = new SimulationLogManager(_timeProvider, seed);
+        LoggerFactory = _logManager.LoggerFactory;
 
         _logger = LoggerFactory.CreateLogger<SimulationHarness>();
+        _log = new SimulationHarnessLogger(_logger);
         Network.SetLogger(LoggerFactory.CreateLogger<SimulationNetwork>());
 
-        LogEvent(SimulationEventType.HarnessCreated, $"Seed: {seed}");
+        _log.HarnessCreated(seed);
     }
-
-    #region Core Components
 
     /// <summary>
     /// Gets the seed used for this harness.
     /// </summary>
     public int Seed { get; }
+
+    /// <summary>
+    /// A cancellation token used to signal when the simulation is being torn down.
+    /// </summary>
+    public CancellationToken TeardownCancellationToken { get; }
+
+    /// <summary>
+    /// Maximum simulated time to advance before considering the simulation stuck.
+    /// Default is 10 minutes of simulated time.
+    /// </summary>
+    public TimeSpan MaxSimulatedTimeAdvance { get; set; } = TimeSpan.FromMinutes(10);
 
     /// <summary>
     /// Gets the starting date/time for the simulation.
@@ -95,8 +97,6 @@ internal sealed class SimulationHarness : IAsyncDisposable
     /// </summary>
     public SimulationClock Clock { get; }
 
-    private readonly SimulationTimeProvider _timeProvider;
-
     /// <summary>
     /// Gets the simulation time provider.
     /// </summary>
@@ -111,11 +111,6 @@ internal sealed class SimulationHarness : IAsyncDisposable
     /// Gets all nodes in the simulation (snapshot).
     /// </summary>
     public IReadOnlyList<SimulationNode> Nodes => [.. _nodes.Values];
-
-    /// <summary>
-    /// Gets the current logical time (number of tasks executed).
-    /// </summary>
-    public long LogicalTime { get; private set; }
 
     /// <summary>
     /// Gets the harness-level task queue for scheduling general simulation work.
@@ -139,11 +134,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
     /// Gets the single-threaded guard used to detect accidental concurrent access.
     /// This guard should be shared with all simulation components to ensure single-threaded execution.
     /// </summary>
-    public SingleThreadedGuard Guard => _lock;
-
-    #endregion
-
-    #region Node Context Management
+    public SingleThreadedGuard Guard { get; } = new();
 
     /// <summary>
     /// Gets the simulation context for a specific node.
@@ -156,37 +147,13 @@ internal sealed class SimulationHarness : IAsyncDisposable
         return node.Context;
     }
 
-    #endregion
-
-    #region Per-Node Execution Control (Internal Helpers)
-
-    /// <summary>
-    /// Logs an event related to a specific node. Called by SimulationNode.
-    /// </summary>
-    internal void LogNodeEvent(SimulationNode node, SimulationEventType type, string description)
-    {
-        LogEvent(type, $"[{RapidUtils.Loggable(node.Address)}] {description}");
-    }
-
-    /// <summary>
-    /// Increments the logical time counter. Called by SimulationNode.Step().
-    /// </summary>
-    internal void IncrementLogicalTime()
-    {
-        LogicalTime++;
-    }
-
-    #endregion
-
-    #region Node Registry (Internal)
-
     /// <summary>
     /// Registers a node with the simulation.
     /// </summary>
     internal void RegisterNode(SimulationNode node)
     {
         var key = RapidUtils.Loggable(node.Address);
-        using var _ = _lock.Enter();
+        using var _ = Guard.Enter();
         if (!_nodes.TryAdd(key, node))
         {
             throw new InvalidOperationException($"Node with address {key} already exists");
@@ -199,7 +166,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
     internal void UnregisterNode(SimulationNode node)
     {
         var key = RapidUtils.Loggable(node.Address);
-        using var _ = _lock.Enter();
+        using var _ = Guard.Enter();
         _nodes.Remove(key);
         node.Context.Clear();
     }
@@ -209,7 +176,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
     /// </summary>
     internal SimulationNode? GetNode(string address)
     {
-        using var _ = _lock.Enter();
+        using var _ = Guard.Enter();
         _nodes.TryGetValue(address, out var node);
         return node;
     }
@@ -219,15 +186,11 @@ internal sealed class SimulationHarness : IAsyncDisposable
     /// </summary>
     internal SimulationRandom CreateDerivedRandom()
     {
-        using var _ = _lock.Enter();
+        using var _ = Guard.Enter();
 #pragma warning disable CA5394 // Do not use insecure randomness
         return new SimulationRandom(Random.Next());
 #pragma warning restore CA5394 // Do not use insecure randomness
     }
-
-    #endregion
-
-    #region Node Lifecycle
 
     /// <summary>
     /// Creates a node without initializing it (for testing edge cases).
@@ -242,7 +205,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
         var address = RapidUtils.HostFromParts("node", nodeId);
         var node = new SimulationNode(this, address, seedNode?.Address, metadata: null, opts, LoggerFactory);
         RegisterNode(node);
-        LogEvent(SimulationEventType.NodeCreated, $"Uninitialized node {nodeId} created");
+        _log.UninitializedNodeCreated(nodeId);
         return node;
     }
 
@@ -258,9 +221,9 @@ internal sealed class SimulationHarness : IAsyncDisposable
 
         // For seed nodes, initialization is synchronous (no network I/O needed),
         // but we still drive it through DriveToCompletion for consistency.
-        DriveToCompletion(() => node.InitializeAsync());
+        Run(() => node.InitializeAsync());
 
-        LogEvent(SimulationEventType.NodeCreated, $"Seed node {nodeId} created");
+        _log.SeedNodeCreated(nodeId);
         return node;
     }
 
@@ -279,12 +242,12 @@ internal sealed class SimulationHarness : IAsyncDisposable
         var node = new SimulationNode(this, address, seedNode.Address, metadata: null, opts, LoggerFactory);
         RegisterNode(node);
 
-        LogEvent(SimulationEventType.NodeJoining, $"Node {nodeId} joining via seed");
+        _log.NodeJoining(nodeId);
 
         // Drive the initialization to completion
-        DriveToCompletion(() => node.InitializeAsync());
+        Run(() => node.InitializeAsync());
 
-        LogEvent(SimulationEventType.NodeJoined, $"Node {nodeId} joined cluster");
+        _log.NodeJoined(nodeId);
         return node;
     }
 
@@ -389,7 +352,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
                 var node = new SimulationNode(this, address, seedNode.Address, metadata: null, opts, LoggerFactory);
                 RegisterNode(node);
 
-                LogEvent(SimulationEventType.NodeJoining, $"Node {node.Address} joining via seed (parallel batch)");
+                _log.NodeJoiningParallel(RapidUtils.Loggable(node.Address));
 
                 batchNodes.Add(node);
             }
@@ -397,7 +360,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
             // Drive the simulation until all joins in this batch complete.
             // IMPORTANT: Join tasks must be started inside DriveToCompletion so they
             // capture the simulation's SynchronizationContext for their continuations.
-            DriveToCompletion(() =>
+            Run(() =>
             {
                 var joinTasks = batchNodes.Select(node => node.InitializeAsync()).ToList();
                 return Task.WhenAll(joinTasks);
@@ -406,7 +369,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
             // Log completion
             foreach (var node in batchNodes)
             {
-                LogEvent(SimulationEventType.NodeJoined, $"Node {node.Address} joined cluster (parallel batch)");
+                _log.NodeJoinedParallel(RapidUtils.Loggable(node.Address));
             }
 
             result.AddRange(batchNodes);
@@ -424,7 +387,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(node);
         UnregisterNode(node);
         node.Destroy();
-        LogEvent(SimulationEventType.NodeCrashed, $"Node crashed");
+        _log.NodeCrashed();
     }
 
     /// <summary>
@@ -435,13 +398,13 @@ internal sealed class SimulationHarness : IAsyncDisposable
     public void RemoveNodeGracefully(SimulationNode node)
     {
         ArgumentNullException.ThrowIfNull(node);
-        LogEvent(SimulationEventType.NodeLeaving, $"Node beginning graceful leave");
+        _log.NodeLeaving();
 
         var remainingNodes = Nodes.Where(n => n != node).ToList();
         var targetSize = remainingNodes.Count;
 
         // Drive the leave operation to completion (sends LeaveMessages to observers)
-        DriveToCompletion(node.LeaveAsync);
+        Run(node.LeaveAsync);
 
         // The leaving node must remain active to participate in consensus.
         // Run the simulation until all remaining nodes converge to the new size.
@@ -453,7 +416,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
         {
             // Log current state for debugging
             var sizes = string.Join(", ", remainingNodes.Select(n => n.MembershipSize));
-            _logger?.LogWarning(
+            _logger.LogWarning(
                 "RemoveNodeGracefully: remaining nodes did not converge to size {TargetSize}. Current sizes: [{Sizes}]",
                 targetSize, sizes);
         }
@@ -462,7 +425,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
         UnregisterNode(node);
         node.Destroy();
 
-        LogEvent(SimulationEventType.NodeLeft, $"Node left gracefully");
+        _log.NodeLeft();
     }
 
     /// <summary>
@@ -488,17 +451,17 @@ internal sealed class SimulationHarness : IAsyncDisposable
         var startingConfigVersion = remainingNodes[0].CurrentView.ConfigurationId.Version;
         var targetSize = remainingNodes.Count;
 
-        LogEvent(SimulationEventType.NodeLeaving, $"{nodesToRemove.Count} nodes beginning parallel graceful leave");
+        _log.NodesLeavingParallel(nodesToRemove.Count);
 
         foreach (var node in nodesToRemove)
         {
-            LogEvent(SimulationEventType.NodeLeaving, $"Node {node.Address} initiating leave (parallel batch)");
+            _log.NodeLeavingParallel(RapidUtils.Loggable(node.Address));
         }
 
         // Drive the simulation until all leave operations complete.
         // IMPORTANT: Leave tasks must be started inside DriveToCompletion so they
         // capture the simulation's SynchronizationContext for their continuations.
-        DriveToCompletion(() =>
+        Run(() =>
         {
             var leaveTasks = nodesToRemove.Select(node => node.LeaveAsync());
             return Task.WhenAll(leaveTasks);
@@ -512,7 +475,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
         if (!converged)
         {
             var sizes = string.Join(", ", remainingNodes.Select(n => n.MembershipSize));
-            _logger?.LogWarning(
+            _logger.LogWarning(
                 "RemoveNodesGracefullyParallel: remaining nodes did not converge to size {TargetSize}. Current sizes: [{Sizes}]",
                 targetSize, sizes);
         }
@@ -522,15 +485,14 @@ internal sealed class SimulationHarness : IAsyncDisposable
         {
             UnregisterNode(node);
             node.Destroy();
-            LogEvent(SimulationEventType.NodeLeft, $"Node {node.Address} left gracefully (parallel batch)");
+            _log.NodeLeftParallel(RapidUtils.Loggable(node.Address));
         }
 
         // Calculate configuration changes
         var endingConfigVersion = remainingNodes[0].CurrentView.ConfigurationId.Version;
         var configChanges = (int)(endingConfigVersion - startingConfigVersion);
 
-        LogEvent(SimulationEventType.NodeLeft,
-            $"Parallel leave completed: {nodesToRemove.Count} nodes removed in {configChanges} configuration changes");
+        _log.ParallelLeaveCompleted(nodesToRemove.Count, configChanges);
 
         return configChanges;
     }
@@ -542,10 +504,6 @@ internal sealed class SimulationHarness : IAsyncDisposable
         return opts;
     }
 
-    #endregion
-
-    #region Network Partitions
-
     /// <summary>
     /// Isolates a node from the cluster.
     /// </summary>
@@ -554,7 +512,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(node);
         var addr = RapidUtils.Loggable(node.Address);
         Network.IsolateNode(addr);
-        LogEvent(SimulationEventType.NodeIsolated, $"Node isolated");
+        _log.NodeIsolated();
     }
 
     /// <summary>
@@ -565,7 +523,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(node);
         var addr = RapidUtils.Loggable(node.Address);
         Network.ReconnectNode(addr);
-        LogEvent(SimulationEventType.NodeReconnected, $"Node reconnected");
+        _log.NodeReconnected();
     }
 
     /// <summary>
@@ -578,7 +536,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
         var addr1 = RapidUtils.Loggable(node1.Address);
         var addr2 = RapidUtils.Loggable(node2.Address);
         Network.CreateBidirectionalPartition(addr1, addr2);
-        LogEvent(SimulationEventType.PartitionCreated, $"Partition between nodes");
+        _log.PartitionCreated();
     }
 
     /// <summary>
@@ -586,24 +544,14 @@ internal sealed class SimulationHarness : IAsyncDisposable
     /// </summary>
     public void HealPartition(SimulationNode node1, SimulationNode node2)
     {
-        using var _ = _lock.Enter();
+        using var _ = Guard.Enter();
         ArgumentNullException.ThrowIfNull(node1);
         ArgumentNullException.ThrowIfNull(node2);
         var addr1 = RapidUtils.Loggable(node1.Address);
         var addr2 = RapidUtils.Loggable(node2.Address);
         Network.HealBidirectionalPartition(addr1, addr2);
-        LogEvent(SimulationEventType.PartitionHealed, $"Partition healed between nodes");
+        _log.PartitionHealed();
     }
-
-    #endregion
-
-    #region Simulation Driving
-
-    /// <summary>
-    /// Maximum simulated time to advance before considering the simulation stuck.
-    /// Default is 10 minutes of simulated time.
-    /// </summary>
-    public TimeSpan MaxSimulatedTimeAdvance { get; set; } = TimeSpan.FromMinutes(10);
 
     /// <summary>
     /// Runs the simulation until the specified condition is met.
@@ -621,7 +569,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
     /// </summary>
     private bool RunUntilCore(Func<bool> condition, int maxIterations)
     {
-        using var _ = _lock.Enter();
+        using var _ = Guard.Enter();
         var startTime = TimeProvider.GetUtcNow();
         var maxEndTime = MaxSimulatedTimeAdvance;
         var timeAdvanceCount = 0;
@@ -631,20 +579,19 @@ internal sealed class SimulationHarness : IAsyncDisposable
             // Check for teardown cancellation
             if (TeardownCancellationToken.IsCancellationRequested)
             {
-                LogEvent(SimulationEventType.MaxStepsReached, "Teardown cancellation requested - exiting simulation loop");
+                _log.TeardownCancellationRequested();
                 return false;
             }
 
             if (condition())
             {
-                LogEvent(SimulationEventType.ConditionMet, $"Condition met after {i} iterations");
+                _log.ConditionMet(i);
                 return true;
             }
 
             // Try to execute one ready task using round-robin across all sources
             if (RunOneTaskRoundRobin())
             {
-                LogicalTime++;
                 timeAdvanceCount = 0; // Reset time advance counter when real work happens
                 continue;
             }
@@ -654,9 +601,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
             if (!nextScheduledTime.HasValue)
             {
                 // No more scheduled work - simulation is idle and cannot make progress
-                LogEvent(SimulationEventType.MaxStepsReached,
-                    $"Simulation is idle with no pending work - condition cannot be met. " +
-                    $"Iterations: {i}, Simulated time: {TimeProvider.GetUtcNow():O}");
+                _log.SimulationIdleNoPendingWork(i, $"{TimeProvider.GetUtcNow():O}");
                 return false;
             }
 
@@ -664,9 +609,11 @@ internal sealed class SimulationHarness : IAsyncDisposable
             var timeDelta = nextScheduledTime.Value - Clock.UtcNow;
             if (timeDelta > maxEndTime)
             {
-                LogEvent(SimulationEventType.MaxStepsReached,
-                    $"Simulation appears stuck: exceeded max simulated time ({MaxSimulatedTimeAdvance}). " +
-                    $"Start: {startTime:O}, Current: {TimeProvider.GetUtcNow():O}, Next scheduled time delta: {timeDelta}");
+                _log.SimulationStuckMaxTime(
+                    $"{MaxSimulatedTimeAdvance}",
+                    $"{startTime:O}",
+                    $"{TimeProvider.GetUtcNow():O}",
+                    $"{timeDelta}");
                 return false;
             }
 
@@ -680,13 +627,12 @@ internal sealed class SimulationHarness : IAsyncDisposable
             // Safety check: if we've advanced time many times without executing tasks, we might be stuck
             if (timeAdvanceCount > 10000)
             {
-                LogEvent(SimulationEventType.MaxStepsReached,
-                    $"Simulation appears stuck: {timeAdvanceCount} consecutive time advances without task execution");
+                _log.SimulationStuckConsecutiveTimeAdvances(timeAdvanceCount);
                 return false;
             }
         }
 
-        LogEvent(SimulationEventType.MaxStepsReached, $"Max iterations ({maxIterations}) reached");
+        _log.MaxIterationsReached(maxIterations);
         return false;
     }
 
@@ -696,7 +642,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
     /// </summary>
     private bool RunOneTaskRoundRobin()
     {
-        using var _ = _lock.Enter();
+        using var _ = Guard.Enter();
 
         // Try the harness queue (for scheduled operations like auto-resume)
         if (TaskQueue.RunOnce())
@@ -722,7 +668,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
     /// </summary>
     private DateTimeOffset? GetNextWaitingDueTime()
     {
-        using var _ = _lock.Enter();
+        using var _ = Guard.Enter();
         return Nodes.Select(n => n.Context.NextWaitingDueTime).Concat([TaskQueue.NextWaitingDueTime]).Min();
     }
 
@@ -757,7 +703,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
     /// <returns>The number of iterations executed.</returns>
     private int RunUntilIdleCore(TimeSpan? maxSimulatedTime, int maxIterations)
     {
-        using var _ = _lock.Enter();
+        using var _ = Guard.Enter();
         var startTime = TimeProvider.GetUtcNow();
         var maxEndTime = maxSimulatedTime ?? MaxSimulatedTimeAdvance;
         var timeAdvanceCount = 0;
@@ -767,13 +713,12 @@ internal sealed class SimulationHarness : IAsyncDisposable
             // Check for teardown cancellation
             if (TeardownCancellationToken.IsCancellationRequested)
             {
-                LogEvent(SimulationEventType.MaxStepsReached, "Teardown cancellation requested - exiting simulation loop");
+                _log.TeardownCancellationRequested();
                 return i;
             }
 
             if (RunOneTaskRoundRobin())
             {
-                LogicalTime++;
                 timeAdvanceCount = 0; // Reset time advance counter when real work happens
                 continue;
             }
@@ -781,16 +726,18 @@ internal sealed class SimulationHarness : IAsyncDisposable
             var nextScheduledTime = GetNextWaitingDueTime();
             if (!nextScheduledTime.HasValue)
             {
-                LogEvent(SimulationEventType.ConditionMet, "Simulation reached idle state");
+                _log.SimulationReachedIdleState();
                 return i;
             }
 
             var timeDelta = nextScheduledTime.Value - Clock.UtcNow;
             if (timeDelta > maxEndTime)
             {
-                LogEvent(SimulationEventType.MaxStepsReached,
-                    $"Simulation appears stuck: exceeded max simulated time ({maxSimulatedTime ?? MaxSimulatedTimeAdvance}). " +
-                    $"Start: {startTime:O}, Current: {TimeProvider.GetUtcNow():O}, Next scheduled time delta: {timeDelta}");
+                _log.SimulationStuckMaxTime(
+                    $"{maxSimulatedTime ?? MaxSimulatedTimeAdvance}",
+                    $"{startTime:O}",
+                    $"{TimeProvider.GetUtcNow():O}",
+                    $"{timeDelta}");
                 return i;
             }
 
@@ -804,13 +751,12 @@ internal sealed class SimulationHarness : IAsyncDisposable
             // Safety check: if we've advanced time many times without executing tasks, we might be stuck
             if (timeAdvanceCount > 10000)
             {
-                LogEvent(SimulationEventType.MaxStepsReached,
-                    $"Simulation appears stuck: {timeAdvanceCount} consecutive time advances without task execution");
+                _log.SimulationStuckConsecutiveTimeAdvances(timeAdvanceCount);
                 return i;
             }
         }
 
-        LogEvent(SimulationEventType.MaxStepsReached, $"Max iterations ({maxIterations}) reached");
+        _log.MaxIterationsReached(maxIterations);
         return maxIterations;
     }
 
@@ -819,26 +765,51 @@ internal sealed class SimulationHarness : IAsyncDisposable
     /// The task factory is invoked with the harness's synchronization context installed,
     /// ensuring async continuations are captured on the simulation scheduler.
     /// </summary>
-    public void DriveToCompletion(Func<Task> taskFactory, int maxIterations = 100000)
+    public void Run(Func<Task> taskFactory, int maxIterations = 100000)
     {
         ArgumentNullException.ThrowIfNull(taskFactory);
-        using var lockScope = _lock.Enter();
-
-        // Use the harness queue's sync context for the task factory invocation
-        using var _ = TaskQueue.SynchronizationContext.Install();
+        using var lockScope = Guard.Enter();
 
         var task = new Task<Task>(taskFactory);
         task.Start(TaskScheduler);
 
         if (!RunUntilCore(() => task.IsCompleted && task.Result.IsCompleted, maxIterations))
         {
-            if (!task.IsCompleted)
+            if (!task.IsCompleted || !task.GetAwaiter().GetResult().IsCompleted)
             {
                 throw new TimeoutException($"Task did not complete within {maxIterations} iterations");
             }
         }
 
-        task.GetAwaiter().GetResult();
+        task.GetAwaiter().GetResult().GetAwaiter().GetResult();
+    }
+
+    /// <summary>
+    /// Drives a task to completion by running the simulation asynchronously.
+    /// The task factory is invoked with the harness's synchronization context installed,
+    /// ensuring async continuations are captured on the simulation scheduler.
+    /// Unlike <see cref="Run"/>, this method awaits the task instead of calling Wait(),
+    /// allowing exceptions to propagate properly through async/await.
+    /// </summary>
+    public async Task RunAsync(Func<Task> taskFactory, int maxIterations = 100000)
+    {
+        ArgumentNullException.ThrowIfNull(taskFactory);
+        var task = new Task<Task>(taskFactory);
+        using (Guard.Enter())
+        {
+            task.Start(TaskScheduler);
+
+            if (!RunUntilCore(() => task.IsCompleted && task.Result.IsCompleted, maxIterations))
+            {
+                if (!task.IsCompleted)
+                {
+                    throw new TimeoutException($"Task did not complete within {maxIterations} iterations");
+                }
+            }
+        }
+
+        var innerTask = await task.ConfigureAwait(true);
+        await innerTask.ConfigureAwait(true);
     }
 
     /// <summary>
@@ -901,9 +872,9 @@ internal sealed class SimulationHarness : IAsyncDisposable
         }
 
         // Advance time to trigger timers, then run until idle
-        LogEvent(SimulationEventType.TimeAdvanced, $"Advancing time until {delta}");
+        _log.TimeAdvancing($"{delta}");
 
-        using var lockScope = _lock.Enter();
+        using var lockScope = Guard.Enter();
 
         var targetTime = Clock.UtcNow + delta;
         var iterations = RunUntilIdleCore(maxSimulatedTime: delta, maxIterations);
@@ -923,67 +894,19 @@ internal sealed class SimulationHarness : IAsyncDisposable
         return RunUntilIdleCore(null, remainingIterations) < remainingIterations;
     }
 
-    #endregion
-
-    #region Event Logging
-
-    /// <summary>
-    /// Gets a copy of the event log.
-    /// </summary>
-    public IReadOnlyList<SimulationEvent> EventLog
-    {
-        get
-        {
-            using var _ = _lock.Enter();
-            return [.. _eventLog];
-        }
-    }
-
-    public CancellationToken TeardownCancellationToken { get; }
-
     /// <summary>
     /// Logs the seed to the test output for reproduction.
     /// </summary>
-    public void LogSeedForReproduction() => _logger?.LogInformation("[SEED FOR REPRODUCTION] {Seed}", Seed);
-
-    /// <summary>
-    /// Dumps the event log to the test output.
-    /// </summary>
-    public void DumpEventLog()
-    {
-        using var _ = _lock.Enter();
-        if (_logger == null) return;
-
-        _logger.LogInformation("=== Simulation Event Log ===");
-        foreach (var evt in _eventLog)
-        {
-            _logger.LogInformation("[{LogicalTime:D6}] [{SimulatedTime:O}] {Type}: {Description}",
-                evt.LogicalTime, evt.SimulatedTime, evt.Type, evt.Description);
-        }
-        _logger.LogInformation("============================");
-    }
-
-    private void LogEvent(SimulationEventType type, string description)
-    {
-        using var _ = _lock.Enter();
-        var evt = new SimulationEvent(
-            LogicalTime,
-            TimeProvider.GetUtcNow(),
-            type,
-            description);
-        _eventLog.Add(evt);
-
-        _logger?.LogDebug("[{LogicalTime:D6}] {Type}: {Description}", evt.LogicalTime, type, description);
-    }
-
-    #endregion
-
-    #region Disposal
+    public void LogSeedForReproduction() => _logger.LogInformation("[SEED FOR REPRODUCTION] {Seed}", Seed);
 
     /// <inheritdoc />
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
-        if (_disposed) return;
+        if (_disposed) return ValueTask.CompletedTask;
+
+#pragma warning disable CA1849 // Call async methods when in an async method
+        _teardownCts.Cancel();
+#pragma warning restore CA1849 // Call async methods when in an async method
         _disposed = true;
 
         // Clear harness queue
@@ -997,122 +920,11 @@ internal sealed class SimulationHarness : IAsyncDisposable
         }
 
         // Attach logs to test context BEFORE disposing the provider
-        AttachLogsToTestContext(TestContext.Current);
+        _logManager.AttachLogsToTestContext(TestContext.Current);
 
-        // Dispose the logger factory first (removes reference to provider)
-        LoggerFactory.Dispose();
-
-        // Explicitly dispose the in-memory logger provider to satisfy CA2213
-        _inMemoryLoggerProvider.Dispose();
-
-        await Task.CompletedTask.ConfigureAwait(true);
+        // Dispose the log manager (disposes logger factory and provider)
+        _logManager.Dispose();
+        _teardownCts.Dispose();
+        return ValueTask.CompletedTask;
     }
-
-    /// <summary>
-    /// Attaches buffered logs to the test context.
-    /// If the full log exceeds 1MB, a warning is added and only Information level and above are attached.
-    /// </summary>
-    private void AttachLogsToTestContext(ITestContext? testContext)
-    {
-        if (testContext == null)
-        {
-            return;
-        }
-
-        var buffer = _inMemoryLoggerProvider.Buffer;
-        var (fullContent, fullSizeBytes) = buffer.FormatAllEntriesWithSize();
-
-        string logContent;
-        string logFileName;
-
-        if (fullSizeBytes <= MaxFullLogSizeBytes)
-        {
-            // Full log is under 1MB - attach it directly
-            logContent = fullContent;
-            logFileName = GenerateLogFileName(testContext.Test?.TestDisplayName, Seed);
-        }
-        else
-        {
-            // Full log exceeds 1MB - warn and attach only Information and above
-            testContext.TestOutputHelper?.WriteLine(
-                $"Warning: Full simulation log ({fullSizeBytes:N0} bytes) exceeds 1MB limit. " +
-                $"Attaching only Information level and above.");
-
-            var (filteredContent, _) = buffer.FormatEntriesWithSize(LogLevel.Information);
-            logContent = filteredContent;
-            logFileName = GenerateLogFileName(testContext.Test?.TestDisplayName, Seed, filtered: true);
-        }
-
-        // Attach log content directly to the test context
-        testContext.AddAttachment(logFileName, logContent);
-    }
-
-    /// <summary>
-    /// Generates a unique log file name for a simulation.
-    /// </summary>
-    private static string GenerateLogFileName(string? testName, int seed, bool filtered = false)
-    {
-        var sanitizedTestName = SanitizeFileName(testName ?? "unknown_test");
-        var uniqueId = Guid.NewGuid().ToString("N")[..8];
-        var suffix = filtered ? "_info_and_above" : "";
-
-        return $"rapid_sim_{sanitizedTestName}_{seed}_{uniqueId}{suffix}.log";
-    }
-
-    /// <summary>
-    /// Sanitizes a string to be used as a file name by removing invalid characters.
-    /// </summary>
-    private static string SanitizeFileName(string name)
-    {
-        var invalidChars = Path.GetInvalidFileNameChars();
-        var sanitized = new System.Text.StringBuilder();
-        foreach (var c in name)
-        {
-            sanitized.Append(invalidChars.Contains(c) ? '_' : c);
-        }
-        // Truncate to a reasonable length to avoid path length issues
-        var result = sanitized.ToString();
-        return result.Length > 100 ? result[..100] : result;
-    }
-
-    #endregion
 }
-
-/// <summary>
-/// Types of events that can be logged during simulation.
-/// </summary>
-internal enum SimulationEventType
-{
-    HarnessCreated,
-    NodeCreated,
-    NodeJoining,
-    NodeJoined,
-    NodeLeaving,
-    NodeLeft,
-    NodeCrashed,
-    NodeIsolated,
-    NodeReconnected,
-    NodeSuspended,
-    NodeResumed,
-    PartitionCreated,
-    PartitionHealed,
-    MessageSent,
-    MessageReceived,
-    MessageDropped,
-    TimeAdvanced,
-    FastForward,
-    ConditionMet,
-    MaxStepsReached,
-    InvariantViolation
-}
-
-/// <summary>
-/// Represents an event that occurred during simulation.
-/// </summary>
-internal readonly record struct SimulationEvent(
-    long LogicalTime,
-    DateTimeOffset SimulatedTime,
-    SimulationEventType Type,
-    string Description);
-
-

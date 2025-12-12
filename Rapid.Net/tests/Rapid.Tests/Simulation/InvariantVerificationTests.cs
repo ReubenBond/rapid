@@ -26,7 +26,6 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
         await _harness.DisposeAsync();
     }
 
-    #region Membership Invariants (INV-001 to INV-004)
 
     [Fact]
     public void MembershipViewNeverEmptyForInitializedNode()
@@ -69,9 +68,7 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
         Assert.Subset(viewAddresses, knownAddresses);
     }
 
-    #endregion
 
-    #region Safety Invariants (INV-010 to INV-013)
 
     [Fact]
     public void NoSplitBrainWithSingleNode()
@@ -125,9 +122,7 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
         Assert.True(result);
     }
 
-    #endregion
 
-    #region Membership Consistency (INV-012 specific tests)
 
     [Fact]
     public void MembershipConsistencyWithNoNodes()
@@ -157,9 +152,7 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
         Assert.True(result);
     }
 
-    #endregion
 
-    #region Check All Invariants
 
     [Fact]
     public void CheckAllWithEmptyCluster()
@@ -192,9 +185,7 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
         Assert.False(_checker.HasViolations);
     }
 
-    #endregion
 
-    #region Liveness Invariants (INV-020 to INV-023)
 
     /// <summary>
     /// Verifies that the liveness checker can detect when the system has pending tasks
@@ -300,9 +291,7 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
         Assert.Equal(2, joiner.MembershipSize);
     }
 
-    #endregion
 
-    #region Violation Management
 
     [Fact]
     public void ViolationsClearWorks()
@@ -328,5 +317,4 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
         Assert.NotSame(violations1, violations2);
     }
 
-    #endregion
 }

@@ -8,7 +8,6 @@ namespace Rapid.Tests;
 /// </summary>
 public class RapidOptionsTests
 {
-    #region ListenAddress Tests
 
     [Fact]
     public void ListenAddressDefaultIsNull()
@@ -30,9 +29,7 @@ public class RapidOptionsTests
         Assert.Equal(1234, options.ListenAddress.Port);
     }
 
-    #endregion
 
-    #region SeedAddress Tests
 
     [Fact]
     public void SeedAddressDefaultIsNull()
@@ -67,9 +64,7 @@ public class RapidOptionsTests
         Assert.Equal(options.ListenAddress, options.SeedAddress);
     }
 
-    #endregion
 
-    #region Metadata Tests
 
     [Fact]
     public void MetadataDefaultIsEmptyMetadata()
@@ -92,9 +87,7 @@ public class RapidOptionsTests
         Assert.Equal("value", options.Metadata.Metadata_["key"].ToStringUtf8());
     }
 
-    #endregion
 
-    #region SetMetadata Tests
 
     [Fact]
     public void SetMetadataSetsMetadataFromDictionary()
@@ -188,9 +181,7 @@ public class RapidOptionsTests
         Assert.Equal(binaryData, stored);
     }
 
-    #endregion
 
-    #region Full Configuration Tests
 
     [Fact]
     public void FullConfigurationAllPropertiesSet()
@@ -215,5 +206,4 @@ public class RapidOptionsTests
         Assert.Equal(2, options.Metadata.Metadata_.Count);
     }
 
-    #endregion
 }

@@ -26,7 +26,6 @@ public sealed class JoinProtocolTests : IAsyncLifetime
         await _harness.DisposeAsync();
     }
 
-    #region Basic Join Protocol (JOIN-001 to JOIN-005)
 
     /// <summary>
     /// Tests that a basic join succeeds in normal conditions.
@@ -83,9 +82,7 @@ public sealed class JoinProtocolTests : IAsyncLifetime
         Assert.Equal(seedNode.CurrentView.ConfigurationId, joiner.CurrentView.ConfigurationId);
     }
 
-    #endregion
 
-    #region Join with Message Drops (JOIN-010 to JOIN-015)
 
     /// <summary>
     /// Tests that join succeeds despite random message drops.
@@ -141,9 +138,7 @@ public sealed class JoinProtocolTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 3);
     }
 
-    #endregion
 
-    #region Configuration Change During Join (JOIN-020 to JOIN-025)
 
     /// <summary>
     /// Tests that a new joiner can still join while another join is being processed.
@@ -216,9 +211,7 @@ public sealed class JoinProtocolTests : IAsyncLifetime
         Assert.True(joiner3.IsInitialized);
     }
 
-    #endregion
 
-    #region Join to Different Cluster Members (JOIN-030 to JOIN-035)
 
     /// <summary>
     /// Tests joining through a non-seed node.
@@ -265,9 +258,7 @@ public sealed class JoinProtocolTests : IAsyncLifetime
         Assert.All(_harness.Nodes, n => Assert.Equal(6, n.MembershipSize));
     }
 
-    #endregion
 
-    #region Join Failures (JOIN-040 to JOIN-045)
 
     /// <summary>
     /// Tests that join fails when consensus is impossible due to node isolation.
@@ -306,9 +297,7 @@ public sealed class JoinProtocolTests : IAsyncLifetime
         });
     }
 
-    #endregion
 
-    #region Join Protocol Timing (JOIN-050 to JOIN-055)
 
     /// <summary>
     /// Tests rapid consecutive joins.
@@ -370,9 +359,7 @@ public sealed class JoinProtocolTests : IAsyncLifetime
         Assert.True(joiner.IsInitialized);
     }
 
-    #endregion
 
-    #region Join with Partitions (JOIN-060 to JOIN-065)
 
     /// <summary>
     /// Tests that join fails gracefully when the seed is completely partitioned.
@@ -444,9 +431,7 @@ public sealed class JoinProtocolTests : IAsyncLifetime
         Assert.True(joiner3.MembershipSize >= 2);
     }
 
-    #endregion
 
-    #region Join Protocol Edge Cases (JOIN-070 to JOIN-075)
 
     /// <summary>
     /// Tests join immediately after cluster initialization.
@@ -495,5 +480,4 @@ public sealed class JoinProtocolTests : IAsyncLifetime
         Assert.All(_harness.Nodes, n => Assert.Equal(3, n.MembershipSize));
     }
 
-    #endregion
 }

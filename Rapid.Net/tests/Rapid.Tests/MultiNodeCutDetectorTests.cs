@@ -338,7 +338,6 @@ public class MultiNodeCutDetectorTests
         }
     }
 
-    #region Constructor Validation Tests
 
     [Fact]
     public void ConstructorValidParametersSucceeds()
@@ -412,9 +411,7 @@ public class MultiNodeCutDetectorTests
         Assert.Throws<ArgumentException>(() => new MultiNodeCutDetector(5, 2, view)); // H=5 = K
     }
 
-    #endregion
 
-    #region Detector Replacement Tests (replaces Clear tests)
 
     [Fact]
     public void NewDetector_ResetsProposalCount()
@@ -479,9 +476,7 @@ public class MultiNodeCutDetectorTests
         Assert.Equal(0, detector3.GetNumProposals());
     }
 
-    #endregion
 
-    #region Duplicate Alert Tests
 
     [Fact]
     public void AggregateForProposalDuplicateAlertIgnored()
@@ -515,9 +510,7 @@ public class MultiNodeCutDetectorTests
         Assert.Empty(result2);
     }
 
-    #endregion
 
-    #region Multiple Ring Numbers in Single Alert
 
     [Fact]
     public void AggregateForProposalMultipleRingNumbersAllProcessed()
@@ -544,9 +537,7 @@ public class MultiNodeCutDetectorTests
         Assert.Single(result);
     }
 
-    #endregion
 
-    #region Edge Status Tests
 
     [Fact]
     public void AggregateForProposalEdgeStatusUpWorksCorrectly()
@@ -598,9 +589,7 @@ public class MultiNodeCutDetectorTests
         Assert.Equal(1, detector.GetNumProposals());
     }
 
-    #endregion
 
-    #region Ring Number Validation Tests
 
     [Fact]
     public void AggregateForProposalRingNumberExceedsKThrows()
@@ -652,9 +641,7 @@ public class MultiNodeCutDetectorTests
         Assert.Empty(result);
     }
 
-    #endregion
 
-    #region Concurrent Proposals Tests
 
     [Fact]
     public void AggregateForProposalTwoNodesReachHSimultaneously()
@@ -685,9 +672,7 @@ public class MultiNodeCutDetectorTests
         Assert.Equal(1, detector.GetNumProposals());
     }
 
-    #endregion
 
-    #region Large Scale Tests
 
     [Fact]
     public void AggregateForProposalManyDestinationsAllProposed()
@@ -716,9 +701,7 @@ public class MultiNodeCutDetectorTests
         Assert.Equal(numDestinations, proposalCount);
     }
 
-    #endregion
 
-    #region Link Invalidation Edge Cases
 
     [Fact]
     public void InvalidateFailingEdgesNoDownEventsReturnsEmpty()
@@ -756,9 +739,7 @@ public class MultiNodeCutDetectorTests
         Assert.NotNull(result);
     }
 
-    #endregion
 
-    #region Null Input Tests
 
     [Fact]
     public void AggregateForProposalNullMessageThrows()
@@ -769,9 +750,7 @@ public class MultiNodeCutDetectorTests
         Assert.Throws<ArgumentNullException>(() => detector.AggregateForProposal(null!));
     }
 
-    #endregion
 
-    #region AggregateForProposalSingleRing Tests
 
     [Fact]
     public void AggregateForProposalSingleRing_ProcessesSingleRing()
@@ -888,9 +867,7 @@ public class MultiNodeCutDetectorTests
         Assert.Equal(detector1.GetNumProposals(), detector2.GetNumProposals());
     }
 
-    #endregion
 
-    #region Batching Behavior Tests
 
     /// <summary>
     /// Tests that processing messages sequentially (all rings per node) produces individual proposals.
@@ -1207,9 +1184,7 @@ public class MultiNodeCutDetectorTests
         Assert.Equal(2, detector.GetNumProposals()); // Total proposals
     }
 
-    #endregion
 
-    #region InvalidateFailingEdges Tests
 
     /// <summary>
     /// Tests that InvalidateFailingEdges properly handles edges between failing nodes.
@@ -1324,5 +1299,4 @@ public class MultiNodeCutDetectorTests
         Assert.NotNull(result);
     }
 
-    #endregion
 }

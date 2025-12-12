@@ -97,11 +97,11 @@ public sealed class ChaosInjectorTests : IAsyncLifetime
     {
         _harness.CreateSeedNode();
 
-        var initialLogicalTime = _harness.LogicalTime;
+        var initialTime = _harness.TimeProvider.GetUtcNow();
         _chaos.RunChaos(steps: 10);
 
-        // Time should have advanced
-        // Note: The exact logical time depends on whether tasks were created
+        // Time should have advanced (chaos injects delays and events)
+        Assert.True(_harness.TimeProvider.GetUtcNow() >= initialTime);
     }
 
     [Fact]

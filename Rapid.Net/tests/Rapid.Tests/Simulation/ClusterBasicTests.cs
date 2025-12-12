@@ -24,7 +24,6 @@ public sealed class ClusterBasicTests : IAsyncLifetime
         await _harness.DisposeAsync();
     }
 
-    #region Single Node Operations (BASIC-001 to BASIC-005)
 
     [Fact]
     public void SingleNodeClusterInitializes()
@@ -70,18 +69,16 @@ public sealed class ClusterBasicTests : IAsyncLifetime
     }
 
     [Fact]
-    public void SingleNodeCanLeaveCluster()
+    public async Task SingleNodeCanLeaveCluster()
     {
         var seedNode = _harness.CreateSeedNode();
         Assert.True(seedNode.IsInitialized);
 
         // Leave should not throw (degenerates to shutdown for single node)
-        _harness.DriveToCompletion(seedNode.LeaveAsync);
+        await _harness.RunAsync(seedNode.LeaveAsync);
     }
 
-    #endregion
 
-    #region Two-Node Cluster Operations (BASIC-010 to BASIC-015)
 
     [Fact]
     public void TwoNodeClusterFormation()
@@ -174,9 +171,7 @@ public sealed class ClusterBasicTests : IAsyncLifetime
         Assert.Equal(2, joiner2.MembershipSize);
     }
 
-    #endregion
 
-    #region Multi-Node Cluster Operations (BASIC-020 to BASIC-025)
 
     [Fact]
     public void ThreeNodeClusterFormation()
@@ -263,9 +258,7 @@ public sealed class ClusterBasicTests : IAsyncLifetime
         Assert.Contains($"{joiner2.Address.Hostname}:{joiner2.Address.Port}", addresses);
     }
 
-    #endregion
 
-    #region Metadata Operations (BASIC-030 to BASIC-032)
 
     [Fact]
     public void NodeCanJoinWithMetadata()
@@ -280,5 +273,4 @@ public sealed class ClusterBasicTests : IAsyncLifetime
         Assert.True(joiner.IsInitialized);
     }
 
-    #endregion
 }

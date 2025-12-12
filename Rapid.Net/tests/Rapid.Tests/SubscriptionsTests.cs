@@ -363,7 +363,6 @@ public sealed class SubscriptionsTests(ITestOutputHelper outputHelper) : IAsyncD
             _notificationLog.Add(clusterStatusChange);
     }
 
-    #region IObservable Tests
 
     /// <summary>
     /// Two node cluster using IObservable subscriptions.
@@ -524,5 +523,4 @@ public sealed class SubscriptionsTests(ITestOutputHelper outputHelper) : IAsyncD
         Assert.True(joiner1MaxMembership >= 3, $"Joiner1 max membership was {joiner1MaxMembership}, expected at least 3");
     }
 
-    #endregion
 }

@@ -10,7 +10,6 @@ namespace Rapid.Tests;
 /// </summary>
 public class PropertyBasedTests
 {
-    #region Generators
 
     /// <summary>
     /// Generator for valid endpoints.
@@ -73,9 +72,7 @@ public class PropertyBasedTests
     /// </summary>
     private static readonly Gen<int> GenL = Gen.Int[1, 10];
 
-    #endregion
 
-    #region MembershipView Properties
 
     [Fact]
     public void MembershipView_RingCount_Equals_K()
@@ -194,9 +191,7 @@ public class PropertyBasedTests
             });
     }
 
-    #endregion
 
-    #region SimpleCutDetector Properties
 
     [Fact]
     public void SimpleCutDetector_Single_Report_With_Required_Votes_Triggers_Cut()
@@ -274,9 +269,7 @@ public class PropertyBasedTests
             });
     }
 
-    #endregion
 
-    #region MultiNodeCutDetector Properties
 
     [Fact]
     public void MultiNodeCutDetector_Respects_H_Threshold()
@@ -763,9 +756,7 @@ public class PropertyBasedTests
             });
     }
 
-    #endregion
 
-    #region Rank Properties (using protobuf Rank)
 
     [Fact]
     public void Rank_CompareTo_Is_Transitive()
@@ -827,9 +818,7 @@ public class PropertyBasedTests
             });
     }
 
-    #endregion
 
-    #region ListEndpointComparer Properties
 
     [Fact]
     public void ListEndpointComparer_Equal_Lists_Have_Same_HashCode()
@@ -881,9 +870,7 @@ public class PropertyBasedTests
             });
     }
 
-    #endregion
 
-    #region ConfigurationId Properties
 
     [Fact]
     public void ConfigurationId_Next_Increases_Version()
@@ -927,9 +914,7 @@ public class PropertyBasedTests
             });
     }
 
-    #endregion
 
-    #region MetadataManager Properties
 
     [Fact]
     public void MetadataManager_Get_Returns_Set_Value()
@@ -986,5 +971,4 @@ public class PropertyBasedTests
             });
     }
 
-    #endregion
 }

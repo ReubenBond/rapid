@@ -27,7 +27,6 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
         await _harness.DisposeAsync();
     }
 
-    #region Large Cluster Formation (SCALE-001 to SCALE-005)
 
     /// <summary>
     /// Tests formation of a cluster using sequential joins.
@@ -192,7 +191,7 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
     [Theory]
     [InlineData(20)]
     [InlineData(50)]
-    public void ParallelJoins_WithDetailedViewTracking(int clusterSize)
+    public async Task ParallelJoins_WithDetailedViewTracking(int clusterSize)
     {
         // Create seed node first
         var seedNode = _harness.CreateSeedNode();
@@ -224,7 +223,7 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
         // IMPORTANT: Join tasks must be started inside DriveToCompletion so they
         // capture the simulation's SynchronizationContext for their continuations.
         var maxIterations = clusterSize >= 50 ? 500000 : 100000;
-        _harness.DriveToCompletion(() =>
+        await _harness.RunAsync(() =>
         {
             var joinTasks = nodes.Select(n => n.InitializeAsync(cancellationToken));
             return Task.WhenAll(joinTasks);
@@ -233,7 +232,7 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
 
         // Signal view collection is complete and wait for it
         viewCollectionComplete = true;
-        _harness.DriveToCompletion(() => viewCollectionTask);
+        await _harness.RunAsync(() => viewCollectionTask);
 
         // Compute and log detailed view transitions
         var transitions = ComputeViewTransitions(viewHistory);
@@ -291,9 +290,7 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
         }
     }
 
-    #endregion
 
-    #region Sequential Joins at Scale (SCALE-010 to SCALE-015)
 
     /// <summary>
     /// Tests that 10 nodes can join sequentially.
@@ -362,9 +359,7 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
         Assert.All(_harness.Nodes, n => Assert.Equal(6, n.MembershipSize));
     }
 
-    #endregion
 
-    #region Joins with Existing Cluster (SCALE-020 to SCALE-025)
 
     /// <summary>
     /// Tests that 5 nodes can join an existing 5-node cluster.
@@ -412,9 +407,7 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
         Assert.All(_harness.Nodes, n => Assert.Equal(9, n.MembershipSize));
     }
 
-    #endregion
 
-    #region Failures in Large Clusters (SCALE-030 to SCALE-035)
 
     /// <summary>
     /// Tests that a large cluster can handle single node failure.
@@ -481,9 +474,7 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
         Assert.All(_harness.Nodes, n => Assert.Equal(10, n.MembershipSize));
     }
 
-    #endregion
 
-    #region Graceful Operations in Large Clusters (SCALE-040 to SCALE-045)
 
     /// <summary>
     /// Tests that nodes can leave gracefully from a large cluster.
@@ -564,9 +555,7 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
             $"Leave batching is not working correctly.");
     }
 
-    #endregion
 
-    #region Mixed Operations (SCALE-050 to SCALE-055)
 
     /// <summary>
     /// Tests mixed join and leave operations in a large cluster.
@@ -621,9 +610,7 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
             $"Expected multiple configuration IDs through cluster lifecycle, got {configIds.Count}");
     }
 
-    #endregion
 
-    #region Helper Methods
 
     /// <summary>
     /// Logs a summary of batching statistics to the test output.
@@ -732,9 +719,7 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
         return transitions;
     }
 
-    #endregion
 
-    #region Stress Tests (SCALE-060 to SCALE-063)
 
     /// <summary>
     /// Tests sustained join/leave churn in a cluster.
@@ -789,5 +774,4 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
         Assert.All(_harness.Nodes, n => Assert.Equal(11, n.MembershipSize));
     }
 
-    #endregion
 }

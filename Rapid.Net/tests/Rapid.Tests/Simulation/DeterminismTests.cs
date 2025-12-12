@@ -24,7 +24,6 @@ public sealed class DeterminismTests : IAsyncLifetime
         await _harness.DisposeAsync();
     }
 
-    #region Reproducibility Tests (DET-001 to DET-004)
 
     [Fact]
     public async Task SameSeedProducesSameRandomSequence()
@@ -92,62 +91,11 @@ public sealed class DeterminismTests : IAsyncLifetime
         Assert.Equal(initialTime + TimeSpan.FromMinutes(5), newTime);
     }
 
-    #endregion
 
-    #region Event Logging (DET-020 to DET-023)
 
-    [Fact]
-    public void EventsAreLoggedWithCorrectLogicalTime()
-    {
-        var initialLogicalTime = _harness.LogicalTime;
 
-        _harness.CreateSeedNode();
 
-        var events = _harness.EventLog;
-        var nodeCreatedEvent = events.FirstOrDefault(e => e.Type == SimulationEventType.NodeCreated);
 
-        Assert.NotEqual(default, nodeCreatedEvent);
-        Assert.Equal(initialLogicalTime, nodeCreatedEvent.LogicalTime);
-    }
-
-    [Fact]
-    public void EventsAreLoggedWithCorrectSimulatedTime()
-    {
-        var initialTime = _harness.TimeProvider.GetUtcNow();
-
-        _harness.CreateSeedNode();
-
-        var events = _harness.EventLog;
-        var nodeCreatedEvent = events.FirstOrDefault(e => e.Type == SimulationEventType.NodeCreated);
-
-        Assert.NotEqual(default, nodeCreatedEvent);
-        Assert.Equal(initialTime, nodeCreatedEvent.SimulatedTime);
-    }
-
-    [Fact]
-    public void EventLogIsImmutableCopy()
-    {
-        _harness.CreateSeedNode();
-
-        var log1 = _harness.EventLog;
-        var log2 = _harness.EventLog;
-
-        Assert.NotSame(log1, log2);
-        Assert.Equal(log1.Count, log2.Count);
-    }
-
-    [Fact]
-    public void HarnessCreatedEventIsFirstEvent()
-    {
-        var events = _harness.EventLog;
-
-        Assert.NotEmpty(events);
-        Assert.Equal(SimulationEventType.HarnessCreated, events[0].Type);
-    }
-
-    #endregion
-
-    #region RunUntil Tests
 
     [Fact]
     public void RunUntilReturnsWhenConditionMet()
@@ -181,12 +129,9 @@ public sealed class DeterminismTests : IAsyncLifetime
         Assert.True(result);
     }
 
-    #endregion
 
-    #region Seed Access Tests
 
     [Fact]
     public void SeedIsAccessible() => Assert.Equal(TestSeed, _harness.Seed);
 
-    #endregion
 }

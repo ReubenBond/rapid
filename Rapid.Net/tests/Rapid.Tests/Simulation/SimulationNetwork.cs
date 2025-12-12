@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Rapid.Tests.Simulation.Logging;
 
 namespace Rapid.Tests.Simulation;
 
@@ -27,7 +28,7 @@ internal sealed class SimulationNetwork
     private readonly SimulationRandom _random;
     private readonly ConcurrentDictionary<string, HashSet<string>> _partitions = new();
     private readonly Lock _lock = new();
-    private ILogger<SimulationNetwork> _logger;
+    private SimulationNetworkLogger _log;
 
     /// <summary>
     /// Gets or sets the base message delay for all messages.
@@ -53,10 +54,10 @@ internal sealed class SimulationNetwork
     {
         _harness = harness;
         _random = random;
-        _logger = NullLogger<SimulationNetwork>.Instance;
+        _log = new SimulationNetworkLogger(NullLogger<SimulationNetwork>.Instance);
     }
 
-    internal void SetLogger(ILogger<SimulationNetwork> logger) => _logger = logger;
+    internal void SetLogger(ILogger<SimulationNetwork> logger) => _log = new SimulationNetworkLogger(logger);
 
     /// <summary>
     /// Creates a network partition between two nodes (unidirectional).
@@ -69,7 +70,7 @@ internal sealed class SimulationNetwork
             var blocked = _partitions.GetOrAdd(sourceAddress, _ => []);
             blocked.Add(targetAddress);
         }
-        _logger.LogInformation("Created partition: {Source} -> {Target}", sourceAddress, targetAddress);
+        _log.PartitionCreated(sourceAddress, targetAddress);
     }
 
     /// <summary>
@@ -77,7 +78,7 @@ internal sealed class SimulationNetwork
     /// </summary>
     public void CreateBidirectionalPartition(string node1, string node2)
     {
-        _logger.LogInformation("Creating bidirectional partition between {Node1} and {Node2}", node1, node2);
+        _log.BidirectionalPartitionCreating(node1, node2);
         CreatePartition(node1, node2);
         CreatePartition(node2, node1);
     }
@@ -94,7 +95,7 @@ internal sealed class SimulationNetwork
                 blocked.Remove(targetAddress);
             }
         }
-        _logger.LogInformation("Healed partition: {Source} -> {Target}", sourceAddress, targetAddress);
+        _log.PartitionHealed(sourceAddress, targetAddress);
     }
 
     /// <summary>
@@ -102,7 +103,7 @@ internal sealed class SimulationNetwork
     /// </summary>
     public void HealBidirectionalPartition(string node1, string node2)
     {
-        _logger.LogInformation("Healing bidirectional partition between {Node1} and {Node2}", node1, node2);
+        _log.BidirectionalPartitionHealing(node1, node2);
         HealPartition(node1, node2);
         HealPartition(node2, node1);
     }
@@ -118,7 +119,7 @@ internal sealed class SimulationNetwork
             count = _partitions.Count;
             _partitions.Clear();
         }
-        _logger.LogInformation("Healed all {Count} partitions", count);
+        _log.AllPartitionsHealed(count);
     }
 
     /// <summary>
@@ -126,7 +127,7 @@ internal sealed class SimulationNetwork
     /// </summary>
     public void IsolateNode(string nodeAddress)
     {
-        _logger.LogInformation("Isolating node {Node}", nodeAddress);
+        _log.NodeIsolating(nodeAddress);
         foreach (var node in _harness.Nodes)
         {
             var addr = RapidUtils.Loggable(node.Address);
@@ -142,7 +143,7 @@ internal sealed class SimulationNetwork
     /// </summary>
     public void ReconnectNode(string nodeAddress)
     {
-        _logger.LogInformation("Reconnecting isolated node {Node}", nodeAddress);
+        _log.NodeReconnecting(nodeAddress);
         foreach (var node in _harness.Nodes)
         {
             var addr = RapidUtils.Loggable(node.Address);
@@ -150,6 +151,32 @@ internal sealed class SimulationNetwork
             {
                 HealBidirectionalPartition(nodeAddress, addr);
             }
+        }
+    }
+
+    /// <summary>
+    /// Checks if a node is isolated (has partitions with all other nodes).
+    /// </summary>
+    public bool IsNodeIsolated(string nodeAddress)
+    {
+        lock (_lock)
+        {
+            if (!_partitions.TryGetValue(nodeAddress, out var blocked))
+            {
+                return false;
+            }
+
+            // Check if node is partitioned from all other nodes
+            foreach (var node in _harness.Nodes)
+            {
+                var addr = RapidUtils.Loggable(node.Address);
+                if (addr != nodeAddress && !blocked.Contains(addr))
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
     }
 
@@ -171,7 +198,7 @@ internal sealed class SimulationNetwork
         {
             if (_partitions.TryGetValue(sourceAddress, out var blocked) && blocked.Contains(targetAddress))
             {
-                _logger.LogTrace("Message from {Source} to {Target} blocked (partition)", sourceAddress, targetAddress);
+                _log.MessageBlockedByPartition(sourceAddress, targetAddress);
                 return DeliveryStatus.Partitioned;
             }
         }
@@ -179,7 +206,7 @@ internal sealed class SimulationNetwork
         // Check for random message drop (transient)
         if (MessageDropRate > 0 && _random.Chance(MessageDropRate))
         {
-            _logger.LogTrace("Message from {Source} to {Target} dropped (random)", sourceAddress, targetAddress);
+            _log.MessageDroppedRandom(sourceAddress, targetAddress);
             return DeliveryStatus.Dropped;
         }
 

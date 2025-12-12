@@ -7,7 +7,6 @@ public class RapidProtocolOptionsValidatorTests
 {
     private readonly RapidProtocolOptionsValidator _validator = new();
 
-    #region GrpcTimeout Validation
 
     [Fact]
     public void ValidateGrpcTimeoutZeroFails()
@@ -43,9 +42,7 @@ public class RapidProtocolOptionsValidatorTests
         Assert.True(result.Succeeded);
     }
 
-    #endregion
 
-    #region GrpcDefaultRetries Validation
 
     [Fact]
     public void ValidateGrpcDefaultRetriesNegativeFails()
@@ -81,9 +78,7 @@ public class RapidProtocolOptionsValidatorTests
         Assert.True(result.Succeeded);
     }
 
-    #endregion
 
-    #region GrpcJoinTimeout Validation
 
     [Fact]
     public void ValidateGrpcJoinTimeoutZeroFails()
@@ -108,9 +103,7 @@ public class RapidProtocolOptionsValidatorTests
         Assert.True(result.Succeeded);
     }
 
-    #endregion
 
-    #region GrpcProbeTimeout Validation
 
     [Fact]
     public void ValidateGrpcProbeTimeoutZeroFails()
@@ -135,9 +128,7 @@ public class RapidProtocolOptionsValidatorTests
         Assert.True(result.Succeeded);
     }
 
-    #endregion
 
-    #region FailureDetectorInterval Validation
 
     [Fact]
     public void ValidateFailureDetectorIntervalZeroFails()
@@ -162,9 +153,7 @@ public class RapidProtocolOptionsValidatorTests
         Assert.True(result.Succeeded);
     }
 
-    #endregion
 
-    #region BatchingWindow Validation
 
     [Fact]
     public void ValidateBatchingWindowZeroFails()
@@ -189,9 +178,7 @@ public class RapidProtocolOptionsValidatorTests
         Assert.True(result.Succeeded);
     }
 
-    #endregion
 
-    #region ConsensusFallbackTimeoutBaseDelay Validation
 
     [Fact]
     public void ValidateConsensusFallbackTimeoutBaseDelayZeroFails()
@@ -216,9 +203,7 @@ public class RapidProtocolOptionsValidatorTests
         Assert.True(result.Succeeded);
     }
 
-    #endregion
 
-    #region LeaveMessageTimeout Validation
 
     [Fact]
     public void ValidateLeaveMessageTimeoutZeroFails()
@@ -243,9 +228,7 @@ public class RapidProtocolOptionsValidatorTests
         Assert.True(result.Succeeded);
     }
 
-    #endregion
 
-    #region ObserversPerSubject Validation
 
     [Fact]
     public void ValidateObserversPerSubjectZeroFails()
@@ -306,9 +289,7 @@ public class RapidProtocolOptionsValidatorTests
         Assert.True(result.Succeeded);
     }
 
-    #endregion
 
-    #region HighWatermark Validation
 
     [Fact]
     public void ValidateHighWatermarkZeroFails()
@@ -370,9 +351,7 @@ public class RapidProtocolOptionsValidatorTests
         Assert.Contains("must be less than ObserversPerSubject", result.FailureMessage, StringComparison.Ordinal);
     }
 
-    #endregion
 
-    #region LowWatermark Validation
 
     [Fact]
     public void ValidateLowWatermarkNegativeFails()
@@ -435,9 +414,7 @@ public class RapidProtocolOptionsValidatorTests
         Assert.Contains("must be less than HighWatermark", result.FailureMessage, StringComparison.Ordinal);
     }
 
-    #endregion
 
-    #region FailureDetectorConsecutiveFailures Validation
 
     [Fact]
     public void ValidateFailureDetectorConsecutiveFailuresZeroFails()
@@ -486,9 +463,7 @@ public class RapidProtocolOptionsValidatorTests
         Assert.Equal(3, options.FailureDetectorConsecutiveFailures);
     }
 
-    #endregion
 
-    #region Combined Validation
 
     [Fact]
     public void ValidateAllDefaultValuesSucceeds()
@@ -530,9 +505,7 @@ public class RapidProtocolOptionsValidatorTests
         Assert.True(result.Succeeded);
     }
 
-    #endregion
 
-    #region GetEffectiveParameters Tests
 
     [Fact]
     public void GetEffectiveParameters_SingleNodeCluster_ReturnsZeros()
@@ -628,7 +601,6 @@ public class RapidProtocolOptionsValidatorTests
         }
     }
 
-    #endregion
 
     private static RapidProtocolOptions CreateValidOptions() => new();
 }

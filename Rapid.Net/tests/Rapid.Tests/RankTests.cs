@@ -7,7 +7,6 @@ namespace Rapid.Tests;
 /// </summary>
 public class RankTests
 {
-    #region IComparable Tests
 
     [Fact]
     public void CompareToHigherRoundReturnsPositive()
@@ -90,9 +89,7 @@ public class RankTests
         Assert.True(rank1.CompareTo(rank2) > 0);
     }
 
-    #endregion
 
-    #region Equality Operators Tests
 
     [Fact]
     public void EqualityOperatorEqualRanksReturnsTrue()
@@ -154,9 +151,7 @@ public class RankTests
 #pragma warning restore CA1508
     }
 
-    #endregion
 
-    #region Inequality Operators Tests
 
     [Fact]
     public void InequalityOperatorEqualRanksReturnsFalse()
@@ -176,9 +171,7 @@ public class RankTests
         Assert.True(rank1 != rank2);
     }
 
-    #endregion
 
-    #region Less Than Operator Tests
 
     [Fact]
     public void LessThanOperatorSmallerRankReturnsTrue()
@@ -234,9 +227,7 @@ public class RankTests
         Assert.False(rank1 < rank2);
     }
 
-    #endregion
 
-    #region Greater Than Operator Tests
 
     [Fact]
     public void GreaterThanOperatorLargerRankReturnsTrue()
@@ -265,9 +256,7 @@ public class RankTests
         Assert.False(rank1 > rank2);
     }
 
-    #endregion
 
-    #region Less Than Or Equal Operator Tests
 
     [Fact]
     public void LessThanOrEqualOperatorSmallerRankReturnsTrue()
@@ -287,9 +276,7 @@ public class RankTests
         Assert.True(rank1 <= rank2);
     }
 
-    #endregion
 
-    #region Greater Than Or Equal Operator Tests
 
     [Fact]
     public void GreaterThanOrEqualOperatorLargerRankReturnsTrue()
@@ -309,9 +296,7 @@ public class RankTests
         Assert.True(rank1 >= rank2);
     }
 
-    #endregion
 
-    #region Edge Cases
 
     [Fact]
     public void RankRoundDifferenceOverridesNodeIndex()
@@ -346,5 +331,4 @@ public class RankTests
         Assert.Equal(1, ranks[2].NodeIndex);
     }
 
-    #endregion
 }

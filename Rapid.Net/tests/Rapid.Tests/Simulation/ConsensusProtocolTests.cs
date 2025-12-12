@@ -24,7 +24,6 @@ public sealed class ConsensusProtocolTests : IAsyncLifetime
         await _harness.DisposeAsync();
     }
 
-    #region Fast Paxos Basic Operations (CONS-001 to CONS-004)
 
     [Fact]
     public void SingleProposalAcceptedInTwoNodeCluster()
@@ -94,9 +93,7 @@ public sealed class ConsensusProtocolTests : IAsyncLifetime
         Assert.Equal(seedMembers, joiner2Members);
     }
 
-    #endregion
 
-    #region Fast Paxos Failure Cases (CONS-010 to CONS-013)
 
     [Fact]
     public void ConsensusSucceedsWithMinorityFailure()
@@ -175,9 +172,7 @@ public sealed class ConsensusProtocolTests : IAsyncLifetime
         Assert.All(_harness.Nodes, n => Assert.Equal(4, n.MembershipSize));
     }
 
-    #endregion
 
-    #region Configuration Changes (CONS-020 to CONS-022)
 
     [Fact]
     public void ConfigurationIdChangesWithEachMembershipChange()
@@ -232,9 +227,7 @@ public sealed class ConsensusProtocolTests : IAsyncLifetime
             n => Assert.Equal(configId, n.CurrentView.ConfigurationId));
     }
 
-    #endregion
 
-    #region Consensus Under Network Conditions
 
     [Fact]
     public void ConsensusWithMessageDelaysCompletesCorrectly()
@@ -271,9 +264,7 @@ public sealed class ConsensusProtocolTests : IAsyncLifetime
         Assert.Equal(2, joiner.MembershipSize);
     }
 
-    #endregion
 
-    #region Classic Paxos Fallback Tests (CONS-030 to CONS-035)
 
     [Fact]
     public void ClassicPaxosFallback_SucceedsWhenFastPaxosFails()
@@ -432,9 +423,7 @@ public sealed class ConsensusProtocolTests : IAsyncLifetime
         Assert.Equal(configAfterSecondRemoval, nodes[1].CurrentView.ConfigurationId);
     }
 
-    #endregion
 
-    #region HandlePhase1bMessage Guard Tests (CONS-040)
 
     [Fact]
     public void ConsensusNotRepeated_AfterDecision()
@@ -457,6 +446,5 @@ public sealed class ConsensusProtocolTests : IAsyncLifetime
         Assert.Equal(configAfterJoins, seedNode.CurrentView.ConfigurationId);
     }
 
-    #endregion
 }
 

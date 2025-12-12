@@ -25,7 +25,6 @@ public sealed class IntegrationTests : IAsyncLifetime
         await _harness.DisposeAsync();
     }
 
-    #region Complete Cluster Lifecycle (INT-001 to INT-004)
 
     [Fact]
     public void FullClusterLifecycle()
@@ -114,9 +113,7 @@ public sealed class IntegrationTests : IAsyncLifetime
         Assert.All(_harness.Nodes, n => Assert.Equal(3, n.MembershipSize));
     }
 
-    #endregion
 
-    #region Recovery Scenarios (INT-010 to INT-013)
 
     [Fact]
     public void RecoveryFromPartitionedState()
@@ -181,9 +178,7 @@ public sealed class IntegrationTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 3);
     }
 
-    #endregion
 
-    #region View Change Notification (INT-020 to INT-023)
 
     [Fact]
     public void ViewAccessorInitiallyHasView()
@@ -221,9 +216,7 @@ public sealed class IntegrationTests : IAsyncLifetime
         Assert.Equal(2, joiner.ViewAccessor.CurrentView.Size);
     }
 
-    #endregion
 
-    #region Network Simulation Integration
 
     [Fact]
     public void NetworkSimulationBasics()
@@ -268,9 +261,7 @@ public sealed class IntegrationTests : IAsyncLifetime
         Assert.True(_harness.Network.CanDeliver("node:0", "node:2"));
     }
 
-    #endregion
 
-    #region Harness Utilities
 
     [Fact]
     public void HarnessPropertiesAccessible()
@@ -320,5 +311,4 @@ public sealed class IntegrationTests : IAsyncLifetime
         });
     }
 
-    #endregion
 }

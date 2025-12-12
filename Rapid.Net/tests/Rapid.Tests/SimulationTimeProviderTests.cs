@@ -87,7 +87,6 @@ public class SimulationTimeProviderTests
         public void RunUntilIdle() => TaskQueue.RunUntilIdle();
     }
 
-    #region Constructor Tests
 
     [Fact]
     public void ConstructorDefaultInitializationSetsExpectedValues()
@@ -134,9 +133,7 @@ public class SimulationTimeProviderTests
         Assert.Equal(customTime, p.Start);
     }
 
-    #endregion
 
-    #region GetTimestamp Tests
 
     [Fact]
     public void GetTimestampWithoutAdvanceDoesNotChange()
@@ -173,9 +170,7 @@ public class SimulationTimeProviderTests
         Assert.Equal(TimeSpan.FromSeconds(1), elapsed);
     }
 
-    #endregion
 
-    #region Advance Tests
 
     [Fact]
     public void AdvanceForwardAdvancesByProperAmount()
@@ -235,9 +230,7 @@ public class SimulationTimeProviderTests
         Assert.Equal(1000, elapsed.TotalMilliseconds);
     }
 
-    #endregion
 
-    #region SetUtcNow Tests
 
     [Fact]
     public void SetUtcNowForwardAdvancesByProperAmount()
@@ -283,9 +276,7 @@ public class SimulationTimeProviderTests
         Assert.Equal(currentTime, p.GetUtcNow());
     }
 
-    #endregion
 
-    #region Timer Basic Tests
 
     [Fact]
     public void CreateTimerWithDueTimeCreatesWaiter()
@@ -434,9 +425,7 @@ public class SimulationTimeProviderTests
         Assert.Equal(0, callCount);
     }
 
-    #endregion
 
-    #region Timer Edge Cases
 
     [Fact]
     public void MultipleTimersFireInOrder()
@@ -509,9 +498,7 @@ public class SimulationTimeProviderTests
         Assert.Equal("Test exception", ex.Message);
     }
 
-    #endregion
 
-    #region AdvanceToNextTimer Tests
 
     [Fact]
     public void AdvanceToNextTimerWithPendingTimer()
@@ -561,9 +548,7 @@ public class SimulationTimeProviderTests
         Assert.Equal([1, 2, 3], firedTimers);
     }
 
-    #endregion
 
-    #region TimeUntilNextTimer Tests
 
     [Fact]
     public void TimeUntilNextTimerNoPendingTimersReturnsNull()
@@ -611,9 +596,7 @@ public class SimulationTimeProviderTests
         Assert.Equal(TimeSpan.FromSeconds(10), p.TimeUntilNextTimer);
     }
 
-    #endregion
 
-    #region GetPendingTimers Tests
 
     [Fact]
     public void GetPendingTimersNoPendingReturnsEmpty()
@@ -654,9 +637,7 @@ public class SimulationTimeProviderTests
         Assert.True(timers[1].DueTime < timers[2].DueTime);
     }
 
-    #endregion
 
-    #region Task.Delay Integration Tests
 
     [Fact]
     public async Task DelayZeroDelayCompletesImmediately()
@@ -780,9 +761,7 @@ public class SimulationTimeProviderTests
         Assert.Equal([2, 3, 1], completionOrder);
     }
 
-    #endregion
 
-    #region ToString Tests
 
     [Fact]
     public void ToStringDefaultReturnsProperFormat()
@@ -813,9 +792,7 @@ public class SimulationTimeProviderTests
         Assert.Equal("2000-01-01T01:30:00.000", p.TimeProvider.ToString());
     }
 
-    #endregion
 
-    #region PendingTimerCount Tests
 
     [Fact]
     public void PendingTimerCountNoTimersReturnsZero()
@@ -885,9 +862,7 @@ public class SimulationTimeProviderTests
         Assert.Equal(1, p.PendingTimerCount);
     }
 
-    #endregion
 
-    #region Timer Disposal Tests
 
     [Fact]
     public void TimerDisposeRemovesFromPending()
@@ -935,9 +910,7 @@ public class SimulationTimeProviderTests
         Assert.False(result);
     }
 
-    #endregion
 
-    #region Thread Safety Tests
 
     [Fact]
     public async Task ConcurrentAdvanceDoesNotCorruptState()
@@ -999,9 +972,7 @@ public class SimulationTimeProviderTests
         Assert.Equal(0, p.PendingTimerCount);
     }
 
-    #endregion
 
-    #region Start Property Tests
 
     [Fact]
     public void StartReturnsInitialTime()
@@ -1024,5 +995,4 @@ public class SimulationTimeProviderTests
         Assert.NotEqual(startTime, p.GetUtcNow());
     }
 
-    #endregion
 }

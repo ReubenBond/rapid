@@ -37,7 +37,6 @@ public class SimpleCutDetectorTests
         return builder.Build();
     }
 
-    #region Constructor Tests
 
     [Fact]
     public void Constructor_K1_Succeeds()
@@ -75,9 +74,7 @@ public class SimpleCutDetectorTests
         Assert.Throws<ArgumentNullException>(() => new SimpleCutDetector(null!));
     }
 
-    #endregion
 
-    #region K=1 Tests (Two-node cluster)
 
     [Fact]
     public void K1_SingleVoteTriggersProposal()
@@ -127,9 +124,7 @@ public class SimpleCutDetectorTests
         Assert.Equal(2, detector.GetNumProposals());
     }
 
-    #endregion
 
-    #region K=2 Tests (Three-node cluster)
 
     [Fact]
     public void K2_SingleVoteDoesNotTriggerProposal()
@@ -204,9 +199,7 @@ public class SimpleCutDetectorTests
         Assert.Equal(1, detector.GetNumProposals());
     }
 
-    #endregion
 
-    #region Detector Replacement Tests (replaces Clear tests)
 
     [Fact]
     public void NewDetector_StartsWithZeroProposals()
@@ -246,9 +239,7 @@ public class SimpleCutDetectorTests
         Assert.Equal(1, detector2.GetNumProposals());
     }
 
-    #endregion
 
-    #region Edge Status Tests
 
     [Fact]
     public void EdgeStatus_UpAndDownBothWork()
@@ -267,9 +258,7 @@ public class SimpleCutDetectorTests
         Assert.Equal(2, detector.GetNumProposals());
     }
 
-    #endregion
 
-    #region Multiple Ring Numbers in Single Alert
 
     [Fact]
     public void MultipleRingNumbers_K1_TriggersOnFirst()
@@ -295,9 +284,7 @@ public class SimpleCutDetectorTests
         Assert.Equal(1, detector.GetNumProposals());
     }
 
-    #endregion
 
-    #region Ring Number Handling
 
     [Fact]
     public void RingNumber_LargerThanK_Throws()
@@ -353,9 +340,7 @@ public class SimpleCutDetectorTests
         Assert.Single(result2); // Second vote triggers proposal
     }
 
-    #endregion
 
-    #region Null Input Tests
 
     [Fact]
     public void AggregateForProposal_NullMessage_Throws()
@@ -366,9 +351,7 @@ public class SimpleCutDetectorTests
         Assert.Throws<ArgumentNullException>(() => detector.AggregateForProposal(null!));
     }
 
-    #endregion
 
-    #region InvalidateFailingEdges Tests
 
     [Fact]
     public void InvalidateFailingEdges_NoDownEvents_ReturnsEmpty()
@@ -387,5 +370,4 @@ public class SimpleCutDetectorTests
         Assert.Empty(result);
     }
 
-    #endregion
 }

@@ -25,7 +25,6 @@ public sealed class AsymmetricFailureTests : IAsyncLifetime
         await _harness.DisposeAsync();
     }
 
-    #region One-Way Partition Tests (ASYM-001 to ASYM-005)
 
     [Fact]
     public void OneWayPartition_SourceCannotReachTarget()
@@ -150,9 +149,7 @@ public sealed class AsymmetricFailureTests : IAsyncLifetime
         Assert.Equal(DeliveryStatus.Success, _harness.Network.CheckDelivery(addrD, addrC));
     }
 
-    #endregion
 
-    #region Asymmetric Failure Detection Tests (ASYM-010 to ASYM-015)
 
     [Fact]
     public void AsymmetricPartition_ObserverCannotReachMonitoredNode()
@@ -266,9 +263,7 @@ public sealed class AsymmetricFailureTests : IAsyncLifetime
         Assert.Equal(4, _harness.Nodes.Count);
     }
 
-    #endregion
 
-    #region Complex Asymmetric Scenarios (ASYM-020 to ASYM-025)
 
     [Fact]
     public void AsymmetricPartition_ChainedOneWayFailures()
@@ -447,9 +442,7 @@ public sealed class AsymmetricFailureTests : IAsyncLifetime
         Assert.True(_harness.Nodes.Count >= 3, "Cluster should maintain quorum");
     }
 
-    #endregion
 
-    #region Asymmetric Partition During Operations (ASYM-030 to ASYM-035)
 
     [Fact]
     public void AsymmetricPartition_DuringJoin()
@@ -527,9 +520,7 @@ public sealed class AsymmetricFailureTests : IAsyncLifetime
         Assert.True(newNode2.IsInitialized, "Second new node should join");
     }
 
-    #endregion
 
-    #region Edge Cases (ASYM-040 to ASYM-045)
 
     [Fact]
     public void AsymmetricPartition_SingleNodeCannotSendToAnyone()
@@ -691,5 +682,4 @@ public sealed class AsymmetricFailureTests : IAsyncLifetime
         Assert.True(_harness.Nodes.Count >= 2, "Cluster should handle cyclic partitions");
     }
 
-    #endregion
 }

@@ -28,7 +28,6 @@ public sealed class ChaosTests : IAsyncLifetime
         await _harness.DisposeAsync();
     }
 
-    #region Random Fault Injection (CHAOS-001 to CHAOS-004)
 
     [Fact]
     public void ChaosInjectorDefaultsToZeroRates()
@@ -102,9 +101,7 @@ public sealed class ChaosTests : IAsyncLifetime
         Assert.True(_harness.Network.CanDeliver(node1Addr, node2Addr));
     }
 
-    #endregion
 
-    #region Stress Testing (CHAOS-010 to CHAOS-013)
 
     [Fact]
     public void RunChaosForManySteps()
@@ -151,7 +148,7 @@ public sealed class ChaosTests : IAsyncLifetime
             output?.WriteLine($"Invariant check failed! Violations:");
             foreach (var violation in _checker.Violations)
             {
-                output?.WriteLine($"  [{violation.Type}] {violation.Message} (LogicalTime={violation.LogicalTime})");
+                output?.WriteLine($"  [{violation.Type}] {violation.Message} (SimulatedTime={violation.SimulatedTime})");
             }
 
             // Output node membership info
@@ -182,9 +179,7 @@ public sealed class ChaosTests : IAsyncLifetime
         Assert.Contains(node, _harness.Nodes);
     }
 
-    #endregion
 
-    #region Scheduled Fault Scenarios (CHAOS-020 to CHAOS-023)
 
     [Fact]
     public void ScheduledPartitionExecutesOnTime()
@@ -284,9 +279,7 @@ public sealed class ChaosTests : IAsyncLifetime
         _chaos.MaybeInjectFault(); // Should not throw even though node is already crashed
     }
 
-    #endregion
 
-    #region Additional Chaos Scenarios
 
     /// <summary>
     /// Tests the cluster's resilience to random network partitions being created and healed.
@@ -401,7 +394,6 @@ public sealed class ChaosTests : IAsyncLifetime
         Assert.True(_harness.Nodes.Count >= 2);
     }
 
-    #endregion
 }
 
 

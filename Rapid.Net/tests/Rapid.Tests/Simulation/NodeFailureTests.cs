@@ -25,7 +25,6 @@ public sealed class NodeFailureTests : IAsyncLifetime
         await _harness.DisposeAsync();
     }
 
-    #region Single Node Failure (FAIL-001 to FAIL-004)
 
     [Fact]
     public void NodeCrashRemovesFromCluster()
@@ -90,9 +89,7 @@ public sealed class NodeFailureTests : IAsyncLifetime
         Assert.DoesNotContain(seedNode, _harness.Nodes);
     }
 
-    #endregion
 
-    #region Multiple Node Failures (FAIL-010 to FAIL-013)
 
     [Fact]
     public void TwoNodeFailuresInFiveNodeCluster()
@@ -148,9 +145,7 @@ public sealed class NodeFailureTests : IAsyncLifetime
         Assert.Contains(joiner1, _harness.Nodes);
     }
 
-    #endregion
 
-    #region Seed Node Failure (FAIL-020 to FAIL-022)
 
     [Fact]
     public void SeedNodeCrashDoesNotAffectExistingCluster()
@@ -218,9 +213,7 @@ public sealed class NodeFailureTests : IAsyncLifetime
         Assert.Equal(3, joiner1.MembershipSize);
     }
 
-    #endregion
 
-    #region Failure During Operations (FAIL-030 to FAIL-033)
 
     [Fact(Skip = "Complex race condition test requiring mid-join node crash injection - not supported by simulation harness")]
     public void NodeCrashDuringJoinProtocol()
@@ -246,5 +239,4 @@ public sealed class NodeFailureTests : IAsyncLifetime
         Assert.DoesNotContain(joiner, _harness.Nodes);
     }
 
-    #endregion
 }

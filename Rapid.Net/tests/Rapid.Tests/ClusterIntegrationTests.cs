@@ -274,7 +274,6 @@ public sealed class ClusterIntegrationTests(ITestOutputHelper outputHelper) : IA
         Assert.True(proposals.Count > 0);
     }
 
-    #region Sequential Join Tests
 
     [Fact]
     public async Task SequentialJoinsFiveNodesAllConverge()
@@ -322,9 +321,7 @@ public sealed class ClusterIntegrationTests(ITestOutputHelper outputHelper) : IA
         Assert.Equal(3, joiner2.GetMembershipSize());
     }
 
-    #endregion
 
-    #region Memberlist Tests
 
     [Fact]
     public async Task GetMemberlistReturnsAllMembers()
@@ -373,9 +370,7 @@ public sealed class ClusterIntegrationTests(ITestOutputHelper outputHelper) : IA
         }
     }
 
-    #endregion
 
-    #region Metadata Tests
 
     [Fact]
     public async Task ComplexMetadataPropagatedCorrectly()
@@ -437,9 +432,7 @@ public sealed class ClusterIntegrationTests(ITestOutputHelper outputHelper) : IA
         Assert.Empty(allMetadata[joinerAddress].Metadata_);
     }
 
-    #endregion
 
-    #region Event Subscription Tests
 
     [Fact]
     public async Task MultipleSubscriptionsAllReceiveEvents()
@@ -492,9 +485,7 @@ public sealed class ClusterIntegrationTests(ITestOutputHelper outputHelper) : IA
         Assert.True(lastChange.Membership.Count >= 2);
     }
 
-    #endregion
 
-    #region Configuration ID Tests
 
     [Fact]
     public async Task ConfigurationIdChangesOnJoin()
@@ -518,9 +509,7 @@ public sealed class ClusterIntegrationTests(ITestOutputHelper outputHelper) : IA
         Assert.NotEmpty(configIds);
     }
 
-    #endregion
 
-    #region Four Node Tests
 
     [Fact]
     public async Task FourNodesFormCluster()
@@ -546,9 +535,7 @@ public sealed class ClusterIntegrationTests(ITestOutputHelper outputHelper) : IA
         Assert.Equal(4, joiner3.GetMembershipSize());
     }
 
-    #endregion
 
-    #region Node Status Tests
 
     [Fact]
     public async Task NodeStatusChangesTracked()
@@ -569,5 +556,4 @@ public sealed class ClusterIntegrationTests(ITestOutputHelper outputHelper) : IA
         Assert.True(viewChangeCount > 0);
     }
 
-    #endregion
 }

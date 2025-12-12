@@ -103,7 +103,6 @@ public class PaxosTests
         return r1.NodeIndex.CompareTo(r2.NodeIndex);
     }
 
-    #region Phase1aMessage Tests
 
     [Fact]
     public void Phase1aMessageCreationSetsAllFields()
@@ -155,9 +154,7 @@ public class PaxosTests
         Assert.Equal(100, original.ConfigurationId);
     }
 
-    #endregion
 
-    #region Phase1bMessage Tests
 
     [Fact]
     public void Phase1bMessageCreationSetsAllFields()
@@ -215,9 +212,7 @@ public class PaxosTests
         Assert.Equal(3, msg.Vval.Count);
     }
 
-    #endregion
 
-    #region Phase2aMessage Tests
 
     [Fact]
     public void Phase2aMessageCreationSetsAllFields()
@@ -260,9 +255,7 @@ public class PaxosTests
         Assert.Equal(3, msg.Vval.Count);
     }
 
-    #endregion
 
-    #region Phase2bMessage Tests
 
     [Fact]
     public void Phase2bMessageCreationSetsAllFields()
@@ -302,9 +295,7 @@ public class PaxosTests
         Assert.Equal(10, msg.Endpoints.Count);
     }
 
-    #endregion
 
-    #region FastRoundPhase2bMessage Tests
 
     [Fact]
     public void FastRoundPhase2bMessageCreationSetsAllFields()
@@ -352,9 +343,7 @@ public class PaxosTests
         Assert.Equal(100, msg.Endpoints.Count);
     }
 
-    #endregion
 
-    #region Rank Comparison in Paxos Context
 
     [Fact]
     public void RankFastRoundIsRound1()
@@ -409,9 +398,7 @@ public class PaxosTests
         Assert.Equal(16, n - f);
     }
 
-    #endregion
 
-    #region ConsensusResponse Tests
 
     [Fact]
     public void ConsensusResponseDefaultFields()
@@ -421,9 +408,7 @@ public class PaxosTests
         Assert.NotNull(response);
     }
 
-    #endregion
 
-    #region Message Serialization Tests
 
     [Fact]
     public void Phase1aMessageSerializeDeserializeRoundtrips()
@@ -463,9 +448,7 @@ public class PaxosTests
         Assert.Equal(5001, deserialized.Vval[0].Port);
     }
 
-    #endregion
 
-    #region Edge Cases
 
     [Fact]
     public void RankZeroValuesCompareCorrectly()
@@ -516,9 +499,7 @@ public class PaxosTests
         Assert.Equal(long.MaxValue, msg.ConfigurationId);
     }
 
-    #endregion
 
-    #region ChooseValue Tests (Coordinator Rule for Classic Paxos)
 
     /// <summary>
     /// Helper to create a Phase1bMessage with specific vrnd and vval
@@ -755,5 +736,4 @@ public class PaxosTests
         Assert.Equal(node1, result[0]);
     }
 
-    #endregion
 }

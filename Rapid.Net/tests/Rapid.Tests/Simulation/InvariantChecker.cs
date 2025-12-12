@@ -161,8 +161,6 @@ internal sealed class InvariantChecker(SimulationHarness harness)
     /// </summary>
     public bool CheckLiveness(int maxSteps = 1000)
     {
-        var initialLogicalTime = _harness.LogicalTime;
-
         // Try to make progress
         for (var i = 0; i < maxSteps; i++)
         {
@@ -201,7 +199,6 @@ internal sealed class InvariantChecker(SimulationHarness harness)
     private void RecordViolation(InvariantType type, string message)
     {
         var violation = new InvariantViolation(
-            _harness.LogicalTime,
             _harness.TimeProvider.GetUtcNow(),
             type,
             message);
@@ -241,7 +238,6 @@ internal enum InvariantType
 /// Represents a detected invariant violation.
 /// </summary>
 internal readonly record struct InvariantViolation(
-    long LogicalTime,
     DateTimeOffset SimulatedTime,
     InvariantType Type,
     string Message);
