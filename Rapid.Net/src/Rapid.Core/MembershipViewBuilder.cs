@@ -109,6 +109,15 @@ internal sealed class MembershipViewBuilder
         }
     }
 
+    private static int ComputeRingCount(int ringCount, int nodeIdCount)
+    {
+        // There is no reason to have more rings than there are nodes.
+        // For one or two nodes, there should be one ring.
+        // For more nodes, there should be at most one less ring than there are nodes.
+        ringCount = Math.Clamp(ringCount, 1, Math.Max(1, nodeIdCount - 1));
+        return ringCount;
+    }
+
     /// <summary>
     /// Gets the number of rings (K value).
     /// </summary>
@@ -280,13 +289,14 @@ internal sealed class MembershipViewBuilder
         _isSealed = true;
 
         // Create immutable ring copies
-        var ringsBuilder = ImmutableArray.CreateBuilder<ImmutableArray<Endpoint>>(_ringCount);
-        for (var i = 0; i < _ringCount; i++)
+        var ringCount = ComputeRingCount(_ringCount, _allNodes.Count);
+        var ringsBuilder = ImmutableArray.CreateBuilder<ImmutableArray<Endpoint>>(ringCount);
+        for (var i = 0; i < ringCount; i++)
         {
             ringsBuilder.Add([.. _rings[i]]);
         }
 
-        return new MembershipView(_ringCount, configurationId, ringsBuilder.MoveToImmutable(), [.. _identifiersSeen]);
+        return new MembershipView(ringCount, configurationId, ringsBuilder.MoveToImmutable(), [.. _identifiersSeen]);
     }
 
     /// <summary>

@@ -6,11 +6,10 @@ namespace Rapid;
 
 /// <summary>
 /// A simple cut detector for small clusters where the full multi-node cut detection
-/// algorithm (with H/L watermarks) is not applicable (K &lt; 3).
+/// algorithm (with H/L watermarks) is not applicable.
 /// 
-/// This detector uses a simple voting threshold:
-/// - For 2-node clusters: 1 vote required (the only observer)
-/// - For 3-node clusters: 2 votes required (majority of 2 observers per subject)
+/// This detector uses a simple voting threshold requiring all observers to agree:
+/// - For K observers per subject, all K votes are required
 /// 
 /// Unlike <see cref="MultiNodeCutDetector"/>, this does not implement the
 /// "unstable mode" waiting behavior - it simply triggers a proposal once
@@ -75,20 +74,20 @@ internal sealed partial class SimpleCutDetector : ICutDetector
     private partial void LogImplicitEdge(LoggableEndpoint Observer, LoggableEndpoint NodeInFlux);
 
     /// <summary>
-    /// Creates a SimpleCutDetector for small clusters.
+    /// Creates a SimpleCutDetector for clusters where MultiNodeCutDetector constraints cannot be satisfied.
     /// </summary>
     /// <param name="membershipView">The current membership view for observer lookups (K is derived from RingCount)</param>
     /// <param name="logger">Optional logger for diagnostic output</param>
-    /// <exception cref="ArgumentException">If membershipView.RingCount is not 1 or 2</exception>
+    /// <exception cref="ArgumentException">If membershipView.RingCount is less than 1</exception>
     public SimpleCutDetector(MembershipView membershipView, ILogger<SimpleCutDetector>? logger = null)
     {
         ArgumentNullException.ThrowIfNull(membershipView);
 
         var k = membershipView.RingCount;
-        if (k < 1 || k > 2)
+        if (k < 1)
         {
             throw new ArgumentException(
-                $"SimpleCutDetector is for small clusters with 1-2 observers per subject, got {k}",
+                $"SimpleCutDetector requires at least 1 observer per subject, got {k}",
                 nameof(membershipView));
         }
 

@@ -19,13 +19,7 @@ internal sealed class MembershipViewAccessor : IMembershipViewAccessor, IDisposa
     public MembershipView CurrentView => _viewChangeChannel.Current.Value;
 
     /// <inheritdoc/>
-    public async IAsyncEnumerable<MembershipView> ListenForViewUpdatesAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
-    {
-        await foreach (var view in _viewChangeChannel.Reader.WithCancellation(cancellationToken))
-        {
-            yield return view;
-        }
-    }
+    public BroadcastChannelReader<MembershipView> Updates => _viewChangeChannel.Reader;
 
     /// <summary>
     /// Publishes a new view to all listeners. Called by MembershipService when consensus is reached.

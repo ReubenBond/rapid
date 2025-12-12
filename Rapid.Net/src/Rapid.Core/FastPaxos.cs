@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
 
+using Rapid.Logging;
 using Rapid.Messaging;
 using Rapid.Pb;
 
@@ -17,60 +18,15 @@ namespace Rapid;
 /// This class does NOT handle classic Paxos rounds. The ConsensusCoordinator
 /// is responsible for creating Paxos instances for classic rounds (2, 3, ...).
 /// </summary>
-internal sealed partial class FastPaxos
+internal sealed class FastPaxos
 {
-    private readonly ILogger<FastPaxos> _logger;
+    private readonly FastPaxosLogger _log;
     private readonly Endpoint _myAddr;
     private readonly long _configurationId;
     private readonly long _membershipSize;
     private readonly IBroadcaster _broadcaster;
     private readonly Dictionary<List<Endpoint>, int> _votesPerProposal = new(ListEndpointComparer.Instance);
     private readonly HashSet<Endpoint> _votesReceived = [];
-
-    private readonly struct LoggableEndpoints(IEnumerable<Endpoint> endpoints)
-    {
-        private readonly IEnumerable<Endpoint> _endpoints = endpoints;
-        public override readonly string ToString() => string.Join(", ", _endpoints.Select(RapidUtils.Loggable));
-    }
-
-    private readonly struct LoggableEndpoint(Endpoint endpoint)
-    {
-        private readonly Endpoint _endpoint = endpoint;
-        public override readonly string ToString() => RapidUtils.Loggable(_endpoint);
-    }
-
-    [LoggerMessage(Level = LogLevel.Trace, Message = "Configuration ID mismatch for proposal: current_config:{CurrentConfig}")]
-    private partial void LogConfigurationMismatch(long CurrentConfig);
-
-    [LoggerMessage(Level = LogLevel.Trace, Message = "Decided on a view change: {Proposal}")]
-    private partial void LogDecidedViewChange(LoggableEndpoints Proposal);
-
-    [LoggerMessage(Level = LogLevel.Trace, Message = "Fast round may not succeed for proposal")]
-    private partial void LogFastRoundMayNotSucceed();
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "FastPaxos initialized: myAddr={MyAddr}, configId={ConfigId}, membershipSize={MembershipSize}")]
-    private partial void LogFastPaxosInitialized(LoggableEndpoint MyAddr, long ConfigId, long MembershipSize);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Propose: broadcasting fast round proposal={Proposal}")]
-    private partial void LogPropose(LoggableEndpoints Proposal);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "HandleFastRoundProposal: received from {Sender}, endpoints={Endpoints}, configId={ConfigId}")]
-    private partial void LogHandleFastRoundProposalReceived(LoggableEndpoint Sender, LoggableEndpoints Endpoints, long ConfigId);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "HandleFastRoundProposal: duplicate vote from {Sender}, ignoring")]
-    private partial void LogDuplicateFastRoundVote(LoggableEndpoint Sender);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "HandleFastRoundProposal: already decided, ignoring")]
-    private partial void LogFastRoundAlreadyDecided();
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "HandleFastRoundProposal: vote count for proposal={Count}, total votes received={TotalVotes}, threshold={Threshold}, f={F}")]
-    private partial void LogFastRoundVoteCount(int Count, int TotalVotes, long Threshold, int F);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "HandleFastRoundProposal: fast round succeeded")]
-    private partial void LogFastRoundSucceeded();
-
-    [LoggerMessage(Level = LogLevel.Information, Message = "Early fallback needed: {FailureCount} delivery failures (f={F}, need at least {Threshold} for Fast Paxos)")]
-    private partial void LogEarlyFallbackNeeded(int FailureCount, int F, long Threshold);
 
     private readonly TaskCompletionSource<ConsensusResult> _resultTcs = new();
     private CancellationTokenRegistration _cancellationRegistration;
@@ -91,9 +47,9 @@ internal sealed partial class FastPaxos
         _configurationId = configurationId;
         _membershipSize = membershipSize;
         _broadcaster = broadcaster;
-        _logger = logger;
+        _log = new FastPaxosLogger(logger);
 
-        LogFastPaxosInitialized(new LoggableEndpoint(myAddr), configurationId, membershipSize);
+        _log.FastPaxosInitialized(new FastPaxosLogger.LoggableEndpoint(myAddr), configurationId, membershipSize);
     }
 
     /// <summary>
@@ -119,7 +75,7 @@ internal sealed partial class FastPaxos
     /// <param name="cancellationToken">Cancellation token</param>
     public void Propose(List<Endpoint> proposal, CancellationToken cancellationToken = default)
     {
-        LogPropose(new LoggableEndpoints(proposal));
+        _log.Propose(new FastPaxosLogger.LoggableEndpoints(proposal));
 
         var consensusMessage = new FastRoundPhase2bMessage
         {
@@ -149,7 +105,7 @@ internal sealed partial class FastPaxos
             // If we can't reach the threshold due to delivery failures, complete with failure
             if (maxPossibleVotes < fastPaxosThreshold && !_resultTcs.Task.IsCompleted)
             {
-                LogEarlyFallbackNeeded(newFailureCount, f, fastPaxosThreshold);
+                _log.EarlyFallbackNeeded(newFailureCount, f, fastPaxosThreshold);
                 _resultTcs.TrySetResult(ConsensusResult.DeliveryFailure.Instance);
             }
         }, cancellationToken);
@@ -161,23 +117,23 @@ internal sealed partial class FastPaxos
     /// <param name="proposalMessage">the membership change proposal towards a configuration change.</param>
     public void HandleFastRoundProposal(FastRoundPhase2bMessage proposalMessage)
     {
-        LogHandleFastRoundProposalReceived(new LoggableEndpoint(proposalMessage.Sender), new LoggableEndpoints(proposalMessage.Endpoints), proposalMessage.ConfigurationId);
+        _log.HandleFastRoundProposalReceived(new FastPaxosLogger.LoggableEndpoint(proposalMessage.Sender), new FastPaxosLogger.LoggableEndpoints(proposalMessage.Endpoints), proposalMessage.ConfigurationId);
 
         if (proposalMessage.ConfigurationId != _configurationId)
         {
-            LogConfigurationMismatch(_configurationId);
+            _log.ConfigurationMismatch(_configurationId);
             return;
         }
 
         if (_votesReceived.Contains(proposalMessage.Sender))
         {
-            LogDuplicateFastRoundVote(new LoggableEndpoint(proposalMessage.Sender));
+            _log.DuplicateFastRoundVote(new FastPaxosLogger.LoggableEndpoint(proposalMessage.Sender));
             return;
         }
 
         if (_resultTcs.Task.IsCompleted)
         {
-            LogFastRoundAlreadyDecided();
+            _log.FastRoundAlreadyDecided();
             return;
         }
 
@@ -191,24 +147,24 @@ internal sealed partial class FastPaxos
         var f = (int)Math.Floor((_membershipSize - 1) / 4.0); // Fast Paxos resiliency.
         var threshold = _membershipSize - f;
 
-        LogFastRoundVoteCount(count, _votesReceived.Count, threshold, f);
+        _log.FastRoundVoteCount(count, _votesReceived.Count, threshold, f);
 
         if (_votesReceived.Count >= _membershipSize - f)
         {
             if (count >= _membershipSize - f)
             {
-                LogDecidedViewChange(new LoggableEndpoints(proposalList));
+                _log.DecidedViewChange(new FastPaxosLogger.LoggableEndpoints(proposalList));
 
                 // We have a successful proposal. Consume it.
                 if (_resultTcs.TrySetResult(new ConsensusResult.Decided(proposalList)))
                 {
-                    LogFastRoundSucceeded();
+                    _log.FastRoundSucceeded();
                 }
             }
             else
             {
                 // Fast round cannot succeed due to vote split, complete with failure
-                LogFastRoundMayNotSucceed();
+                _log.FastRoundMayNotSucceed();
                 _resultTcs.TrySetResult(ConsensusResult.VoteSplit.Instance);
             }
         }

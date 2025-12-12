@@ -16,7 +16,6 @@ public interface IMembershipViewAccessor
     /// Subscribes to view changes, returning an async enumerable of subsequently decided views.
     /// The enumerable will yield a new MembershipView each time consensus is reached on a view change.
     /// </summary>
-    /// <param name="cancellationToken">Token to cancel the subscription.</param>
     /// <returns>An async enumerable of MembershipView instances.</returns>
-    IAsyncEnumerable<MembershipView> ListenForViewUpdatesAsync(CancellationToken cancellationToken = default);
+    BroadcastChannelReader<MembershipView> Updates { get; }
 }

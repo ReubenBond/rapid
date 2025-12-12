@@ -3,7 +3,7 @@ using Rapid.Pb;
 namespace Rapid.Tests;
 
 /// <summary>
-/// Tests for simple cut detection used in small clusters (K &lt; 3)
+/// Tests for simple cut detection used in clusters where MultiNodeCutDetector constraints cannot be satisfied
 /// </summary>
 public class SimpleCutDetectorTests
 {
@@ -62,10 +62,11 @@ public class SimpleCutDetectorTests
     }
 
     [Fact]
-    public void Constructor_K3_Throws()
+    public void Constructor_K3_Succeeds()
     {
-        var view = CreateTestView(10, 3); // K=3 is too high for SimpleCutDetector
-        Assert.Throws<ArgumentException>(() => new SimpleCutDetector(view));
+        var view = CreateTestView(10, 3);
+        var detector = new SimpleCutDetector(view);
+        Assert.Equal(0, detector.GetNumProposals());
     }
 
     [Fact]

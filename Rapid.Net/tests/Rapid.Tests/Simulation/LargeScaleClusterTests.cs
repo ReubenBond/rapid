@@ -202,7 +202,7 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
         var viewCollectionComplete = false;
         var viewCollectionTask = Task.Run(async () =>
         {
-            await foreach (var view in seedNode.ViewAccessor.ListenForViewUpdatesAsync(cancellationToken))
+            await foreach (var view in seedNode.ViewAccessor.Updates.WithCancellation(cancellationToken))
             {
                 viewHistory.Add(view);
                 if (view.Size >= clusterSize || viewCollectionComplete)

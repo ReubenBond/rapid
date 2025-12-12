@@ -3,15 +3,21 @@ using System.Reactive.Subjects;
 namespace Rapid;
 
 /// <summary>
+/// Contains sentinel values used by <see cref="BroadcastChannel{T}"/>.
+/// </summary>
+internal static class BroadcastChannel
+{
+    internal static readonly object InitialValue = new();
+    internal static readonly object DisposedValue = new();
+}
+
+/// <summary>
 /// A broadcast channel that allows multiple subscribers to receive the same items.
 /// Provides <see cref="Reader"/> for consumers and <see cref="Writer"/> for producers.
 /// </summary>
 /// <typeparam name="T">The type of items in the channel.</typeparam>
 public sealed class BroadcastChannel<T> : IDisposable
 {
-    private static readonly object InitialValue = new();
-    private static readonly object DisposedValue = new();
-
     private readonly ReplaySubject<T> _subject = new(1);
     private readonly Lock _lock = new();
     private Element _current;
@@ -167,7 +173,7 @@ public sealed class BroadcastChannel<T> : IDisposable
         }
 
         public static Element CreateInitial() => new(
-            InitialValue,
+            BroadcastChannel.InitialValue,
             new TaskCompletionSource<Element>(TaskCreationOptions.RunContinuationsAsynchronously));
 
         public static Element CreateDisposed()
@@ -177,14 +183,14 @@ public sealed class BroadcastChannel<T> : IDisposable
             // on the disposed element. The IsDisposed check in MoveNextAsync prevents
             // any subscriber from actually calling NextAsync() on a disposed element.
             var tcs = new TaskCompletionSource<Element>(TaskCreationOptions.RunContinuationsAsynchronously);
-            var disposed = new Element(DisposedValue, tcs);
+            var disposed = new Element(BroadcastChannel.DisposedValue, tcs);
             tcs.SetResult(disposed); // Self-referential: NextAsync returns itself
             return disposed;
         }
 
         public bool IsValid => !IsInitial && !IsDisposed;
-        public bool IsInitial => ReferenceEquals(_value, InitialValue);
-        public bool IsDisposed => ReferenceEquals(_value, DisposedValue);
+        public bool IsInitial => ReferenceEquals(_value, BroadcastChannel.InitialValue);
+        public bool IsDisposed => ReferenceEquals(_value, BroadcastChannel.DisposedValue);
 
         public T Value
         {
@@ -232,20 +238,34 @@ public sealed class BroadcastChannelReader<T> : IAsyncEnumerable<T>, IObservable
 
     /// <inheritdoc />
     public IAsyncEnumerator<T> GetAsyncEnumerator(CancellationToken cancellationToken = default)
-        => new Enumerator(_channel.Current, cancellationToken);
+        => new AsyncEnumerator(_channel.Current, cancellationToken);
 
     /// <inheritdoc />
     public IDisposable Subscribe(IObserver<T> observer) => _channel.Observable.Subscribe(observer);
 
-    private sealed class Enumerator : IAsyncEnumerator<T>
+    private sealed class AsyncEnumerator : IAsyncEnumerator<T>
     {
         private readonly CancellationToken _cancellationToken;
         private BroadcastChannel<T>.Element _current;
 
-        public Enumerator(BroadcastChannel<T>.Element initial, CancellationToken cancellationToken)
+        public AsyncEnumerator(BroadcastChannel<T>.Element initial, CancellationToken cancellationToken)
         {
             _cancellationToken = cancellationToken;
-            _current = initial;
+
+            // If there's no valid current value, just use the initial element directly.
+            // Otherwise, create an initial placeholder that points to the valid element.
+            // This way, the first MoveNextAsync() will return the current value immediately,
+            // matching the replay behavior of the IObservable path (ReplaySubject with buffer 1).
+            if (!initial.IsValid)
+            {
+                _current = initial;
+            }
+            else
+            {
+                var result = BroadcastChannel<T>.Element.CreateInitial();
+                result.SetNext(initial);
+                _current = result;
+            }
         }
 
         public T Current => _current.Value;

@@ -142,7 +142,7 @@ public sealed class SimulationTestHarnessTests : IAsyncLifetime
         var startTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var listenTask = Task.Run(async () =>
         {
-            await foreach (var view in seedNode.ViewAccessor.ListenForViewUpdatesAsync(TestContext.Current.CancellationToken))
+            await foreach (var view in seedNode.ViewAccessor.Updates.WithCancellation(TestContext.Current.CancellationToken))
             {
                 startTcs.TrySetResult();
                 viewChanges.Add(view);
@@ -155,8 +155,8 @@ public sealed class SimulationTestHarnessTests : IAsyncLifetime
         }, TestContext.Current.CancellationToken);
 
         // Join a new node
-        var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
         await startTcs.Task.WaitAsync(TestContext.Current.CancellationToken);
+        var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
         await listenTask.WaitAsync(TestContext.Current.CancellationToken);
 
         // Should have received at least one view change (the join)

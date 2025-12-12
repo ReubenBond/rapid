@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
 
+using Rapid.Logging;
 using Rapid.Messaging;
 using Rapid.Pb;
 
@@ -14,101 +15,14 @@ namespace Rapid;
 /// only round that is a fast round. A round is identified by a tuple (rnd-number, nodeId), where nodeId is a unique
 /// identifier per node that initiates phase1.
 /// </summary>
-internal sealed partial class Paxos
+internal sealed class Paxos
 {
-    private readonly ILogger<Paxos> _logger;
+    private readonly PaxosLogger _log;
     private readonly IBroadcaster _broadcaster;
     private readonly IMessagingClient _client;
     private readonly long _configurationId;
     private readonly Endpoint _myAddr;
     private readonly int _membershipSize;
-
-    private readonly struct LoggableEndpoints(IEnumerable<Endpoint> endpoints)
-    {
-        private readonly IEnumerable<Endpoint> _endpoints = endpoints;
-        public override readonly string ToString() => string.Join(", ", _endpoints.Select(RapidUtils.Loggable));
-    }
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Prepare called by {MyAddr} for round {Crnd}")]
-    private partial void LogPrepareCalled(Endpoint MyAddr, Rank Crnd);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Decided on value: {Value}")]
-    private partial void LogDecidedValue(LoggableEndpoints Value);
-
-    [LoggerMessage(Level = LogLevel.Trace, Message = "Broadcasting startPhase1a message")]
-    private partial void LogBroadcastingPhase1a();
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Paxos initialized: myAddr={MyAddr}, configId={ConfigId}, n={N}")]
-    private partial void LogPaxosInitialized(LoggableEndpoint MyAddr, long ConfigId, int N);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "RegisterFastRoundVote: proposal={Proposal}, voteCount={VoteCount}")]
-    private partial void LogRegisterFastRoundVote(LoggableEndpoints Proposal, int VoteCount);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "StartPhase1a: skipping, current round {CurrentRound} > requested {RequestedRound}")]
-    private partial void LogStartPhase1aSkipped(int CurrentRound, int RequestedRound);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "HandlePhase1aMessage: received from {Sender}, rank={Rank}, configId={ConfigId}")]
-    private partial void LogHandlePhase1aReceived(LoggableEndpoint Sender, Rank Rank, long ConfigId);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "HandlePhase1aMessage: config mismatch, expected={Expected}, got={Got}")]
-    private partial void LogPhase1aConfigMismatch(long Expected, long Got);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "HandlePhase1aMessage: rank too low, received={Received}, current={Current}")]
-    private partial void LogPhase1aRankTooLow(Rank Received, Rank Current);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "HandlePhase1aMessage: sending phase1b to {Destination}, rnd={Rnd}, vrnd={Vrnd}, vval={Vval}")]
-    private partial void LogSendingPhase1b(LoggableEndpoint Destination, Rank Rnd, Rank Vrnd, LoggableEndpoints Vval);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "HandlePhase1bMessage: received from {Sender}, rnd={Rnd}, vrnd={Vrnd}, configId={ConfigId}")]
-    private partial void LogHandlePhase1bReceived(LoggableEndpoint Sender, Rank Rnd, Rank Vrnd, long ConfigId);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "HandlePhase1bMessage: config mismatch, expected={Expected}, got={Got}")]
-    private partial void LogPhase1bConfigMismatch(long Expected, long Got);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "HandlePhase1bMessage: round mismatch, expected={Expected}, got={Got}")]
-    private partial void LogPhase1bRoundMismatch(Rank Expected, Rank Got);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "HandlePhase1bMessage: collected {Count} responses, threshold={Threshold}, f={F}")]
-    private partial void LogPhase1bCollected(int Count, int Threshold, int F);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "HandlePhase1bMessage: chosen value={ChosenValue}, broadcasting phase2a")]
-    private partial void LogPhase1bChosenValue(LoggableEndpoints ChosenValue);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "HandlePhase2aMessage: received from {Sender}, rnd={Rnd}, vval={Vval}, configId={ConfigId}")]
-    private partial void LogHandlePhase2aReceived(LoggableEndpoint Sender, Rank Rnd, LoggableEndpoints Vval, long ConfigId);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "HandlePhase2aMessage: config mismatch, expected={Expected}, got={Got}")]
-    private partial void LogPhase2aConfigMismatch(long Expected, long Got);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "HandlePhase2aMessage: rank too low, received={Received}, current={Current}")]
-    private partial void LogPhase2aRankTooLow(Rank Received, Rank Current);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "HandlePhase2aMessage: accepting value, sending phase2b to {Destination}, rnd={Rnd}, vval={Vval}")]
-    private partial void LogSendingPhase2b(LoggableEndpoint Destination, Rank Rnd, LoggableEndpoints Vval);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "HandlePhase2bMessage: received from {Sender}, rnd={Rnd}, endpoints={Endpoints}, configId={ConfigId}")]
-    private partial void LogHandlePhase2bReceived(LoggableEndpoint Sender, Rank Rnd, LoggableEndpoints Endpoints, long ConfigId);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "HandlePhase2bMessage: config mismatch, expected={Expected}, got={Got}")]
-    private partial void LogPhase2bConfigMismatch(long Expected, long Got);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "HandlePhase2bMessage: collected {Count} accept responses for round {Rnd}, threshold={Threshold}, f={F}")]
-    private partial void LogPhase2bCollected(int Count, Rank Rnd, int Threshold, int F);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "ChooseValue: processing {Count} phase1b messages, n={N}")]
-    private partial void LogChooseValueStart(int Count, int N);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "ChooseValue: no values with non-empty vval, returning empty")]
-    private partial void LogChooseValueEmpty();
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "ChooseValue: maxVrnd={MaxVrnd}, valuesWithMaxVrnd count={Count}")]
-    private partial void LogChooseValueMaxVrnd(Rank MaxVrnd, int Count);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "ChooseValue: all values identical, returning {Value}")]
-    private partial void LogChooseValueIdentical(LoggableEndpoints Value);
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "ChooseValue: maxCount={MaxCount}, threshold={Threshold}, choosing by count")]
-    private partial void LogChooseValueByCount(int MaxCount, int Threshold);
 
     private Rank _rnd;
     private Rank _vrnd;
@@ -142,19 +56,13 @@ internal sealed partial class Paxos
         _membershipSize = membershipSize;
         _broadcaster = broadcaster;
         _client = client;
-        _logger = logger;
+        _log = new PaxosLogger(logger);
 
         _crnd = new Rank { Round = 0, NodeIndex = 0 };
         _rnd = new Rank { Round = 0, NodeIndex = 0 };
         _vrnd = new Rank { Round = 0, NodeIndex = 0 };
 
-        LogPaxosInitialized(new LoggableEndpoint(myAddr), configurationId, membershipSize);
-    }
-
-    private readonly struct LoggableEndpoint(Endpoint endpoint)
-    {
-        private readonly Endpoint _endpoint = endpoint;
-        public override readonly string ToString() => RapidUtils.Loggable(_endpoint);
+        _log.PaxosInitialized(new PaxosLogger.LoggableEndpoint(myAddr), configurationId, membershipSize);
     }
 
     /// <summary>
@@ -181,7 +89,7 @@ internal sealed partial class Paxos
 
         ref var voteCount = ref CollectionsMarshal.GetValueRefOrAddDefault(_fastRoundVotes, proposal, out var _);
         ++voteCount;
-        LogRegisterFastRoundVote(new LoggableEndpoints(proposal), voteCount);
+        _log.RegisterFastRoundVote(new PaxosLogger.LoggableEndpoints(proposal), voteCount);
     }
 
     /// <summary>
@@ -194,7 +102,7 @@ internal sealed partial class Paxos
     {
         if (_crnd.Round > round)
         {
-            LogStartPhase1aSkipped(_crnd.Round, round);
+            _log.StartPhase1aSkipped(_crnd.Round, round);
             return;
         }
 
@@ -204,7 +112,7 @@ internal sealed partial class Paxos
         }
 
         _crnd = new Rank { Round = round, NodeIndex = _myAddr.GetHashCode() };
-        LogPrepareCalled(_myAddr, _crnd);
+        _log.PrepareCalled(_myAddr, _crnd);
 
         var prepare = new Phase1aMessage
         {
@@ -214,7 +122,7 @@ internal sealed partial class Paxos
         };
 
         var request = RapidUtils.ToRapidRequest(prepare);
-        LogBroadcastingPhase1a();
+        _log.BroadcastingPhase1a();
 
         _broadcaster.Broadcast(request, cancellationToken);
     }
@@ -226,11 +134,11 @@ internal sealed partial class Paxos
     /// <param name="cancellationToken">Cancellation token</param>
     public void HandlePhase1aMessage(Phase1aMessage phase1aMessage, CancellationToken cancellationToken = default)
     {
-        LogHandlePhase1aReceived(new LoggableEndpoint(phase1aMessage.Sender), phase1aMessage.Rank, phase1aMessage.ConfigurationId);
+        _log.HandlePhase1aReceived(new PaxosLogger.LoggableEndpoint(phase1aMessage.Sender), phase1aMessage.Rank, phase1aMessage.ConfigurationId);
 
         if (phase1aMessage.ConfigurationId != _configurationId)
         {
-            LogPhase1aConfigMismatch(_configurationId, phase1aMessage.ConfigurationId);
+            _log.Phase1aConfigMismatch(_configurationId, phase1aMessage.ConfigurationId);
             return;
         }
 
@@ -247,14 +155,14 @@ internal sealed partial class Paxos
             };
             phase1b.Vval.AddRange(_vval);
 
-            LogSendingPhase1b(new LoggableEndpoint(phase1aMessage.Sender), _rnd, _vrnd, new LoggableEndpoints(_vval));
+            _log.SendingPhase1b(new PaxosLogger.LoggableEndpoint(phase1aMessage.Sender), _rnd, _vrnd, new PaxosLogger.LoggableEndpoints(_vval));
 
             var request = RapidUtils.ToRapidRequest(phase1b);
             _client.SendOneWayMessage(phase1aMessage.Sender, request, cancellationToken);
         }
         else
         {
-            LogPhase1aRankTooLow(phase1aMessage.Rank, _rnd);
+            _log.Phase1aRankTooLow(phase1aMessage.Rank, _rnd);
         }
     }
 
@@ -266,17 +174,17 @@ internal sealed partial class Paxos
     /// <param name="cancellationToken">Cancellation token</param>
     public void HandlePhase1bMessage(Phase1bMessage phase1bMessage, CancellationToken cancellationToken = default)
     {
-        LogHandlePhase1bReceived(new LoggableEndpoint(phase1bMessage.Sender), phase1bMessage.Rnd, phase1bMessage.Vrnd, phase1bMessage.ConfigurationId);
+        _log.HandlePhase1bReceived(new PaxosLogger.LoggableEndpoint(phase1bMessage.Sender), phase1bMessage.Rnd, phase1bMessage.Vrnd, phase1bMessage.ConfigurationId);
 
         if (phase1bMessage.ConfigurationId != _configurationId)
         {
-            LogPhase1bConfigMismatch(_configurationId, phase1bMessage.ConfigurationId);
+            _log.Phase1bConfigMismatch(_configurationId, phase1bMessage.ConfigurationId);
             return;
         }
 
         if (!phase1bMessage.Rnd.Equals(_crnd))
         {
-            LogPhase1bRoundMismatch(_crnd, phase1bMessage.Rnd);
+            _log.Phase1bRoundMismatch(_crnd, phase1bMessage.Rnd);
             return;
         }
 
@@ -285,7 +193,7 @@ internal sealed partial class Paxos
         // Classic Paxos uses majority quorum (N/2 + 1), not Fast Paxos threshold
         var majorityThreshold = (_membershipSize / 2) + 1;
         var f = (int)Math.Floor((_membershipSize - 1) / 4.0);
-        LogPhase1bCollected(_phase1bMessages.Count, majorityThreshold, f);
+        _log.Phase1bCollected(_phase1bMessages.Count, majorityThreshold, f);
 
         if (_phase1bMessages.Count >= majorityThreshold)
         {
@@ -299,7 +207,7 @@ internal sealed partial class Paxos
             {
                 _cval = chosenValue;
 
-                LogPhase1bChosenValue(new LoggableEndpoints(_cval));
+                _log.Phase1bChosenValue(new PaxosLogger.LoggableEndpoints(_cval));
 
                 var phase2a = new Phase2aMessage
                 {
@@ -323,11 +231,11 @@ internal sealed partial class Paxos
     /// <param name="cancellationToken">Cancellation token</param>
     public void HandlePhase2aMessage(Phase2aMessage phase2aMessage, CancellationToken cancellationToken = default)
     {
-        LogHandlePhase2aReceived(new LoggableEndpoint(phase2aMessage.Sender), phase2aMessage.Rnd, new LoggableEndpoints(phase2aMessage.Vval), phase2aMessage.ConfigurationId);
+        _log.HandlePhase2aReceived(new PaxosLogger.LoggableEndpoint(phase2aMessage.Sender), phase2aMessage.Rnd, new PaxosLogger.LoggableEndpoints(phase2aMessage.Vval), phase2aMessage.ConfigurationId);
 
         if (phase2aMessage.ConfigurationId != _configurationId)
         {
-            LogPhase2aConfigMismatch(_configurationId, phase2aMessage.ConfigurationId);
+            _log.Phase2aConfigMismatch(_configurationId, phase2aMessage.ConfigurationId);
             return;
         }
 
@@ -346,7 +254,7 @@ internal sealed partial class Paxos
             };
             phase2b.Endpoints.AddRange(_vval);
 
-            LogSendingPhase2b(new LoggableEndpoint(phase2aMessage.Sender), _rnd, new LoggableEndpoints(_vval));
+            _log.SendingPhase2b(new PaxosLogger.LoggableEndpoint(phase2aMessage.Sender), _rnd, new PaxosLogger.LoggableEndpoints(_vval));
 
             // Broadcast to all nodes so they can independently learn the decision
             // This matches the Java implementation
@@ -355,7 +263,7 @@ internal sealed partial class Paxos
         }
         else
         {
-            LogPhase2aRankTooLow(phase2aMessage.Rnd, _rnd);
+            _log.Phase2aRankTooLow(phase2aMessage.Rnd, _rnd);
         }
     }
 
@@ -367,11 +275,11 @@ internal sealed partial class Paxos
     /// <param name="phase2bMessage">acceptor's vote</param>
     public void HandlePhase2bMessage(Phase2bMessage phase2bMessage)
     {
-        LogHandlePhase2bReceived(new LoggableEndpoint(phase2bMessage.Sender), phase2bMessage.Rnd, new LoggableEndpoints(phase2bMessage.Endpoints), phase2bMessage.ConfigurationId);
+        _log.HandlePhase2bReceived(new PaxosLogger.LoggableEndpoint(phase2bMessage.Sender), phase2bMessage.Rnd, new PaxosLogger.LoggableEndpoints(phase2bMessage.Endpoints), phase2bMessage.ConfigurationId);
 
         if (phase2bMessage.ConfigurationId != _configurationId)
         {
-            LogPhase2bConfigMismatch(_configurationId, phase2bMessage.ConfigurationId);
+            _log.Phase2bConfigMismatch(_configurationId, phase2bMessage.ConfigurationId);
             return;
         }
 
@@ -388,14 +296,14 @@ internal sealed partial class Paxos
         // Classic Paxos uses majority quorum (N/2 + 1), not Fast Paxos threshold
         var majorityThreshold = (_membershipSize / 2) + 1;
         var f = (int)Math.Floor((_membershipSize - 1) / 4.0);
-        LogPhase2bCollected(acceptResponses.Count, messageRnd, majorityThreshold, f);
+        _log.Phase2bCollected(acceptResponses.Count, messageRnd, majorityThreshold, f);
 
         if (acceptResponses.Count >= majorityThreshold)
         {
             var endpoints = new List<Endpoint>(phase2bMessage.Endpoints);
             if (_decidedTcs.TrySetResult(new ConsensusResult.Decided(endpoints)))
             {
-                LogDecidedValue(new LoggableEndpoints(endpoints));
+                _log.DecidedValue(new PaxosLogger.LoggableEndpoints(endpoints));
             }
         }
     }

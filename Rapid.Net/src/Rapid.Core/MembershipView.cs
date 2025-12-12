@@ -16,7 +16,7 @@ public sealed class MembershipView
     /// <summary>
     /// An empty membership view with no members. Used as the initial state before the cluster is initialized.
     /// </summary>
-    public static MembershipView Empty { get; } = CreateEmpty(ringCount: 1);
+    public static MembershipView Empty { get; } = CreateEmpty(ringCount: 0);
 
     private readonly ImmutableArray<ImmutableArray<Endpoint>> _rings;
     private readonly ImmutableHashSet<Endpoint> _allNodes;
@@ -31,13 +31,13 @@ public sealed class MembershipView
     /// <param name="nodeIds">The set of node identifiers seen.</param>
     internal MembershipView(int ringCount, ConfigurationId configurationId, ImmutableArray<ImmutableArray<Endpoint>> rings, ImmutableArray<NodeId> nodeIds)
     {
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(ringCount);
+        ArgumentOutOfRangeException.ThrowIfNegative(ringCount);
         ArgumentOutOfRangeException.ThrowIfNotEqual(rings.Length, ringCount, "Number of rings does not match ring count");
         RingCount = ringCount;
         ConfigurationId = configurationId;
         _rings = rings;
         NodeIds = nodeIds;
-        _allNodes = [.. rings[0]];
+        _allNodes = rings.Length > 0 ? [.. rings[0]] : [];
         _identifiersSeen = [.. nodeIds];
     }
 

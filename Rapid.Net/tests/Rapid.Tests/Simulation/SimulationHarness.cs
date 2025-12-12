@@ -15,7 +15,7 @@ namespace Rapid.Tests.Simulation;
 /// - Per-node execution control (suspend, resume, step)
 /// - Simulation driving APIs (Step, RunUntil, Run)
 /// </summary>
-internal sealed class SimulationHarness : IAsyncDisposable
+internal sealed partial class SimulationHarness : IAsyncDisposable
 {
     private readonly SortedDictionary<string, SimulationNode> _nodes = new(StringComparer.Ordinal);
     private readonly SimulationLogManager _logManager;
