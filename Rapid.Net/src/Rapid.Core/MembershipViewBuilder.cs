@@ -14,7 +14,7 @@ namespace Rapid;
 /// </summary>
 internal sealed class MembershipViewBuilder
 {
-    private readonly int _ringCount;
+    private readonly int _maxRingCount;
     private readonly List<AddressComparator> _addressComparators;
     private readonly List<SortedSet<Endpoint>> _rings;
     private readonly SortedSet<NodeId> _identifiersSeen;
@@ -22,20 +22,22 @@ internal sealed class MembershipViewBuilder
     private bool _isSealed;
 
     /// <summary>
-    /// Initializes a new instance of the MembershipViewBuilder class with the specified number of rings.
+    /// Initializes a new instance of the MembershipViewBuilder class with the specified maximum number of rings.
     /// </summary>
-    /// <param name="ringCount">Number of monitoring rings to maintain. Must be positive.</param>
-    /// <exception cref="ArgumentException">Thrown when k is not positive.</exception>
-    public MembershipViewBuilder(int ringCount)
+    /// <param name="maxRingCount">Maximum number of monitoring rings to maintain. Must be positive.
+    /// The actual ring count in the built view may be less if there are insufficient nodes
+    /// (at most nodes-1 rings, minimum 1).</param>
+    /// <exception cref="ArgumentException">Thrown when maxRingCount is not positive.</exception>
+    public MembershipViewBuilder(int maxRingCount)
     {
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(ringCount);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxRingCount);
 
-        _ringCount = ringCount;
-        _rings = new List<SortedSet<Endpoint>>(ringCount);
-        _addressComparators = new List<AddressComparator>(ringCount);
+        _maxRingCount = maxRingCount;
+        _rings = new List<SortedSet<Endpoint>>(maxRingCount);
+        _addressComparators = new List<AddressComparator>(maxRingCount);
         _identifiersSeen = new SortedSet<NodeId>(NodeIdComparer.Instance);
 
-        for (var i = 0; i < ringCount; i++)
+        for (var i = 0; i < maxRingCount; i++)
         {
             var comparator = new AddressComparator(i);
             _addressComparators.Add(comparator);
@@ -51,12 +53,12 @@ internal sealed class MembershipViewBuilder
     {
         ArgumentNullException.ThrowIfNull(view);
 
-        _ringCount = view.RingCount;
-        _rings = new List<SortedSet<Endpoint>>(_ringCount);
-        _addressComparators = new List<AddressComparator>(_ringCount);
+        _maxRingCount = view.RingCount;
+        _rings = new List<SortedSet<Endpoint>>(_maxRingCount);
+        _addressComparators = new List<AddressComparator>(_maxRingCount);
         _identifiersSeen = new SortedSet<NodeId>(NodeIdComparer.Instance);
 
-        for (var i = 0; i < _ringCount; i++)
+        for (var i = 0; i < _maxRingCount; i++)
         {
             var comparator = new AddressComparator(i);
             _addressComparators.Add(comparator);
@@ -78,19 +80,21 @@ internal sealed class MembershipViewBuilder
     /// <summary>
     /// Used to bootstrap a membership view from the fields of a MembershipView.Configuration object.
     /// </summary>
-    /// <param name="ringCount">Number of monitoring rings to maintain.</param>
+    /// <param name="maxRingCount">Maximum number of monitoring rings to maintain. Must be positive.
+    /// The actual ring count in the built view may be less if there are insufficient nodes
+    /// (at most nodes-1 rings, minimum 1).</param>
     /// <param name="nodeIds">Collection of node identifiers to add.</param>
     /// <param name="endpoints">Collection of endpoints corresponding to the node IDs.</param>
-    public MembershipViewBuilder(int ringCount, ICollection<NodeId> nodeIds, ICollection<Endpoint> endpoints)
+    public MembershipViewBuilder(int maxRingCount, ICollection<NodeId> nodeIds, ICollection<Endpoint> endpoints)
     {
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(ringCount);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxRingCount);
 
-        _ringCount = ringCount;
-        _rings = new List<SortedSet<Endpoint>>(ringCount);
-        _addressComparators = new List<AddressComparator>(ringCount);
+        _maxRingCount = maxRingCount;
+        _rings = new List<SortedSet<Endpoint>>(maxRingCount);
+        _addressComparators = new List<AddressComparator>(maxRingCount);
         _identifiersSeen = new SortedSet<NodeId>(NodeIdComparer.Instance);
 
-        for (var i = 0; i < ringCount; i++)
+        for (var i = 0; i < maxRingCount; i++)
         {
             var comparator = new AddressComparator(i);
             _addressComparators.Add(comparator);
@@ -119,14 +123,15 @@ internal sealed class MembershipViewBuilder
     }
 
     /// <summary>
-    /// Gets the number of rings (K value).
+    /// Gets the maximum number of rings (K value) that could be in the built view.
+    /// The actual ring count in the built MembershipView may be less if there are insufficient nodes.
     /// </summary>
-    public int RingCount
+    public int MaxRingCount
     {
         get
         {
             ThrowIfSealed();
-            return _ringCount;
+            return _maxRingCount;
         }
     }
 
@@ -181,7 +186,7 @@ internal sealed class MembershipViewBuilder
             throw new NodeAlreadyInRingException(node);
         }
 
-        for (var k = 0; k < _ringCount; k++)
+        for (var k = 0; k < _maxRingCount; k++)
         {
             _rings[k].Add(node);
         }
@@ -207,7 +212,7 @@ internal sealed class MembershipViewBuilder
             throw new NodeNotInRingException(node);
         }
 
-        for (var k = 0; k < _ringCount; k++)
+        for (var k = 0; k < _maxRingCount; k++)
         {
             _rings[k].Remove(node);
             _addressComparators[k].RemoveEndpoint(node);
@@ -248,7 +253,7 @@ internal sealed class MembershipViewBuilder
     public List<Endpoint> GetRing(int k)
     {
         ThrowIfSealed();
-        if (k < 0 || k >= _ringCount) throw new ArgumentOutOfRangeException(nameof(k));
+        if (k < 0 || k >= _maxRingCount) throw new ArgumentOutOfRangeException(nameof(k));
         return [.. _rings[k]];
     }
 
@@ -289,7 +294,7 @@ internal sealed class MembershipViewBuilder
         _isSealed = true;
 
         // Create immutable ring copies
-        var ringCount = ComputeRingCount(_ringCount, _allNodes.Count);
+        var ringCount = ComputeRingCount(_maxRingCount, _allNodes.Count);
         var ringsBuilder = ImmutableArray.CreateBuilder<ImmutableArray<Endpoint>>(ringCount);
         for (var i = 0; i < ringCount; i++)
         {

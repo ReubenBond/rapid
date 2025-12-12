@@ -913,63 +913,61 @@ public class SimulationTimeProviderTests
 
 
     [Fact]
-    public async Task ConcurrentAdvanceDoesNotCorruptState()
+    public void ConcurrentAccessThrowsInvalidOperationException()
     {
-        var p = new TestTimeProvider();
-        var callCount = 0;
+        // Create a task queue with a guard we can test
+        var guard = new SingleThreadedGuard();
+        var clock = new SimulationClock(DateTimeOffset.UtcNow);
+        var taskQueue = new SimulationTaskQueue(clock, guard);
 
-        using var timer = p.CreateTimer(_ => Interlocked.Increment(ref callCount),
-            null, TimeSpan.FromMilliseconds(1), TimeSpan.FromMilliseconds(1));
+        using var thread1EnteredGuard = new ManualResetEventSlim(false);
+        using var thread2CanProceed = new ManualResetEventSlim(false);
+        InvalidOperationException? caughtException = null;
 
-        var tasks = new List<Task>();
-        for (int i = 0; i < 10; i++)
+        // Schedule an item that will block inside the guard
+        // We use a custom approach: have thread 1 enter the guard and signal,
+        // then thread 2 tries to enter and should fail
+        var thread1 = new Thread(() =>
         {
-            tasks.Add(Task.Run(() =>
+            // Schedule an action - this enters the guard
+            taskQueue.EnqueueAfter(() =>
             {
-                for (int j = 0; j < 100; j++)
-                {
-                    p.Advance(TimeSpan.FromMilliseconds(1));
-                    p.RunUntilIdle();
-                }
-            }, TestContext.Current.CancellationToken));
-        }
+                // This callback runs OUTSIDE the guard, so we need a different approach
+            }, TimeSpan.Zero);
 
-        await Task.WhenAll(tasks);
-
-        // Should have advanced 1000ms total, timer should have fired many times
-        Assert.True(callCount > 0, "Timer should have fired at least once");
-    }
-
-    [Fact]
-    public async Task ConcurrentTimerCreationDoesNotCorruptState()
-    {
-        var p = new TestTimeProvider();
-        var timers = new List<ITimer>();
-        var lockObj = new object();
-
-        var tasks = new List<Task>();
-        for (int i = 0; i < 100; i++)
-        {
-            tasks.Add(Task.Run(() =>
+            // Enter the guard and hold it while signaling thread 2
+            using (guard.Enter())
             {
-                var timer = p.CreateTimer(_ => { }, null, TimeSpan.FromSeconds(1), TimeSpan.Zero);
-                lock (lockObj)
-                {
-                    timers.Add(timer);
-                }
-            }, TestContext.Current.CancellationToken));
-        }
+                thread1EnteredGuard.Set();
+                thread2CanProceed.Wait(); // Hold the guard until thread 2 has tried
+            }
+        });
 
-        await Task.WhenAll(tasks);
-
-        Assert.Equal(100, p.PendingTimerCount);
-
-        foreach (var timer in timers)
+        var thread2 = new Thread(() =>
         {
-            timer.Dispose();
-        }
+            thread1EnteredGuard.Wait(); // Wait for thread 1 to hold the guard
+            try
+            {
+                // Try to access a guarded method - should throw
+                _ = taskQueue.HasItems;
+            }
+            catch (InvalidOperationException ex)
+            {
+                caughtException = ex;
+            }
+            finally
+            {
+                thread2CanProceed.Set(); // Let thread 1 release the guard
+            }
+        });
 
-        Assert.Equal(0, p.PendingTimerCount);
+        thread1.Start();
+        thread2.Start();
+        thread1.Join(TimeSpan.FromSeconds(5));
+        thread2.Join(TimeSpan.FromSeconds(5));
+
+        Assert.NotNull(caughtException);
+        Assert.Contains("single-threaded", caughtException.Message, StringComparison.OrdinalIgnoreCase);
     }
 
 
