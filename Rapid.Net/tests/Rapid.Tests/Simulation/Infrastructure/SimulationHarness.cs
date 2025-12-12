@@ -208,9 +208,8 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
     /// <param name="options">Optional protocol options.</param>
     public SimulationNode CreateUninitializedNode(int nodeId, SimulationNode? seedNode = null, RapidProtocolOptions? options = null)
     {
-        var opts = ConfigureOptions(options);
         var address = RapidUtils.HostFromParts("node", nodeId);
-        var node = new SimulationNode(this, address, seedNode?.Address, metadata: null, opts, LoggerFactory);
+        var node = new SimulationNode(this, address, seedNode?.Address, metadata: null, options, LoggerFactory);
         RegisterNode(node);
         _log.UninitializedNodeCreated(nodeId);
         return node;
@@ -221,9 +220,8 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
     /// </summary>
     public SimulationNode CreateSeedNode(int nodeId = 0, RapidProtocolOptions? options = null)
     {
-        var opts = ConfigureOptions(options);
         var address = RapidUtils.HostFromParts("node", nodeId);
-        var node = new SimulationNode(this, address, seedAddress: null, metadata: null, opts, LoggerFactory);
+        var node = new SimulationNode(this, address, seedAddress: null, metadata: null, options, LoggerFactory);
         RegisterNode(node);
 
         // For seed nodes, initialization is synchronous (no network I/O needed),
@@ -244,9 +242,8 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
         RapidProtocolOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(seedNode);
-        var opts = ConfigureOptions(options);
         var address = RapidUtils.HostFromParts("node", nodeId);
-        var node = new SimulationNode(this, address, seedNode.Address, metadata: null, opts, LoggerFactory);
+        var node = new SimulationNode(this, address, seedNode.Address, metadata: null, options, LoggerFactory);
         RegisterNode(node);
 
         _log.NodeJoining(nodeId);
@@ -355,9 +352,8 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
             // Create all nodes in this batch first (with seedAddress so MembershipService is ready)
             for (var i = 0; i < currentBatchSize; i++)
             {
-                var opts = ConfigureOptions(options);
                 var address = RapidUtils.HostFromParts("node", nodeId++);
-                var node = new SimulationNode(this, address, seedNode.Address, metadata: null, opts, LoggerFactory);
+                var node = new SimulationNode(this, address, seedNode.Address, metadata: null, options, LoggerFactory);
                 RegisterNode(node);
 
                 _log.NodeJoiningParallel(RapidUtils.Loggable(node.Address));
@@ -509,13 +505,6 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
         _log.ParallelLeaveCompleted(nodesToRemove.Count, configChanges);
 
         return configChanges;
-    }
-
-    private static RapidProtocolOptions ConfigureOptions(RapidProtocolOptions? options)
-    {
-        var opts = options ?? new RapidProtocolOptions();
-        opts.FailureDetectorInterval = TimeSpan.FromSeconds(1);
-        return opts;
     }
 
     /// <summary>

@@ -173,11 +173,14 @@ public sealed class NodeFailureTests : IAsyncLifetime
         // Suspend the seed (simulates crash but keeps node in harness so we can attempt to contact it)
         seedNode.Suspend();
 
+        // Use limited retries so the join fails quickly instead of retrying indefinitely
+        var options = new RapidProtocolOptions { MaxJoinRetries = 3 };
+
         // Attempting to join through crashed seed should fail with JoinException
         // The underlying cause is a timeout, but JoinException is the public contract for join failures
         var ex = Assert.Throws<JoinException>(() =>
         {
-            _harness.CreateJoinerNode(seedNode, nodeId: 1);
+            _harness.CreateJoinerNode(seedNode, nodeId: 1, options: options);
         });
         Assert.Contains("Timeout", ex.Message, StringComparison.Ordinal);
     }

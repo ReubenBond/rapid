@@ -396,4 +396,88 @@ public sealed class SimulationHarnessTests : IAsyncLifetime
         Assert.False(joiner2.IsSuspended);
     }
 
+
+    [Fact]
+    public void NetworkSimulationBasics()
+    {
+        var seedNode = _harness.CreateSeedNode();
+        var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
+
+        var seedAddr = RapidUtils.Loggable(seedNode.Address);
+        var joinerAddr = RapidUtils.Loggable(joiner.Address);
+
+        // Initially, network allows all communication
+        Assert.True(_harness.Network.CanDeliver(seedAddr, joinerAddr));
+
+        // Create partition
+        _harness.Network.CreateBidirectionalPartition(seedAddr, joinerAddr);
+        Assert.False(_harness.Network.CanDeliver(seedAddr, joinerAddr));
+
+        // Heal partition
+        _harness.Network.HealBidirectionalPartition(seedAddr, joinerAddr);
+        Assert.True(_harness.Network.CanDeliver(seedAddr, joinerAddr));
+    }
+
+    [Fact]
+    public void NetworkHealAllPartitionsWorks()
+    {
+        _harness.CreateSeedNode(0);
+        _harness.CreateSeedNode(1);
+        _harness.CreateSeedNode(2);
+
+        // Create multiple partitions
+        _harness.Network.CreatePartition("node:0", "node:1");
+        _harness.Network.CreatePartition("node:1", "node:2");
+        _harness.Network.CreatePartition("node:0", "node:2");
+
+        Assert.False(_harness.Network.CanDeliver("node:0", "node:1"));
+
+        // Heal all at once
+        _harness.Network.HealAllPartitions();
+
+        Assert.True(_harness.Network.CanDeliver("node:0", "node:1"));
+        Assert.True(_harness.Network.CanDeliver("node:1", "node:2"));
+        Assert.True(_harness.Network.CanDeliver("node:0", "node:2"));
+    }
+
+    [Fact]
+    public void HarnessNodesListIsUpToDate()
+    {
+        Assert.Empty(_harness.Nodes);
+
+        var node1 = _harness.CreateSeedNode(0);
+        Assert.Single(_harness.Nodes);
+
+        var node2 = _harness.CreateSeedNode(1);
+        Assert.Equal(2, _harness.Nodes.Count);
+
+        _harness.CrashNode(node1);
+        Assert.Single(_harness.Nodes);
+        Assert.Contains(node2, _harness.Nodes);
+    }
+
+    [Fact]
+    public void WaitForConvergenceTimesOutCorrectly()
+    {
+        var seedNode = _harness.CreateSeedNode();
+
+        // Waiting for size 5 when only 1 node exists should timeout
+        Assert.Throws<TimeoutException>(() =>
+        {
+            _harness.WaitForConvergence(expectedSize: 5, maxIterations: 100);
+        });
+    }
+
+    [Fact]
+    public void WaitForNodeSizeTimesOutCorrectly()
+    {
+        var seedNode = _harness.CreateSeedNode();
+
+        // Waiting for size 5 when only 1 node exists should timeout
+        Assert.Throws<TimeoutException>(() =>
+        {
+            _harness.WaitForNodeSize(seedNode, expectedSize: 5, maxIterations: 100);
+        });
+    }
+
 }

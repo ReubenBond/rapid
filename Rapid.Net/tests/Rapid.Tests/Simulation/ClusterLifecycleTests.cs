@@ -4,18 +4,17 @@ using Rapid.Tests.Simulation.Infrastructure;
 namespace Rapid.Tests.Simulation;
 
 /// <summary>
-/// Integration tests for complete cluster lifecycle scenarios.
-/// These tests verify end-to-end behavior and recovery scenarios.
+/// Tests for complete cluster lifecycle scenarios using the simulation harness.
+/// These tests verify end-to-end behavior including startup, scale-up/down, and recovery scenarios.
 /// </summary>
 [SuppressMessage("Naming", "CA1707:Identifiers should not contain underscores", Justification = "Test naming convention")]
-public sealed class IntegrationTests : IAsyncLifetime
+public sealed class ClusterLifecycleTests : IAsyncLifetime
 {
     private SimulationHarness _harness = null!;
     private const int TestSeed = 90123;
 
     public ValueTask InitializeAsync()
     {
-        // Harness always uses fake time for deterministic and fast test execution
         _harness = new SimulationHarness(seed: TestSeed);
         return ValueTask.CompletedTask;
     }
@@ -214,101 +213,6 @@ public sealed class IntegrationTests : IAsyncLifetime
         // Joiner's view accessor should have correct view
         Assert.NotNull(joiner.ViewAccessor);
         Assert.Equal(2, joiner.ViewAccessor.CurrentView.Size);
-    }
-
-
-
-    [Fact]
-    public void NetworkSimulationBasics()
-    {
-        var seedNode = _harness.CreateSeedNode();
-        var joiner = _harness.CreateJoinerNode(seedNode, nodeId: 1);
-
-        var seedAddr = RapidUtils.Loggable(seedNode.Address);
-        var joinerAddr = RapidUtils.Loggable(joiner.Address);
-
-        // Initially, network allows all communication
-        Assert.True(_harness.Network.CanDeliver(seedAddr, joinerAddr));
-
-        // Create partition
-        _harness.Network.CreateBidirectionalPartition(seedAddr, joinerAddr);
-        Assert.False(_harness.Network.CanDeliver(seedAddr, joinerAddr));
-
-        // Heal partition
-        _harness.Network.HealBidirectionalPartition(seedAddr, joinerAddr);
-        Assert.True(_harness.Network.CanDeliver(seedAddr, joinerAddr));
-    }
-
-    [Fact]
-    public void NetworkHealAllPartitionsWorks()
-    {
-        _harness.CreateSeedNode(0);
-        _harness.CreateSeedNode(1);
-        _harness.CreateSeedNode(2);
-
-        // Create multiple partitions
-        _harness.Network.CreatePartition("node:0", "node:1");
-        _harness.Network.CreatePartition("node:1", "node:2");
-        _harness.Network.CreatePartition("node:0", "node:2");
-
-        Assert.False(_harness.Network.CanDeliver("node:0", "node:1"));
-
-        // Heal all at once
-        _harness.Network.HealAllPartitions();
-
-        Assert.True(_harness.Network.CanDeliver("node:0", "node:1"));
-        Assert.True(_harness.Network.CanDeliver("node:1", "node:2"));
-        Assert.True(_harness.Network.CanDeliver("node:0", "node:2"));
-    }
-
-
-
-    [Fact]
-    public void HarnessPropertiesAccessible()
-    {
-        Assert.NotNull(_harness.Random);
-        Assert.NotNull(_harness.Network);
-        Assert.NotNull(_harness.TimeProvider);
-    }
-
-    [Fact]
-    public void HarnessNodesListIsUpToDate()
-    {
-        Assert.Empty(_harness.Nodes);
-
-        var node1 = _harness.CreateSeedNode(0);
-        Assert.Single(_harness.Nodes);
-
-        var node2 = _harness.CreateSeedNode(1);
-        Assert.Equal(2, _harness.Nodes.Count);
-
-        _harness.CrashNode(node1);
-        Assert.Single(_harness.Nodes);
-        Assert.Contains(node2, _harness.Nodes);
-    }
-
-    [Fact]
-    public void WaitForConvergenceTimesOutCorrectly()
-    {
-        var seedNode = _harness.CreateSeedNode();
-
-        // Waiting for size 5 when only 1 node exists should timeout
-        Assert.Throws<TimeoutException>(() =>
-        {
-            _harness.WaitForConvergence(expectedSize: 5, maxIterations: 100);
-        });
-    }
-
-    [Fact]
-    public void WaitForNodeSizeTimesOutCorrectly()
-    {
-        var seedNode = _harness.CreateSeedNode();
-
-        // Waiting for size 5 when only 1 node exists should timeout
-        Assert.Throws<TimeoutException>(() =>
-        {
-            _harness.WaitForNodeSize(seedNode, expectedSize: 5, maxIterations: 100);
-        });
     }
 
 }
