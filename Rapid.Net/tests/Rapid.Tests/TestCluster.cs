@@ -2,7 +2,7 @@ using System.Text;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Rapid.Tests.Simulation;
+using Rapid.Tests.Simulation.Infrastructure;
 
 namespace Rapid.Tests;
 

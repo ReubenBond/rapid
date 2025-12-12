@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using Microsoft.AspNetCore.Builder;
-using Rapid.Tests.Simulation;
+using Rapid.Tests.Simulation.Infrastructure;
 
 namespace Rapid.Tests;
 
