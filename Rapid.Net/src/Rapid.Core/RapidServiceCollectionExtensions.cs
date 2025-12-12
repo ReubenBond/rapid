@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Rapid.Messaging;
 using Rapid.Monitoring;
@@ -50,7 +51,11 @@ public static class RapidServiceCollectionExtensions
         // Add core services
         services.AddGrpc();
         services.AddSingleton(sp =>
-            new SharedResources(sp.GetRequiredService<TimeProvider>()));
+        {
+            var lifetime = sp.GetService<IHostApplicationLifetime>();
+            var shuttingDownToken = lifetime?.ApplicationStopping ?? default;
+            return new SharedResources(sp.GetRequiredService<TimeProvider>(), shuttingDownToken: shuttingDownToken);
+        });
 
         // Register messaging infrastructure
         // GrpcClient is registered as a hosted service so it shuts down AFTER RapidClusterService

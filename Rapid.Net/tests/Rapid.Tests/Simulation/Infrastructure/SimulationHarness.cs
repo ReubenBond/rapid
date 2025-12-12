@@ -381,12 +381,12 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
 
     /// <summary>
     /// Crashes a node (simulates sudden failure).
+    /// Simply unregisters the node - no cleanup or leave messages.
     /// </summary>
     public void CrashNode(SimulationNode node)
     {
         ArgumentNullException.ThrowIfNull(node);
         UnregisterNode(node);
-        node.Destroy();
         _log.NodeCrashed();
     }
 
@@ -403,8 +403,8 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
         var remainingNodes = Nodes.Where(n => n != node).ToList();
         var targetSize = remainingNodes.Count;
 
-        // Drive the leave operation to completion (sends LeaveMessages to observers)
-        Run(node.LeaveAsync);
+        // Drive the stop operation to completion (sends LeaveMessages to observers, disposes node)
+        Run(node.StopAsync);
 
         // The leaving node must remain active to participate in consensus.
         // Run the simulation until all remaining nodes converge to the new size.
@@ -421,9 +421,8 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
                 targetSize, sizes);
         }
 
-        // Now that consensus is complete, clean up the leaving node
+        // Unregister the node (already disposed by StopAsync)
         UnregisterNode(node);
-        node.Destroy();
 
         _log.NodeLeft();
     }
@@ -461,9 +460,10 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
         // Drive the simulation until all leave operations complete.
         // IMPORTANT: Leave tasks must be started inside DriveToCompletion so they
         // capture the simulation's SynchronizationContext for their continuations.
+        // StopAsync also disposes the nodes.
         Run(() =>
         {
-            var leaveTasks = nodesToRemove.Select(node => node.LeaveAsync());
+            var leaveTasks = nodesToRemove.Select(node => node.StopAsync());
             return Task.WhenAll(leaveTasks);
         });
 
@@ -480,11 +480,10 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
                 targetSize, sizes);
         }
 
-        // Clean up leaving nodes
+        // Unregister leaving nodes (already disposed by StopAsync)
         foreach (var node in nodesToRemove)
         {
             UnregisterNode(node);
-            node.Destroy();
             _log.NodeLeftParallel(RapidUtils.Loggable(node.Address));
         }
 
@@ -912,11 +911,10 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
         // Clear harness queue
         TaskQueue.Clear();
 
-        // Destroy all nodes (take snapshot since Destroy calls UnregisterNode)
+        // Unregister all nodes (hard crash - no cleanup needed, just drop references)
         foreach (var node in Nodes.ToList())
         {
             UnregisterNode(node);
-            node.Destroy();
         }
 
         // Attach logs to test context BEFORE disposing the provider

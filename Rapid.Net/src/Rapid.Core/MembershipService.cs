@@ -74,6 +74,10 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
     private readonly List<Task> _backgroundTasks = [];
     private readonly Lock _backgroundTasksLock = new();
 
+    // Internal cancellation for background tasks - linked to SharedResources.ShuttingDownToken
+    // Cancelled by StopAsync or when SharedResources signals shutdown
+    private readonly CancellationTokenSource _stoppingCts;
+
     /// <summary>
     /// Result of a single join attempt. Used to avoid exception-based control flow for retryable conditions.
     /// </summary>
@@ -135,6 +139,9 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
         _sendQueue = Channel.CreateUnbounded<AlertMessage>();
         _eventChannel = new BroadcastChannel<ClusterEventNotification>();
 
+        // Create linked CTS so background tasks stop on either StopAsync or SharedResources shutdown
+        _stoppingCts = CancellationTokenSource.CreateLinkedTokenSource(sharedResources.ShuttingDownToken);
+
         // Configure the failure detector factory to detect stale views (learner role - missed consensus decisions)
         if (edgeFailureDetector is PingPongFailureDetectorFactory pingPongFactory)
         {
@@ -166,7 +173,7 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
         }
 
         // Start background jobs after initialization
-        var alertBatcherTask = Task.Factory.StartNew(AlertBatcherAsync, _sharedResources.ShuttingDownToken, TaskCreationOptions.None, _sharedResources.TaskScheduler).Unwrap();
+        var alertBatcherTask = Task.Factory.StartNew(AlertBatcherAsync, _stoppingCts.Token, TaskCreationOptions.None, _sharedResources.TaskScheduler).Unwrap();
         TrackBackgroundTask(alertBatcherTask);
 
         _initialized = true;
@@ -442,7 +449,7 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
         _announcedProposal = false;
 
         // Replay any buffered consensus messages for this configuration
-        ReplayBufferedConsensusMessages(_membershipView.ConfigurationId, _sharedResources.ShuttingDownToken);
+        ReplayBufferedConsensusMessages(_membershipView.ConfigurationId, _stoppingCts.Token);
 
         // Create new failure detectors
         CreateFailureDetectorsForCurrentConfiguration();
@@ -985,15 +992,15 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
     private async Task AlertBatcherAsync()
     {
         var buffer = new List<AlertMessage>();
-        var shutdownToken = _sharedResources.ShuttingDownToken;
+        var stoppingToken = _stoppingCts.Token;
 
-        while (!shutdownToken.IsCancellationRequested)
+        while (!stoppingToken.IsCancellationRequested)
         {
             buffer.Clear();
             try
             {
-                await Task.Delay(_options.BatchingWindow, _sharedResources.TimeProvider, shutdownToken).ConfigureAwait(true);
-                await _sendQueue.Reader.WaitToReadAsync(shutdownToken);
+                await Task.Delay(_options.BatchingWindow, _sharedResources.TimeProvider, stoppingToken).ConfigureAwait(true);
+                await _sendQueue.Reader.WaitToReadAsync(stoppingToken);
                 while (_sendQueue.Reader.TryRead(out var msg))
                 {
                     buffer.Add(msg);
@@ -1010,7 +1017,7 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
                     batchedMessage.Messages.AddRange(buffer);
 
                     var request = batchedMessage.ToRapidRequest();
-                    _broadcaster.Broadcast(request, shutdownToken);
+                    _broadcaster.Broadcast(request, stoppingToken);
                 }
             }
             catch (OperationCanceledException)
@@ -1280,8 +1287,8 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
 
         // Schedule refresh on the background task scheduler
         var refreshTask = Task.Factory.StartNew(
-            () => RefreshMembershipViewAsync(remoteEndpoint, remoteConfigId, _sharedResources.ShuttingDownToken),
-            _sharedResources.ShuttingDownToken,
+            () => RefreshMembershipViewAsync(remoteEndpoint, remoteConfigId, _stoppingCts.Token),
+            _stoppingCts.Token,
             TaskCreationOptions.None,
             _sharedResources.TaskScheduler).Unwrap();
         TrackBackgroundTask(refreshTask);
@@ -1445,8 +1452,8 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
         if (wasKicked)
         {
             var rejoinTask = Task.Factory.StartNew(
-                () => RejoinClusterAsync(_sharedResources.ShuttingDownToken),
-                _sharedResources.ShuttingDownToken,
+                () => RejoinClusterAsync(_stoppingCts.Token),
+                _stoppingCts.Token,
                 TaskCreationOptions.None,
                 _sharedResources.TaskScheduler).Unwrap();
             TrackBackgroundTask(rejoinTask);
@@ -1619,31 +1626,18 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
     }
 
     /// <summary>
-    /// Shuts down the membership service synchronously.
-    /// Disposes event channels and failure detectors but does not wait for background tasks.
+    /// Stops the membership service gracefully by notifying observers and waiting for background tasks.
+    /// Does not dispose resources - call <see cref="DisposeAsync"/> after this method.
     /// </summary>
-    public void Shutdown()
-    {
-        _log.Shutdown();
-
-        // Dispose the event channel to signal completion to all subscribers
-        _eventChannel.Dispose();
-
-        foreach (var fd in _failureDetectors)
-        {
-            fd.Dispose();
-        }
-        _failureDetectors.Clear();
-    }
-
-    /// <summary>
-    /// Stops the membership service gracefully.
-    /// Sends leave messages to observers, then shuts down and waits for background tasks to complete.
-    /// Background tasks are responsible for responding to shutdown cancellation promptly.
-    /// </summary>
+    /// <remarks>
+    /// For graceful shutdown: call <c>StopAsync()</c> then <c>DisposeAsync()</c>.
+    /// For hard crash (no notification): call <c>DisposeAsync()</c> directly.
+    /// </remarks>
     /// <param name="cancellationToken">Cancellation token to observe.</param>
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {
+        _log.Stopping();
+
         // Send leave messages to observers
         try
         {
@@ -1656,18 +1650,15 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
             var leaveTasks = observers.Select(endpoint =>
                 _messagingClient.SendMessageBestEffortAsync(endpoint, leave, cancellationToken));
 
-            try
-            {
-                await Task.WhenAll(leaveTasks).WaitAsync(_options.LeaveMessageTimeout, _sharedResources.TimeProvider, cancellationToken).ConfigureAwait(true);
-            }
-            catch (TimeoutException)
-            {
-                _log.TimeoutWhileLeaving();
-            }
+            await Task.WhenAll(leaveTasks).WaitAsync(_options.LeaveMessageTimeout, _sharedResources.TimeProvider, cancellationToken).ConfigureAwait(true);
         }
         catch (OperationCanceledException)
         {
             // Cancellation requested - continue with shutdown
+        }
+        catch (TimeoutException)
+        {
+            _log.TimeoutWhileLeaving();
         }
         catch (NodeNotInRingException)
         {
@@ -1675,10 +1666,10 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
             _log.NodeAlreadyRemoved();
         }
 
-        // Shutdown resources
-        Shutdown();
+        // Cancel background tasks
+        await _stoppingCts.CancelAsync().ConfigureAwait(true);
 
-        // Wait for background tasks
+        // Wait for background tasks to complete
         Task[] backgroundTasks;
         lock (_backgroundTasksLock)
         {
@@ -1702,7 +1693,12 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
 
     /// <summary>
     /// Asynchronously disposes the membership service.
+    /// Disposes event channels, failure detectors, and consensus instance.
     /// </summary>
+    /// <remarks>
+    /// For graceful shutdown: call <c>StopAsync()</c> before this method.
+    /// For hard crash (no notification): call this method directly.
+    /// </remarks>
     public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0)
@@ -1711,7 +1707,22 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
         }
 
         _log.Dispose();
-        await StopAsync().ConfigureAwait(true);
+
+        // Cancel background tasks (in case StopAsync wasn't called)
+        await _stoppingCts.CancelAsync().ConfigureAwait(true);
+        _stoppingCts.Dispose();
+
+        // Dispose the event channel to signal completion to all subscribers
+        _eventChannel.Dispose();
+
+        // Dispose failure detectors
+        foreach (var fd in _failureDetectors)
+        {
+            fd.Dispose();
+        }
+        _failureDetectors.Clear();
+
+        // Dispose consensus instance
         await _consensusInstance.DisposeAsync();
     }
 
@@ -1727,7 +1738,24 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
         }
 
         _log.Dispose();
-        Shutdown();
+
+        // Cancel background tasks (in case StopAsync wasn't called)
+#pragma warning disable CA1849 // Call async methods when in an async method - sync Dispose
+        _stoppingCts.Cancel();
+#pragma warning restore CA1849
+        _stoppingCts.Dispose();
+
+        // Dispose the event channel to signal completion to all subscribers
+        _eventChannel.Dispose();
+
+        // Dispose failure detectors
+        foreach (var fd in _failureDetectors)
+        {
+            fd.Dispose();
+        }
+        _failureDetectors.Clear();
+
+        // Dispose consensus instance
         _consensusInstance.DisposeAsync().AsTask().GetAwaiter().GetResult();
     }
 }

@@ -10,7 +10,6 @@ namespace Rapid;
 internal sealed partial class RapidClusterService(
     IOptions<RapidOptions> options,
     MembershipService membershipService,
-    SharedResources sharedResources,
     ILogger<RapidClusterService> logger) : BackgroundService, IAsyncDisposable
 {
     private readonly RapidOptions _options = options.Value;
@@ -61,7 +60,6 @@ internal sealed partial class RapidClusterService(
     {
         LogStopping();
 
-        sharedResources.StartShutdown();
         await MembershipService.StopAsync(cancellationToken).ConfigureAwait(true);
 
         await base.StopAsync(cancellationToken).ConfigureAwait(true);

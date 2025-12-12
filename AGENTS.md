@@ -1,13 +1,22 @@
 # AGENTS.md - Rapid.Net
 
+> **Note**: Keep this file updated as you learn more about the environment, CLI tools, and project conventions.
+
 ## Build & Test Commands
 ```bash
 dotnet build Rapid.Net/Rapid.slnx                    # Build
-dotnet test Rapid.Net/Rapid.slnx                     # Run all tests
-dotnet test Rapid.Net/Rapid.slnx --filter "FullyQualifiedName~TestMethodName"  # Single test
-dotnet test Rapid.Net/Rapid.slnx --filter "FullyQualifiedName~TestClassName"   # Single class
-dotnet test Rapid.Net/Rapid.slnx --filter "FullyQualifiedName!~Integration"    # Unit tests only
+
+# Run tests using dotnet run (xUnit v3 with Microsoft.Testing.Platform)
+cd Rapid.Net/tests/Rapid.Tests
+dotnet run -- --timeout 60s                                        # Run all tests with 60s timeout
+dotnet run -- --timeout 60s --filter-class "*ClusterBasicTests"    # Single test class
+dotnet run -- --timeout 60s --filter-method "*TestMethodName"      # Single test method
+dotnet run -- --timeout 60s --filter-not-class "*Integration*"     # Exclude integration tests
+dotnet run -- --list-tests                                         # List all tests
+dotnet run -- --help                                               # Show all options
 ```
+
+Note: This project uses xUnit v3 with Microsoft.Testing.Platform (MTP). Use `dotnet run --` to run tests, not `dotnet test`. The `--timeout` parameter sets a global test execution timeout (format: `<value>[h|m|s]`).
 
 ## Code Style (enforced via .editorconfig)
 - **Framework**: .NET 10, nullable enabled, warnings as errors

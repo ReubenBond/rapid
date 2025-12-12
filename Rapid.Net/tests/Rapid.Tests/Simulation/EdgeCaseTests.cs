@@ -115,27 +115,27 @@ public sealed class EdgeCaseTests : IAsyncLifetime
 
 
     [Fact]
-    public void DoubleShutdownIsSafe()
+    public void DoubleCrashIsSafe()
     {
         var seedNode = _harness.CreateSeedNode();
 
-        // First shutdown
-        seedNode.Shutdown();
+        // First crash
+        _harness.CrashNode(seedNode);
 
-        // Second shutdown should not throw
-        seedNode.Shutdown();
+        // Second crash should not throw (node already unregistered)
+        _harness.CrashNode(seedNode);
     }
 
     [Fact]
-    public void DoubleDisposeIsSafe()
+    public void CrashNodeTwiceIsSafe()
     {
         var seedNode = _harness.CreateSeedNode();
 
         // Remove from harness first
         _harness.CrashNode(seedNode);
 
-        // Second Destroy should not throw (idempotent)
-        seedNode.Destroy();
+        // Second crash should not throw (idempotent)
+        _harness.CrashNode(seedNode);
     }
 
     [Fact]

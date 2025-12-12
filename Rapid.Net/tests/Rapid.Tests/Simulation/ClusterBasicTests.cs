@@ -64,8 +64,8 @@ public sealed class ClusterBasicTests : IAsyncLifetime
         var seedNode = _harness.CreateSeedNode();
         Assert.True(seedNode.IsInitialized);
 
-        // Shutdown should not throw
-        seedNode.Shutdown();
+        // CrashNode should not throw (hard shutdown)
+        _harness.CrashNode(seedNode);
     }
 
     [Fact]
@@ -74,8 +74,8 @@ public sealed class ClusterBasicTests : IAsyncLifetime
         var seedNode = _harness.CreateSeedNode();
         Assert.True(seedNode.IsInitialized);
 
-        // Leave should not throw (degenerates to shutdown for single node)
-        await _harness.RunAsync(seedNode.LeaveAsync);
+        // Stop should not throw (degenerates to shutdown for single node)
+        await _harness.RunAsync(seedNode.StopAsync);
     }
 
 

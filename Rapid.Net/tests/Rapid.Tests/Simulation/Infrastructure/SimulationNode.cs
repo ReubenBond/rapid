@@ -148,8 +148,13 @@ internal sealed class SimulationNode
         // Create protocol options
         _protocolOptions = protocolOptions ?? new RapidProtocolOptions();
 
-        // Create shared resources with the node's time provider and task scheduler
-        _sharedResources = new SharedResources(_context.TimeProvider, _context.TaskScheduler, _context.Random, _context.Random.NextGuid);
+        // Create shared resources with the node's time provider, task scheduler, and harness teardown token
+        _sharedResources = new SharedResources(
+            _context.TimeProvider,
+            _context.TaskScheduler,
+            _context.Random,
+            _context.Random.NextGuid,
+            harness.TeardownCancellationToken);
 
         // Create in-memory messaging client using GrpcTimeout from protocol options.
         // For tests with suspended nodes requiring Classic Paxos fallback,
@@ -243,59 +248,24 @@ internal sealed class SimulationNode
         _membershipService?.Events ?? throw new InvalidOperationException("Membership service has not been initialized.");
 
     /// <summary>
-    /// Gracefully leaves the cluster.
+    /// Gracefully stops the node by notifying observers and disposing resources.
+    /// Sends leave messages to observers, waits for background tasks, then disposes resources.
     /// </summary>
-    public async Task LeaveAsync()
-    {
-        if (_membershipService is null)
-        {
-            throw new InvalidOperationException("Membership service has not been initialized.");
-        }
-
-        _log.NodeLeaving(RapidUtils.Loggable(Address));
-        await _membershipService.StopAsync().ConfigureAwait(true);
-        _log.NodeLeftGracefully(RapidUtils.Loggable(Address));
-    }
-
-    /// <summary>
-    /// Shuts down the node.
-    /// </summary>
-    public void Shutdown()
-    {
-        // Mark as disposed first to prevent any rejoin attempts (MembershipService checks _disposed)
-        _disposed = true;
-
-        if (_membershipService != null)
-        {
-            _log.NodeShuttingDown(RapidUtils.Loggable(Address));
-            _membershipService.Shutdown();
-        }
-        else
-        {
-            _log.ShutdownCalledNotInitialized(RapidUtils.Loggable(Address));
-        }
-    }
-
-    /// <summary>
-    /// Destroys the node and releases all resources. Called by the harness during node removal or disposal.
-    /// </summary>
-    internal void Destroy()
+    public async Task StopAsync()
     {
         if (_disposed) return;
         _disposed = true;
 
-        _log.NodeDestroying(RapidUtils.Loggable(Address));
+        _log.NodeLeaving(RapidUtils.Loggable(Address));
 
-        // First shutdown shared resources to cancel the ShuttingDownToken
-        // This will cause consensus instances to complete and prevent rejoins
-        _sharedResources.StartShutdown();
+        // Graceful stop: notify observers and wait for background tasks
+        await _membershipService.StopAsync().ConfigureAwait(true);
 
-        _membershipService.Shutdown();
+        // Dispose resources
+        await _membershipService.DisposeAsync().ConfigureAwait(true);
+        await MessagingClient.DisposeAsync().ConfigureAwait(true);
 
-        _sharedResources.Dispose();
-        MessagingClient.Dispose();
-
-        _log.NodeDestroyed(RapidUtils.Loggable(Address));
+        _log.NodeLeftGracefully(RapidUtils.Loggable(Address));
     }
 
     /// <summary>

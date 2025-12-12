@@ -140,6 +140,9 @@ internal sealed partial class MembershipServiceLogger(ILogger<MembershipService>
     [LoggerMessage(Level = LogLevel.Debug, Message = "Shutdown: cancelling background tasks and disposing failure detectors")]
     public partial void Shutdown();
 
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Stopping: sending leave messages and waiting for background tasks")]
+    public partial void Stopping();
+
     [LoggerMessage(Level = LogLevel.Debug, Message = "EnqueueAlertMessage: queued alert edgeSrc={EdgeSrc}, edgeDst={EdgeDst}, status={Status}")]
     public partial void EnqueueAlertMessage(LoggableEndpoint edgeSrc, LoggableEndpoint edgeDst, EdgeStatus status);
 
