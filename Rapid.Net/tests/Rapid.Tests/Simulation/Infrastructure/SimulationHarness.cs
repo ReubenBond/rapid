@@ -425,8 +425,13 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
         // Unregister the node from the network (no more messages will be delivered)
         UnregisterNode(node);
 
-        // Dispose the node's resources
-        Run(() => node.DisposeAsync().AsTask());
+        // Note: We intentionally do NOT dispose the node here.
+        // After UnregisterNode:
+        // 1. The node can no longer receive messages (network won't route to it)
+        // 2. The node's task queue has been cleared
+        // 3. Disposing would require driving async work (e.g., ConsensusCoordinator awaits its loop task)
+        //    which could hang if timers are involved
+        // The harness's DisposeAsync will clean up all remaining resources at test end.
 
         _log.NodeLeft();
     }
@@ -491,12 +496,13 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
             _log.NodeLeftParallel(RapidUtils.Loggable(node.Address));
         }
 
-        // Dispose all leaving nodes' resources
-        Run(() =>
-        {
-            var disposeTasks = nodesToRemove.Select(node => node.DisposeAsync().AsTask());
-            return Task.WhenAll(disposeTasks);
-        });
+        // Note: We intentionally do NOT dispose the nodes here.
+        // After UnregisterNode:
+        // 1. The nodes can no longer receive messages (network won't route to them)
+        // 2. The nodes' task queues have been cleared
+        // 3. Disposing would require driving async work (e.g., ConsensusCoordinator awaits its loop task)
+        //    which could hang if timers are involved
+        // The harness's DisposeAsync will clean up all remaining resources at test end.
 
         // Calculate configuration changes
         var endingConfigVersion = remainingNodes[0].CurrentView.ConfigurationId.Version;

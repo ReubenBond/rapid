@@ -128,6 +128,9 @@ internal sealed partial class MembershipServiceLogger(ILogger<MembershipService>
     [LoggerMessage(Level = LogLevel.Debug, Message = "DecideViewChange: processing {Count} nodes in proposal")]
     public partial void DecideViewChange(int count);
 
+    [LoggerMessage(Level = LogLevel.Warning, Message = "DecideViewChange: ignoring stale consensus decision with {Count} nodes (consensus instance is no longer current)")]
+    public partial void IgnoringStaleConsensusDecision(int count);
+
     [LoggerMessage(Level = LogLevel.Debug, Message = "DecideViewChange: notifying {Count} joiners waiting through us for node {Node}")]
     public partial void NotifyingJoiners(int count, LoggableEndpoint node);
 
@@ -220,6 +223,9 @@ internal sealed partial class MembershipServiceLogger(ILogger<MembershipService>
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Failed to join cluster after {Attempts} attempts")]
     public partial void JoinFailed(int attempts);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Join completed via learner protocol for {MyAddr}, already in membership at config {ConfigId}")]
+    public partial void JoinCompletedViaLearnerProtocol(LoggableEndpoint myAddr, CurrentConfigId configId);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Stale view detected from {RemoteEndpoint}: remote config {RemoteConfigId} > local config {LocalConfigId}. Requesting updated view.")]
     public partial void StaleViewDetected(LoggableEndpoint remoteEndpoint, long remoteConfigId, long localConfigId);

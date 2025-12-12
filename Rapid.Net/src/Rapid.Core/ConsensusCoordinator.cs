@@ -42,6 +42,7 @@ internal sealed class ConsensusCoordinator : IAsyncDisposable
 
     // Synchronization
     private readonly Lock _lock = new();
+    private readonly CancellationTokenSource _disposeCts = new();
     private Task? _consensusLoopTask;
     private int _disposed;
 
@@ -109,8 +110,8 @@ internal sealed class ConsensusCoordinator : IAsyncDisposable
         // Register our fast round vote in the acceptor state
         _paxos.RegisterFastRoundVote(proposal);
 
-        // Start the consensus loop
-        _consensusLoopTask = RunConsensusLoopAsync(proposal, _sharedResources.ShuttingDownToken);
+        // Start the consensus loop with the dispose token so it can be cancelled during disposal
+        _consensusLoopTask = RunConsensusLoopAsync(proposal, _disposeCts.Token);
     }
 
     /// <summary>
@@ -137,7 +138,7 @@ internal sealed class ConsensusCoordinator : IAsyncDisposable
             _fastPaxos.Propose(proposal, cancellationToken);
 
             // Wait for fast round result - will complete when decided, failed, or timeout (via cancellation)
-            var fastRoundResult = await _fastPaxos.Result.ConfigureAwait(true);
+            var fastRoundResult = await _fastPaxos.Result.WaitAsync(cancellationToken).ConfigureAwait(true);
 
             switch (fastRoundResult)
             {
@@ -176,7 +177,7 @@ internal sealed class ConsensusCoordinator : IAsyncDisposable
                 // Check if Paxos already decided (from a previous round's messages arriving late)
                 if (_paxos!.Decided.IsCompletedSuccessfully)
                 {
-                    var paxosResult = await _paxos.Decided.ConfigureAwait(true);
+                    var paxosResult = await _paxos.Decided.WaitAsync(cancellationToken).ConfigureAwait(true);
                     if (paxosResult is ConsensusResult.Decided decided)
                     {
                         _log.ClassicRoundDecided(roundNumber - 1, new ConsensusCoordinatorLogger.LoggableEndpoints(decided.Value));
@@ -310,6 +311,11 @@ internal sealed class ConsensusCoordinator : IAsyncDisposable
 
         _log.Dispose();
 
+        // Cancel the consensus loop first to unblock any Task.Delay calls
+#pragma warning disable CA1849 // Call async methods when in an async method
+        _disposeCts.Cancel();
+#pragma warning restore CA1849
+
         // Cancel both FastPaxos and Paxos to unblock any waiters
         _fastPaxos.Cancel();
         _paxos.Cancel();
@@ -320,5 +326,6 @@ internal sealed class ConsensusCoordinator : IAsyncDisposable
         }
 
         _onDecidedTcs.TrySetCanceled();
+        _disposeCts.Dispose();
     }
 }

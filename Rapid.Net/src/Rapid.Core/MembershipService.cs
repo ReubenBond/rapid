@@ -209,6 +209,16 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
 
         for (var attempt = 0; attempt <= maxRetries; attempt++)
         {
+            // Check if we've already joined via the learner protocol (stale view detection).
+            // This can happen when failure detection probes reveal we're behind and we learn
+            // the current membership view from another node. If our address is already in the
+            // membership, we're effectively joined and can skip the join protocol.
+            if (_membershipView.IsHostPresent(_myAddr))
+            {
+                _log.JoinCompletedViaLearnerProtocol(new MembershipServiceLogger.LoggableEndpoint(_myAddr), new MembershipServiceLogger.CurrentConfigId(_membershipView));
+                return;
+            }
+
             var result = await TryJoinClusterAsync(cancellationToken).ConfigureAwait(true);
 
             switch (result.Status)
@@ -418,7 +428,10 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
         List<Endpoint>? addedNodes)
     {
         // Must be called under _membershipUpdateLock
-        var previousConsensusInstance = _initialized ? _consensusInstance : null;
+        // Always capture the previous consensus instance to ensure it gets disposed.
+        // This handles the case where SetMembershipView is called multiple times
+        // during initialization (e.g., via ApplyLearnedMembershipView during join).
+        var previousConsensusInstance = _consensusInstance;
 
         // Update the view
         _membershipView = newView;
@@ -445,7 +458,7 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
 
         // Create new consensus instance
         _consensusInstance = _consensusCoordinatorFactory.Create(_myAddr, _membershipView.ConfigurationId, _membershipView.Size, _broadcaster);
-        RegisterConsensusDecidedContinuation(_consensusInstance);
+        RegisterConsensusDecidedContinuation(_consensusInstance, _membershipView.ConfigurationId);
         _announcedProposal = false;
 
         // Replay any buffered consensus messages for this configuration
@@ -890,13 +903,29 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
     /// Any node that is not in the membership list will be added to the cluster,
     /// and any node that is currently in the membership list will be removed from it.
     /// </summary>
-    private async Task DecideViewChange(List<Endpoint> proposal)
+    /// <param name="proposal">The list of nodes that were decided to join or leave.</param>
+    /// <param name="decidingConfigurationId">The configuration ID when consensus was started.</param>
+    private async Task DecideViewChange(List<Endpoint> proposal, ConfigurationId decidingConfigurationId)
     {
         _log.DecideViewChange(proposal.Count);
 
         ConsensusCoordinator? previousConsensusInstance;
         lock (_membershipUpdateLock)
         {
+            // Check if this decision is for the current configuration.
+            // A stale decision can arrive if:
+            // 1. Node A crashed while joining (consensus to add A was in progress)
+            // 2. Other nodes detected A's crash and started new consensus to remove A
+            // 3. The "remove A" consensus completed first, advancing the configuration
+            // 4. The old "add A" consensus completes later with a stale decision
+            // In this case, we should ignore the stale decision. The stale consensus
+            // instance has already been disposed when the view changed (via SetMembershipView).
+            if (_membershipView.ConfigurationId != decidingConfigurationId)
+            {
+                _log.IgnoringStaleConsensusDecision(proposal.Count);
+                return;
+            }
+
             _announcedProposal = false;
 
             // Track nodes that were added so we can notify their joiners after ALL nodes are processed
@@ -1556,7 +1585,7 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
     /// Registers a continuation on ConsensusCoordinator.Decided that handles the result and checks for shutdown.
     /// The continuation is tracked as a background task to ensure proper cleanup during shutdown.
     /// </summary>
-    private void RegisterConsensusDecidedContinuation(ConsensusCoordinator consensusInstance)
+    private void RegisterConsensusDecidedContinuation(ConsensusCoordinator consensusInstance, ConfigurationId configurationId)
     {
         var continuationTask = consensusInstance.Decided.ContinueWith(async decision =>
         {
@@ -1569,7 +1598,7 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
                 return;
             }
 
-            await DecideViewChange(await decision);
+            await DecideViewChange(await decision, configurationId);
         }, CancellationToken.None, TaskContinuationOptions.None, _sharedResources.TaskScheduler);
         continuationTask.Unwrap().Ignore();
     }
@@ -1597,7 +1626,7 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
                 _membershipView.ConfigurationId,
                 _membershipView.Size,
                 _broadcaster);
-            RegisterConsensusDecidedContinuation(_consensusInstance);
+            RegisterConsensusDecidedContinuation(_consensusInstance, _membershipView.ConfigurationId);
         }
 
         await failedInstance.DisposeAsync();
