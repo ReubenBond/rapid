@@ -16,7 +16,7 @@ public sealed class MembershipView
     /// <summary>
     /// An empty membership view with no members. Used as the initial state before the cluster is initialized.
     /// </summary>
-    public static MembershipView Empty { get; } = CreateEmpty(ringCount: 0);
+    public static MembershipView Empty { get; } = new(0, ConfigurationId.Empty, [], []);
 
     private readonly ImmutableArray<ImmutableArray<Endpoint>> _rings;
     private readonly ImmutableSortedSet<Endpoint> _allNodes;
@@ -294,16 +294,6 @@ public sealed class MembershipView
             }
         }
         return left;
-    }
-
-    private static MembershipView CreateEmpty(int ringCount)
-    {
-        var emptyRingsBuilder = ImmutableArray.CreateBuilder<ImmutableArray<Endpoint>>(ringCount);
-        for (var i = 0; i < ringCount; i++)
-        {
-            emptyRingsBuilder.Add([]);
-        }
-        return new MembershipView(ringCount, ConfigurationId.Empty, emptyRingsBuilder.MoveToImmutable(), []);
     }
 }
 

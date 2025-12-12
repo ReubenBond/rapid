@@ -856,6 +856,443 @@ public class MembershipViewTests
             });
     }
 
+    [Fact]
+    public void Property_IsMember_And_IsHostPresent_Are_Equivalent()
+    {
+        Gen.Select(GenK, GenUniqueNodes(1, 20))
+            .Sample((k, nodes) =>
+            {
+                var builder = new MembershipViewBuilder(k);
+                foreach (var (endpoint, nodeId) in nodes)
+                {
+                    builder.RingAdd(endpoint, nodeId);
+                }
+                var view = builder.Build();
+
+                // IsMember and IsHostPresent should return the same result for all nodes
+                foreach (var (endpoint, _) in nodes)
+                {
+                    if (view.IsMember(endpoint) != view.IsHostPresent(endpoint))
+                        return false;
+                }
+
+                // Both should return false for a node not in the view
+                var notInView = new Endpoint { Hostname = ByteString.CopyFromUtf8("10.0.0.1"), Port = 9999 };
+                return !view.IsMember(notInView) && !view.IsHostPresent(notInView);
+            });
+    }
+
+    [Fact]
+    public void Property_IsIdentifierPresent_Returns_True_For_All_Added_NodeIds()
+    {
+        Gen.Select(GenK, GenUniqueNodes(1, 20))
+            .Sample((k, nodes) =>
+            {
+                var builder = new MembershipViewBuilder(k);
+                foreach (var (endpoint, nodeId) in nodes)
+                {
+                    builder.RingAdd(endpoint, nodeId);
+                }
+                var view = builder.Build();
+
+                // All added NodeIds should be present
+                return nodes.All(n => view.IsIdentifierPresent(n.NodeId));
+            });
+    }
+
+    [Fact]
+    public void Property_GetSubjectsOf_Returns_RingCount_Subjects()
+    {
+        Gen.Select(GenK, GenUniqueNodes(3, 20))
+            .Sample((k, nodes) =>
+            {
+                var builder = new MembershipViewBuilder(k);
+                foreach (var (endpoint, nodeId) in nodes)
+                {
+                    builder.RingAdd(endpoint, nodeId);
+                }
+                var view = builder.Build();
+
+                var testNode = nodes[0].Endpoint;
+                var subjects = view.GetSubjectsOf(testNode);
+
+                // Subjects count should be exactly the actual ring count (one per ring)
+                return subjects.Length == view.RingCount;
+            });
+    }
+
+    [Fact]
+    public void Property_Observers_And_Subjects_Are_All_Members()
+    {
+        Gen.Select(GenK, GenUniqueNodes(3, 20))
+            .Sample((k, nodes) =>
+            {
+                var builder = new MembershipViewBuilder(k);
+                foreach (var (endpoint, nodeId) in nodes)
+                {
+                    builder.RingAdd(endpoint, nodeId);
+                }
+                var view = builder.Build();
+
+                var testNode = nodes[0].Endpoint;
+                var observers = view.GetObserversOf(testNode);
+                var subjects = view.GetSubjectsOf(testNode);
+
+                // All observers and subjects should be members of the view
+                return observers.All(view.IsMember) && subjects.All(view.IsMember);
+            });
+    }
+
+    [Fact]
+    public void Property_GetRingNumbers_Returns_Valid_Ring_Indices()
+    {
+        Gen.Select(GenK, GenUniqueNodes(3, 20))
+            .Sample((k, nodes) =>
+            {
+                var builder = new MembershipViewBuilder(k);
+                foreach (var (endpoint, nodeId) in nodes)
+                {
+                    builder.RingAdd(endpoint, nodeId);
+                }
+                var view = builder.Build();
+
+                var observer = nodes[0].Endpoint;
+                var subjects = view.GetSubjectsOf(observer);
+
+                // For each subject, GetRingNumbers should return at least one valid ring index
+                foreach (var subject in subjects.Distinct())
+                {
+                    var ringNumbers = view.GetRingNumbers(observer, subject);
+                    if (ringNumbers.Length == 0) return false;
+                    if (ringNumbers.Any(r => r < 0 || r >= view.RingCount)) return false;
+                }
+                return true;
+            });
+    }
+
+    [Fact]
+    public void Property_Members_Contains_All_Added_Endpoints()
+    {
+        Gen.Select(GenK, GenUniqueNodes(1, 20))
+            .Sample((k, nodes) =>
+            {
+                var builder = new MembershipViewBuilder(k);
+                foreach (var (endpoint, nodeId) in nodes)
+                {
+                    builder.RingAdd(endpoint, nodeId);
+                }
+                var view = builder.Build();
+
+                // All added endpoints should be in Members
+                var members = view.Members.ToHashSet();
+                return nodes.All(n => members.Contains(n.Endpoint));
+            });
+    }
+
+    [Fact]
+    public void Property_NodeIds_Contains_All_Added_Identifiers()
+    {
+        Gen.Select(GenK, GenUniqueNodes(1, 20))
+            .Sample((k, nodes) =>
+            {
+                var builder = new MembershipViewBuilder(k);
+                foreach (var (endpoint, nodeId) in nodes)
+                {
+                    builder.RingAdd(endpoint, nodeId);
+                }
+                var view = builder.Build();
+
+                // All added NodeIds should be in NodeIds collection
+                var nodeIdSet = view.NodeIds.ToHashSet();
+                return nodes.All(n => nodeIdSet.Contains(n.NodeId));
+            });
+    }
+
+    [Fact]
+    public void Property_Configuration_Roundtrip_Preserves_Data()
+    {
+        Gen.Select(GenK, GenUniqueNodes(1, 20))
+            .Sample((k, nodes) =>
+            {
+                var builder = new MembershipViewBuilder(k);
+                foreach (var (endpoint, nodeId) in nodes)
+                {
+                    builder.RingAdd(endpoint, nodeId);
+                }
+                var view = builder.Build();
+
+                // Get configuration and verify it contains the same data
+                var config = view.Configuration;
+                return config.Endpoints.Length == view.Size &&
+                       config.NodeIds.Length == view.NodeIds.Length &&
+                       config.Endpoints.SequenceEqual(view.Members);
+            });
+    }
+
+    [Fact]
+    public void Property_IsSafeToJoin_Rejects_Existing_Hosts()
+    {
+        Gen.Select(GenK, GenUniqueNodes(2, 20))
+            .Sample((k, nodes) =>
+            {
+                var builder = new MembershipViewBuilder(k);
+                foreach (var (endpoint, nodeId) in nodes)
+                {
+                    builder.RingAdd(endpoint, nodeId);
+                }
+                var view = builder.Build();
+
+                // Existing hosts should not be safe to join
+                var existingHost = nodes[0].Endpoint;
+                var newNodeId = new NodeId { High = 999999, Low = 999999 };
+                return view.IsSafeToJoin(existingHost, newNodeId) == JoinStatusCode.HostnameAlreadyInRing;
+            });
+    }
+
+    [Fact]
+    public void Property_IsSafeToJoin_Rejects_Existing_NodeIds()
+    {
+        Gen.Select(GenK, GenUniqueNodes(2, 20))
+            .Sample((k, nodes) =>
+            {
+                var builder = new MembershipViewBuilder(k);
+                foreach (var (endpoint, nodeId) in nodes)
+                {
+                    builder.RingAdd(endpoint, nodeId);
+                }
+                var view = builder.Build();
+
+                // Existing NodeIds should not be safe to join
+                var newHost = new Endpoint { Hostname = ByteString.CopyFromUtf8("10.0.0.1"), Port = 9999 };
+                var existingNodeId = nodes[0].NodeId;
+                return view.IsSafeToJoin(newHost, existingNodeId) == JoinStatusCode.UuidAlreadyInRing;
+            });
+    }
+
+    [Fact]
+    public void Property_IsSafeToJoin_Allows_New_Host_And_NodeId()
+    {
+        Gen.Select(GenK, GenUniqueNodes(1, 20))
+            .Sample((k, nodes) =>
+            {
+                var builder = new MembershipViewBuilder(k);
+                foreach (var (endpoint, nodeId) in nodes)
+                {
+                    builder.RingAdd(endpoint, nodeId);
+                }
+                var view = builder.Build();
+
+                // New host and NodeId should be safe to join
+                var newHost = new Endpoint { Hostname = ByteString.CopyFromUtf8("10.0.0.1"), Port = 9999 };
+                var newNodeId = new NodeId { High = 999999, Low = 999999 };
+                return view.IsSafeToJoin(newHost, newNodeId) == JoinStatusCode.SafeToJoin;
+            });
+    }
+
+    [Fact]
+    public void Property_ToBuilder_Creates_Independent_Copy()
+    {
+        Gen.Select(GenK, GenUniqueNodes(2, 20))
+            .Sample((k, nodes) =>
+            {
+                var builder = new MembershipViewBuilder(k);
+                foreach (var (endpoint, nodeId) in nodes)
+                {
+                    builder.RingAdd(endpoint, nodeId);
+                }
+                var view1 = builder.Build();
+
+                // Create a new builder and modify it
+                var builder2 = view1.ToBuilder();
+                var newEndpoint = new Endpoint { Hostname = ByteString.CopyFromUtf8("10.0.0.1"), Port = 9999 };
+                var newNodeId = new NodeId { High = 999999, Low = 999999 };
+                builder2.RingAdd(newEndpoint, newNodeId);
+                var view2 = builder2.Build(view1.ConfigurationId);
+
+                // Original view should be unchanged
+                return view1.Size == nodes.Count && view2.Size == nodes.Count + 1;
+            });
+    }
+
+    [Fact]
+    public void Property_Delete_Removes_Node_From_View()
+    {
+        Gen.Select(GenK, GenUniqueNodes(3, 20))
+            .Sample((k, nodes) =>
+            {
+                var builder = new MembershipViewBuilder(k);
+                foreach (var (endpoint, nodeId) in nodes)
+                {
+                    builder.RingAdd(endpoint, nodeId);
+                }
+                var view1 = builder.Build();
+
+                // Delete a node
+                var builder2 = view1.ToBuilder();
+                var nodeToDelete = nodes[0].Endpoint;
+                builder2.RingDelete(nodeToDelete);
+                var view2 = builder2.Build(view1.ConfigurationId);
+
+                // Node should no longer be a member
+                return view2.Size == nodes.Count - 1 &&
+                       !view2.IsMember(nodeToDelete) &&
+                       view1.IsMember(nodeToDelete); // Original unchanged
+            });
+    }
+
+    [Fact]
+    public void Property_Deleted_NodeId_Still_Present_In_Identifiers()
+    {
+        Gen.Select(GenK, GenUniqueNodes(3, 20))
+            .Sample((k, nodes) =>
+            {
+                var builder = new MembershipViewBuilder(k);
+                foreach (var (endpoint, nodeId) in nodes)
+                {
+                    builder.RingAdd(endpoint, nodeId);
+                }
+
+                // Delete a node - note: NodeId is tracked in builder, not view
+                var nodeToDelete = nodes[0];
+                builder.RingDelete(nodeToDelete.Endpoint);
+
+                // NodeId should still be tracked (prevents UUID reuse)
+                return builder.IsIdentifierPresent(nodeToDelete.NodeId);
+            });
+    }
+
+    [Fact]
+    public void Property_All_Rings_Have_Same_Nodes()
+    {
+        Gen.Select(GenK, GenUniqueNodes(3, 20))
+            .Sample((k, nodes) =>
+            {
+                var builder = new MembershipViewBuilder(k);
+                foreach (var (endpoint, nodeId) in nodes)
+                {
+                    builder.RingAdd(endpoint, nodeId);
+                }
+                var view = builder.Build();
+
+                // All rings should contain the same set of nodes (just in different order)
+                var expectedNodes = nodes.Select(n => n.Endpoint).ToHashSet();
+                for (var ringIndex = 0; ringIndex < view.RingCount; ringIndex++)
+                {
+                    var ring = view.GetRing(ringIndex);
+                    var ringNodes = ring.ToHashSet();
+                    if (!ringNodes.SetEquals(expectedNodes)) return false;
+                }
+                return true;
+            });
+    }
+
+    [Fact]
+    public void Property_GetExpectedObserversOf_Returns_RingCount_Observers()
+    {
+        Gen.Select(GenK, GenUniqueNodes(2, 20))
+            .Sample((k, nodes) =>
+            {
+                var builder = new MembershipViewBuilder(k);
+                foreach (var (endpoint, nodeId) in nodes)
+                {
+                    builder.RingAdd(endpoint, nodeId);
+                }
+                var view = builder.Build();
+
+                // For a new joining node, expected observers count equals ring count
+                var joiningNode = new Endpoint { Hostname = ByteString.CopyFromUtf8("10.0.0.1"), Port = 9999 };
+                var expectedObservers = view.GetExpectedObserversOf(joiningNode);
+                return expectedObservers.Length == view.RingCount;
+            });
+    }
+
+    [Fact]
+    public void Property_Empty_View_Has_No_Members()
+    {
+        GenK.Sample(k =>
+        {
+            var builder = new MembershipViewBuilder(k);
+            var view = builder.Build();
+
+            return view.Size == 0 &&
+                   view.Members.Length == 0 &&
+                   view.NodeIds.Length == 0;
+        });
+    }
+
+    [Fact]
+    public void Property_ConfigurationId_Increments_On_Build()
+    {
+        Gen.Select(GenK, GenUniqueNodes(2, 10))
+            .Sample((k, nodes) =>
+            {
+                var builder = new MembershipViewBuilder(k);
+                builder.RingAdd(nodes[0].Endpoint, nodes[0].NodeId);
+                var view1 = builder.Build();
+
+                var builder2 = view1.ToBuilder();
+                builder2.RingAdd(nodes[1].Endpoint, nodes[1].NodeId);
+                var view2 = builder2.Build(view1.ConfigurationId);
+
+                return view2.ConfigurationId.Version == view1.ConfigurationId.Version + 1;
+            });
+    }
+
+    [Fact]
+    public void Property_GetRing_Throws_For_Invalid_Index()
+    {
+        Gen.Select(GenK, GenUniqueNodes(2, 20))
+            .Sample((k, nodes) =>
+            {
+                var builder = new MembershipViewBuilder(k);
+                foreach (var (endpoint, nodeId) in nodes)
+                {
+                    builder.RingAdd(endpoint, nodeId);
+                }
+                var view = builder.Build();
+
+                // Negative index should throw
+                var threwForNegative = false;
+                try { view.GetRing(-1); }
+                catch (ArgumentOutOfRangeException) { threwForNegative = true; }
+
+                // Index >= RingCount should throw
+                var threwForTooLarge = false;
+                try { view.GetRing(view.RingCount); }
+                catch (ArgumentOutOfRangeException) { threwForTooLarge = true; }
+
+                return threwForNegative && threwForTooLarge;
+            });
+    }
+
+    [Fact]
+    public void Property_Observer_Subject_Relationship_Is_Symmetric()
+    {
+        Gen.Select(GenK, GenUniqueNodes(3, 15))
+            .Sample((k, nodes) =>
+            {
+                var builder = new MembershipViewBuilder(k);
+                foreach (var (endpoint, nodeId) in nodes)
+                {
+                    builder.RingAdd(endpoint, nodeId);
+                }
+                var view = builder.Build();
+
+                // For each node, if B is an observer of A, then A is a subject of B
+                foreach (var (endpoint, _) in nodes)
+                {
+                    var observers = view.GetObserversOf(endpoint);
+                    foreach (var observer in observers)
+                    {
+                        var subjectsOfObserver = view.GetSubjectsOf(observer);
+                        if (!subjectsOfObserver.Contains(endpoint))
+                            return false;
+                    }
+                }
+                return true;
+            });
+    }
+
     #endregion
 }
 
