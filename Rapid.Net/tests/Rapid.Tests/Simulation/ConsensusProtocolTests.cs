@@ -128,7 +128,7 @@ public sealed class ConsensusProtocolTests : IAsyncLifetime
         // With only 2 out of 5 nodes remaining, quorum cannot be reached
         // The remaining nodes will detect the failures but won't be able to reach
         // consensus to remove them from the membership view
-        Assert.Equal(2, _harness.AllNodes.Count);
+        Assert.Equal(2, _harness.Nodes.Count);
 
         // Advance time to trigger failure detection, but don't wait for convergence
         // since it won't happen (no quorum possible)
@@ -169,7 +169,7 @@ public sealed class ConsensusProtocolTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 4);
 
         // All nodes should eventually agree
-        Assert.All(_harness.AllNodes, n => Assert.Equal(4, n.MembershipSize));
+        Assert.All(_harness.Nodes, n => Assert.Equal(4, n.MembershipSize));
     }
 
 
@@ -223,7 +223,7 @@ public sealed class ConsensusProtocolTests : IAsyncLifetime
 
         // All nodes should have the same final configuration
         var configId = seedNode.CurrentView.ConfigurationId;
-        Assert.All(_harness.AllNodes,
+        Assert.All(_harness.Nodes,
             n => Assert.Equal(configId, n.CurrentView.ConfigurationId));
     }
 
@@ -299,7 +299,7 @@ public sealed class ConsensusProtocolTests : IAsyncLifetime
 
         _harness.WaitForConvergence(expectedSize: 4);
 
-        Assert.All(_harness.AllNodes, n => Assert.Equal(4, n.MembershipSize));
+        Assert.All(_harness.Nodes, n => Assert.Equal(4, n.MembershipSize));
     }
 
     [Fact]
@@ -317,7 +317,7 @@ public sealed class ConsensusProtocolTests : IAsyncLifetime
         // Classic Paxos should succeed with 3 nodes (majority)
         _harness.WaitForConvergence(expectedSize: 3);
 
-        Assert.All(_harness.AllNodes, n => Assert.Equal(3, n.MembershipSize));
+        Assert.All(_harness.Nodes, n => Assert.Equal(3, n.MembershipSize));
     }
 
     [Fact]

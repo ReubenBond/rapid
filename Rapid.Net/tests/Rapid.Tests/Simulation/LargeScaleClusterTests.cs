@@ -309,7 +309,7 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
 
         _harness.WaitForConvergence(expectedSize: 10);
 
-        Assert.All(_harness.AllNodes, n => Assert.Equal(10, n.MembershipSize));
+        Assert.All(_harness.Nodes, n => Assert.Equal(10, n.MembershipSize));
     }
 
     /// <summary>
@@ -356,7 +356,7 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
         var joiner5 = _harness.CreateJoinerNode(joiner3, nodeId: 5);
         _harness.WaitForConvergence(expectedSize: 6);
 
-        Assert.All(_harness.AllNodes, n => Assert.Equal(6, n.MembershipSize));
+        Assert.All(_harness.Nodes, n => Assert.Equal(6, n.MembershipSize));
     }
 
 
@@ -380,8 +380,8 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
 
         _harness.WaitForConvergence(expectedSize: 10);
 
-        Assert.Equal(10, _harness.AllNodes.Count);
-        Assert.All(_harness.AllNodes, n => Assert.Equal(10, n.MembershipSize));
+        Assert.Equal(10, _harness.Nodes.Count);
+        Assert.All(_harness.Nodes, n => Assert.Equal(10, n.MembershipSize));
     }
 
     /// <summary>
@@ -404,7 +404,7 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
 
         _harness.WaitForConvergence(expectedSize: 9);
 
-        Assert.All(_harness.AllNodes, n => Assert.Equal(9, n.MembershipSize));
+        Assert.All(_harness.Nodes, n => Assert.Equal(9, n.MembershipSize));
     }
 
 
@@ -424,7 +424,7 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
         // Wait for failure detection
         _harness.WaitForConvergence(expectedSize: 9, maxIterations: 500000);
 
-        Assert.All(_harness.AllNodes, n => Assert.Equal(9, n.MembershipSize));
+        Assert.All(_harness.Nodes, n => Assert.Equal(9, n.MembershipSize));
     }
 
     /// <summary>
@@ -444,7 +444,7 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
         // Wait for failure detection
         _harness.WaitForConvergence(expectedSize: 7, maxIterations: 500000);
 
-        Assert.All(_harness.AllNodes, n => Assert.Equal(7, n.MembershipSize));
+        Assert.All(_harness.Nodes, n => Assert.Equal(7, n.MembershipSize));
     }
 
     /// <summary>
@@ -471,7 +471,7 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
 
         _harness.WaitForConvergence(expectedSize: 10);
 
-        Assert.All(_harness.AllNodes, n => Assert.Equal(10, n.MembershipSize));
+        Assert.All(_harness.Nodes, n => Assert.Equal(10, n.MembershipSize));
     }
 
 
@@ -489,7 +489,7 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
         _harness.RemoveNodeGracefully(nodes[9]);
         _harness.WaitForConvergence(expectedSize: 9);
 
-        Assert.All(_harness.AllNodes, n => Assert.Equal(9, n.MembershipSize));
+        Assert.All(_harness.Nodes, n => Assert.Equal(9, n.MembershipSize));
     }
 
     /// <summary>
@@ -511,7 +511,7 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
         _harness.RemoveNodeGracefully(nodes[7]);
         _harness.WaitForConvergence(expectedSize: 7);
 
-        Assert.All(_harness.AllNodes, n => Assert.Equal(7, n.MembershipSize));
+        Assert.All(_harness.Nodes, n => Assert.Equal(7, n.MembershipSize));
     }
 
     /// <summary>
@@ -541,7 +541,7 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
         var expectedSize = clusterSize - nodesToRemove;
         _harness.WaitForConvergence(expectedSize: expectedSize, maxIterations: maxIterationsPerBatch);
 
-        Assert.All(_harness.AllNodes, n => Assert.Equal(expectedSize, n.MembershipSize));
+        Assert.All(_harness.Nodes, n => Assert.Equal(expectedSize, n.MembershipSize));
 
         var avgNodesPerChange = (double)nodesToRemove / configChanges;
 
@@ -576,7 +576,7 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
         var newNode2 = _harness.CreateJoinerNode(nodes[0], nodeId: 9);
         _harness.WaitForConvergence(expectedSize: 9);
 
-        Assert.All(_harness.AllNodes, n => Assert.Equal(9, n.MembershipSize));
+        Assert.All(_harness.Nodes, n => Assert.Equal(9, n.MembershipSize));
     }
 
     /// <summary>
@@ -597,7 +597,7 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
         }
 
         // Shrink the cluster
-        var nodesToRemove = _harness.AllNodes.Skip(3).ToList();
+        var nodesToRemove = _harness.Nodes.Skip(3).ToList();
         foreach (var node in nodesToRemove)
         {
             _harness.RemoveNodeGracefully(node);
@@ -737,20 +737,20 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
         for (var round = 0; round < 5; round++)
         {
             // Remove one node
-            var nodeToRemove = _harness.AllNodes.Last();
+            var nodeToRemove = _harness.Nodes.Last();
             _harness.RemoveNodeGracefully(nodeToRemove);
 
-            var expectedSize = _harness.AllNodes.Count;
+            var expectedSize = _harness.Nodes.Count;
             _harness.WaitForConvergence(expectedSize: expectedSize);
 
             // Add one node
-            var newNode = _harness.CreateJoinerNode(_harness.AllNodes[0], nodeId: nodeIdCounter++);
+            var newNode = _harness.CreateJoinerNode(_harness.Nodes[0], nodeId: nodeIdCounter++);
             _harness.WaitForConvergence(expectedSize: expectedSize + 1);
         }
 
         // Cluster should be stable with 5 nodes
-        Assert.Equal(5, _harness.AllNodes.Count);
-        Assert.All(_harness.AllNodes, n => Assert.Equal(5, n.MembershipSize));
+        Assert.Equal(5, _harness.Nodes.Count);
+        Assert.All(_harness.Nodes, n => Assert.Equal(5, n.MembershipSize));
     }
 
     /// <summary>
@@ -770,8 +770,8 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
 
         _harness.WaitForConvergence(expectedSize: 11);
 
-        Assert.Equal(11, _harness.AllNodes.Count);
-        Assert.All(_harness.AllNodes, n => Assert.Equal(11, n.MembershipSize));
+        Assert.Equal(11, _harness.Nodes.Count);
+        Assert.All(_harness.Nodes, n => Assert.Equal(11, n.MembershipSize));
     }
 
 }

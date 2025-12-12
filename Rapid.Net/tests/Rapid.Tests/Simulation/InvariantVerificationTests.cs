@@ -56,7 +56,7 @@ public sealed class InvariantVerificationTests : IAsyncLifetime
 
         _harness.RunUntilConverged(expectedSize: 2);
 
-        var knownAddresses = _harness.AllNodes
+        var knownAddresses = _harness.Nodes
             .Select(n => $"{n.Address.Hostname}:{n.Address.Port}")
             .ToHashSet();
 

@@ -111,7 +111,7 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
     /// Gets all nodes in the simulation, including suspended nodes (snapshot).
     /// Consider using <see cref="ActiveNodes"/> for most operations.
     /// </summary>
-    public IReadOnlyList<SimulationNode> AllNodes => [.. _nodes.Values];
+    public IReadOnlyList<SimulationNode> Nodes => [.. _nodes.Values];
 
     /// <summary>
     /// Gets all active (non-suspended) nodes in the simulation (snapshot).
@@ -404,7 +404,7 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(node);
         _log.NodeLeaving();
 
-        var remainingNodes = AllNodes.Where(n => n != node).ToList();
+        var remainingNodes = Nodes.Where(n => n != node).ToList();
         var targetSize = remainingNodes.Count;
 
         // Drive the stop operation to completion (sends LeaveMessages to observers)
@@ -454,7 +454,7 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
         }
 
         // Get the starting configuration version to measure changes
-        var remainingNodes = AllNodes.Where(n => !nodesToRemove.Contains(n)).ToList();
+        var remainingNodes = Nodes.Where(n => !nodesToRemove.Contains(n)).ToList();
         var startingConfigVersion = remainingNodes[0].CurrentView.ConfigurationId.Version;
         var targetSize = remainingNodes.Count;
 
@@ -665,7 +665,7 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
         }
 
         // Try to execute from non-suspended node contexts (round-robin)
-        foreach (var node in AllNodes)
+        foreach (var node in Nodes)
         {
             var context = node.Context;
             if (context.State == SimulationNodeState.Running && context.Step())
@@ -683,7 +683,7 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
     private DateTimeOffset? GetNextWaitingDueTime()
     {
         using var _ = Guard.Enter();
-        return AllNodes.Select(n => n.Context.NextWaitingDueTime).Concat([TaskQueue.NextWaitingDueTime]).Min();
+        return Nodes.Select(n => n.Context.NextWaitingDueTime).Concat([TaskQueue.NextWaitingDueTime]).Min();
     }
 
     /// <summary>
@@ -842,7 +842,7 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
 
         if (!converged)
         {
-            var suspendedNodes = AllNodes.Where(n => n.IsSuspended).ToList();
+            var suspendedNodes = Nodes.Where(n => n.IsSuspended).ToList();
             throw new TimeoutException($"Nodes did not converge. " +
                 $"Active node count: {ActiveNodes.Count}, " +
                 $"Active node sizes: [{string.Join(", ", ActiveNodes.Select(n => n.MembershipSize))}], " +
@@ -858,7 +858,7 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
     {
         if (!RunUntilConverged(expectedSize, maxIterations))
         {
-            var suspendedNodes = AllNodes.Where(n => n.IsSuspended).ToList();
+            var suspendedNodes = Nodes.Where(n => n.IsSuspended).ToList();
             throw new TimeoutException($"Nodes did not converge to size {expectedSize}. " +
                 $"Active node sizes: [{string.Join(", ", ActiveNodes.Select(n => n.MembershipSize))}], " +
                 $"Suspended nodes: {suspendedNodes.Count}");
@@ -954,7 +954,7 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
         TaskQueue.Clear();
 
         // Unregister all nodes (hard crash - no cleanup needed, just drop references)
-        foreach (var node in AllNodes.ToList())
+        foreach (var node in Nodes.ToList())
         {
             UnregisterNode(node);
         }

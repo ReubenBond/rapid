@@ -49,7 +49,7 @@ public sealed class ChaosInjectorTests : IAsyncLifetime
 
         _chaos.ScheduleNodeCrash(node, TimeSpan.FromSeconds(10));
 
-        Assert.Contains(node, _harness.AllNodes);
+        Assert.Contains(node, _harness.Nodes);
     }
 
     [Fact]
@@ -62,7 +62,7 @@ public sealed class ChaosInjectorTests : IAsyncLifetime
         _harness.RunForDuration(TimeSpan.FromSeconds(15));
         _chaos.MaybeInjectFault(); // Process scheduled faults
 
-        Assert.DoesNotContain(node, _harness.AllNodes);
+        Assert.DoesNotContain(node, _harness.Nodes);
     }
 
     [Fact]
@@ -89,7 +89,7 @@ public sealed class ChaosInjectorTests : IAsyncLifetime
         _harness.RunForDuration(TimeSpan.FromSeconds(30));
         _chaos.MaybeInjectFault();
 
-        Assert.Contains(node, _harness.AllNodes);
+        Assert.Contains(node, _harness.Nodes);
     }
 
     [Fact]
@@ -121,7 +121,7 @@ public sealed class ChaosInjectorTests : IAsyncLifetime
         _chaos.RunChaos(steps: 100);
 
         // At least some nodes should have crashed
-        Assert.True(_harness.AllNodes.Count < 5);
+        Assert.True(_harness.Nodes.Count < 5);
     }
 
     [Fact]
@@ -136,6 +136,6 @@ public sealed class ChaosInjectorTests : IAsyncLifetime
         _chaos.RunChaos(steps: 10);
 
         // Node should still be alive due to minimum
-        Assert.Single(_harness.AllNodes);
+        Assert.Single(_harness.Nodes);
     }
 }

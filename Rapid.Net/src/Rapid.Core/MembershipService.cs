@@ -468,7 +468,7 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
         var currentMembership = _membershipView.GetRing(0);
         var clusterStatusChange = new ClusterStatusChange(_membershipView.ConfigurationId, [.. currentMembership], statusChanges);
 
-            _log.PublishingViewChange(new MembershipServiceLogger.CurrentConfigId(_membershipView), new MembershipServiceLogger.MembershipSize(_membershipView));
+        _log.PublishingViewChange(new MembershipServiceLogger.CurrentConfigId(_membershipView), new MembershipServiceLogger.MembershipSize(_membershipView));
         PublishEvent(ClusterEvents.ViewChange, clusterStatusChange);
 
         // Clear pending joiner data that's no longer needed

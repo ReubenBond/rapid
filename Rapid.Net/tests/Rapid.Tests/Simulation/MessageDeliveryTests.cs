@@ -181,7 +181,7 @@ public sealed class MessageDeliveryTests : IAsyncLifetime
 
         _harness.WaitForConvergence(expectedSize: 3, maxIterations: 200000);
 
-        Assert.All(_harness.AllNodes, n => Assert.Equal(3, n.MembershipSize));
+        Assert.All(_harness.Nodes, n => Assert.Equal(3, n.MembershipSize));
     }
 
 

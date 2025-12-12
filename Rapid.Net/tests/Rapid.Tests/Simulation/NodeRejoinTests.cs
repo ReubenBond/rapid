@@ -379,7 +379,7 @@ public sealed class NodeRejoinTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 4);
 
         // Verify consistency
-        Assert.All(_harness.AllNodes, n => Assert.Equal(4, n.MembershipSize));
+        Assert.All(_harness.Nodes, n => Assert.Equal(4, n.MembershipSize));
 
         // Cycle 2: Crash and recover
         _harness.CrashNode(joiner2);
@@ -389,7 +389,7 @@ public sealed class NodeRejoinTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 4);
 
         // Verify final consistency
-        Assert.All(_harness.AllNodes, n => Assert.Equal(4, n.MembershipSize));
+        Assert.All(_harness.Nodes, n => Assert.Equal(4, n.MembershipSize));
     }
 
 }

@@ -159,7 +159,7 @@ public sealed class JoinProtocolTests : IAsyncLifetime
 
         Assert.True(joiner1.IsInitialized);
         Assert.True(joiner2.IsInitialized);
-        Assert.All(_harness.AllNodes, n => Assert.Equal(3, n.MembershipSize));
+        Assert.All(_harness.Nodes, n => Assert.Equal(3, n.MembershipSize));
     }
 
     /// <summary>
@@ -184,7 +184,7 @@ public sealed class JoinProtocolTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 3);
 
         Assert.True(joiner3.IsInitialized);
-        Assert.All(_harness.AllNodes, n => Assert.Equal(3, n.MembershipSize));
+        Assert.All(_harness.Nodes, n => Assert.Equal(3, n.MembershipSize));
     }
 
     /// <summary>
@@ -230,7 +230,7 @@ public sealed class JoinProtocolTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 3);
 
         Assert.True(joiner2.IsInitialized);
-        Assert.All(_harness.AllNodes, n => Assert.Equal(3, n.MembershipSize));
+        Assert.All(_harness.Nodes, n => Assert.Equal(3, n.MembershipSize));
     }
 
     /// <summary>
@@ -255,7 +255,7 @@ public sealed class JoinProtocolTests : IAsyncLifetime
         var joiner5 = _harness.CreateJoinerNode(joiner3, nodeId: 5);
         _harness.WaitForConvergence(expectedSize: 6);
 
-        Assert.All(_harness.AllNodes, n => Assert.Equal(6, n.MembershipSize));
+        Assert.All(_harness.Nodes, n => Assert.Equal(6, n.MembershipSize));
     }
 
 
@@ -316,7 +316,7 @@ public sealed class JoinProtocolTests : IAsyncLifetime
 
         _harness.WaitForConvergence(expectedSize: 6);
 
-        Assert.All(_harness.AllNodes, n => Assert.Equal(6, n.MembershipSize));
+        Assert.All(_harness.Nodes, n => Assert.Equal(6, n.MembershipSize));
     }
 
     /// <summary>
@@ -416,7 +416,7 @@ public sealed class JoinProtocolTests : IAsyncLifetime
         _harness.RunForDuration(TimeSpan.FromSeconds(120), maxIterations: 200000);
 
         // Get remaining nodes to find one we can join through
-        var aliveNodes = _harness.AllNodes.Where(n => n.IsInitialized && n.MembershipSize > 0).ToList();
+        var aliveNodes = _harness.Nodes.Where(n => n.IsInitialized && n.MembershipSize > 0).ToList();
         Assert.NotEmpty(aliveNodes);
 
         var joinPoint = aliveNodes[0];
@@ -477,7 +477,7 @@ public sealed class JoinProtocolTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 3);
 
         Assert.True(joiner4.IsInitialized);
-        Assert.All(_harness.AllNodes, n => Assert.Equal(3, n.MembershipSize));
+        Assert.All(_harness.Nodes, n => Assert.Equal(3, n.MembershipSize));
     }
 
 }

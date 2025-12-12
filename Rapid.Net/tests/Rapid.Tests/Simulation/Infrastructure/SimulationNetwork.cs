@@ -128,7 +128,7 @@ internal sealed class SimulationNetwork
     public void IsolateNode(string nodeAddress)
     {
         _log.NodeIsolating(nodeAddress);
-        foreach (var node in _harness.AllNodes)
+        foreach (var node in _harness.Nodes)
         {
             var addr = RapidUtils.Loggable(node.Address);
             if (addr != nodeAddress)
@@ -144,7 +144,7 @@ internal sealed class SimulationNetwork
     public void ReconnectNode(string nodeAddress)
     {
         _log.NodeReconnecting(nodeAddress);
-        foreach (var node in _harness.AllNodes)
+        foreach (var node in _harness.Nodes)
         {
             var addr = RapidUtils.Loggable(node.Address);
             if (addr != nodeAddress)
@@ -167,7 +167,7 @@ internal sealed class SimulationNetwork
             }
 
             // Check if node is partitioned from all other nodes
-            foreach (var node in _harness.AllNodes)
+            foreach (var node in _harness.Nodes)
             {
                 var addr = RapidUtils.Loggable(node.Address);
                 if (addr != nodeAddress && !blocked.Contains(addr))
