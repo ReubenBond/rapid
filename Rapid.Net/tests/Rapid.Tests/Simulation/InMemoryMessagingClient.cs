@@ -61,13 +61,13 @@ internal sealed class InMemoryMessagingClient : IMessagingClient
                 _logger.LogTrace("Message {MessageType} from {Local} to {Remote} blocked by network partition",
                     request.ContentCase, localAddr, remoteAddr);
                 return Task.FromException<RapidResponse>(
-                    new InvalidOperationException($"Network partition: {localAddr} cannot reach {remoteAddr}"));
+                    new SimulatedNetworkException($"Network partition: {localAddr} cannot reach {remoteAddr}"));
 
             case DeliveryStatus.Dropped:
                 _logger.LogTrace("Message {MessageType} from {Local} to {Remote} dropped (simulated packet loss)",
                     request.ContentCase, localAddr, remoteAddr);
                 return Task.FromException<RapidResponse>(
-                    new TimeoutException($"Message from {localAddr} to {remoteAddr} was dropped (simulated packet loss)"));
+                    new SimulatedNetworkException($"Message from {localAddr} to {remoteAddr} was dropped (simulated packet loss)"));
 
             case DeliveryStatus.Success:
             default:
@@ -81,7 +81,7 @@ internal sealed class InMemoryMessagingClient : IMessagingClient
             _logger.LogError("Target node {Remote} not found when sending from {Local}",
                 remoteAddr, localAddr);
             return Task.FromException<RapidResponse>(
-                new InvalidOperationException($"Target node not found: {remoteAddr}"));
+                new SimulatedNetworkException($"Target node not found: {remoteAddr}"));
         }
 
         // Create a TCS for the response
@@ -128,7 +128,7 @@ internal sealed class InMemoryMessagingClient : IMessagingClient
             _logger.LogDebug("Target node {Remote} was crashed before message delivery from {Local}",
                 remoteAddr, localAddr);
             responseTcs.TrySetException(
-                new InvalidOperationException($"Target node {remoteAddr} is no longer available"));
+                new SimulatedNetworkException($"Target node {remoteAddr} is no longer available"));
             return;
         }
 
@@ -315,6 +315,21 @@ internal sealed class InMemoryMessagingClient : IMessagingClient
             {
                 // Ignore timeout
             }
+        }
+    }
+
+    private sealed class SimulatedNetworkException : Exception
+    {
+        public SimulatedNetworkException(string message) : base(message)
+        {
+        }
+
+        public SimulatedNetworkException(string message, Exception innerException) : base(message, innerException)
+        {
+        }
+
+        public SimulatedNetworkException()
+        {
         }
     }
 }

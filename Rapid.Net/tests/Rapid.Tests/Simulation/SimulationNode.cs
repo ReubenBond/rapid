@@ -139,7 +139,7 @@ internal sealed class SimulationNode
         ILoggerFactory? loggerFactory)
     {
         _harness = harness;
-        _context = new SimulationNodeContext(harness.Clock, harness.CreateDerivedRandom());
+        _context = new SimulationNodeContext(harness.Clock, harness.Guard, harness.CreateDerivedRandom());
         Address = address;
 
         // Wrap the logger factory to prepend the node name to all log messages

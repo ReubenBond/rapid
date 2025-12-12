@@ -367,7 +367,7 @@ internal sealed partial class ConsensusCoordinator : IAsyncDisposable
 
         if (_consensusLoopTask is { } task)
         {
-            await task.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+            await task.ConfigureAwait(ConfigureAwaitOptions.ContinueOnCapturedContext | ConfigureAwaitOptions.SuppressThrowing);
         }
 
         _onDecidedTcs.TrySetCanceled();

@@ -1,88 +1,6 @@
 namespace Rapid.Tests.Simulation;
 
 /// <summary>
-/// Base class for all scheduled items in the queue.
-/// Implements IDisposable for cancellation support.
-/// </summary>
-internal abstract class ScheduledItem : IDisposable, IComparable<ScheduledItem>
-{
-    private SimulationTaskQueue? _queue;
-    private bool _disposed;
-
-    /// <summary>
-    /// The absolute time when this item is due.
-    /// Set internally by <see cref="SimulationTaskQueue"/> when the item is scheduled.
-    /// </summary>
-    public DateTimeOffset DueTime { get; private set; }
-
-    /// <summary>
-    /// The sequence number for ordering items with the same due time.
-    /// Set internally by <see cref="SimulationTaskQueue"/> when the item is scheduled.
-    /// </summary>
-    public long SequenceNumber { get; private set; }
-
-    /// <summary>
-    /// Called by <see cref="SimulationTaskQueue"/> when the item is added to the queue.
-    /// Sets the queue reference, due time, and sequence number.
-    /// </summary>
-    /// <param name="queue">The queue this item belongs to.</param>
-    /// <param name="dueTime">The absolute time when this item is due.</param>
-    /// <param name="sequenceNumber">The sequence number for ordering.</param>
-    internal void OnScheduled(SimulationTaskQueue queue, DateTimeOffset dueTime, long sequenceNumber)
-    {
-        if (_queue is not null)
-        {
-            throw new InvalidOperationException("Item has already been scheduled.");
-        }
-
-        _queue = queue;
-        DueTime = dueTime;
-        SequenceNumber = sequenceNumber;
-    }
-
-    /// <summary>
-    /// Executes the scheduled item's action.
-    /// </summary>
-    protected internal abstract void Invoke();
-
-    /// <summary>
-    /// Cancels the item by removing it from the queue.
-    /// </summary>
-    public void Dispose()
-    {
-        if (_disposed)
-            return;
-
-        _disposed = true;
-        _queue?.RemoveItem(this);
-    }
-
-    /// <summary>
-    /// Compares this item to another by due time, then by sequence number.
-    /// </summary>
-    public int CompareTo(ScheduledItem? other)
-    {
-        if (other is null) return 1;
-        if (ReferenceEquals(this, other)) return 0;
-
-        var dueTimeComparison = DueTime.CompareTo(other.DueTime);
-        if (dueTimeComparison != 0)
-            return dueTimeComparison;
-        return SequenceNumber.CompareTo(other.SequenceNumber);
-    }
-}
-
-/// <summary>
-/// A simple scheduled item that wraps an Action callback.
-/// Used for general-purpose delayed execution.
-/// </summary>
-internal sealed class ScheduledActionItem(Action callback) : ScheduledItem
-{
-    /// <inheritdoc />
-    protected internal override void Invoke() => callback();
-}
-
-/// <summary>
 /// A time-aware task queue that serves as the common core for both
 /// <see cref="TaskScheduler"/> and <see cref="SimulationTimeProvider"/>.
 /// 
@@ -99,11 +17,8 @@ internal sealed class SimulationTaskQueue
     // Single queue ordered by due time, then sequence number
     private readonly SortedSet<ScheduledItem> _queue = new(new ScheduledItemComparer());
     private readonly SimulationClock _clock;
-
-    // Real lock for all queue operations since some can be called cross-thread
-    // (e.g., Enqueue called from SimulationSynchronizationContext.Post on thread pool threads
-    // due to CancellationToken callbacks or other async work escaping the simulation).
-    private readonly Lock _queueLock = new();
+    private readonly SingleThreadedGuard _guard;
+    private readonly object _lock = new();
     private long _sequenceNumber;
 
     /// <summary>
@@ -117,10 +32,13 @@ internal sealed class SimulationTaskQueue
     /// Multiple queues can share the same clock for unified time coordination.
     /// </summary>
     /// <param name="clock">The clock to use for time.</param>
-    public SimulationTaskQueue(SimulationClock clock)
+    /// <param name="guard">The single-threaded guard used to detect concurrent access on simulation-thread-only operations.</param>
+    public SimulationTaskQueue(SimulationClock clock, SingleThreadedGuard guard)
     {
         ArgumentNullException.ThrowIfNull(clock);
+        ArgumentNullException.ThrowIfNull(guard);
         _clock = clock;
+        _guard = guard;
         SynchronizationContext = new SimulationSynchronizationContext(this);
         ScheduledItems = _queue.AsReadOnly();
     }
@@ -143,10 +61,8 @@ internal sealed class SimulationTaskQueue
     {
         get
         {
-            lock (_queueLock)
-            {
-                return _queue.Count > 0;
-            }
+            using var _ = _guard.Enter();
+            return _queue.Count > 0;
         }
     }
 
@@ -158,30 +74,28 @@ internal sealed class SimulationTaskQueue
     {
         get
         {
-            lock (_queueLock)
+            using var _ = _guard.Enter();
+            foreach (var item in _queue)
             {
-                foreach (var item in _queue)
-                {
-                    if (item.DueTime > UtcNow)
-                        return item.DueTime;
-                }
-                return null;
+                if (item.DueTime > UtcNow)
+                    return item.DueTime;
             }
+            return null;
         }
     }
+
     /// <summary>
     /// Enqueues a scheduled item to be executed immediately (at current time).
     /// The item's DueTime, SequenceNumber, and queue reference are set by this method.
-    /// This method is thread-safe and can be called from any thread (e.g., from SynchronizationContext.Post).
+    /// This method must be called from the simulation thread - the guard will throw
+    /// if called from another thread, indicating async work has escaped the simulation.
     /// </summary>
     /// <param name="item">The scheduled item to enqueue.</param>
     public void Enqueue(ScheduledItem item)
     {
         ArgumentNullException.ThrowIfNull(item);
-        lock (_queueLock)
-        {
-            ScheduleCore(item, UtcNow);
-        }
+        using var _ = _guard.Enter();
+        ScheduleCore(item, UtcNow);
     }
 
     /// <summary>
@@ -195,10 +109,8 @@ internal sealed class SimulationTaskQueue
     {
         ArgumentNullException.ThrowIfNull(action);
         ArgumentOutOfRangeException.ThrowIfLessThan(delay, TimeSpan.Zero);
-        lock (_queueLock)
-        {
-            ScheduleCore(new ScheduledActionItem(action), UtcNow + delay);
-        }
+        using var _ = _guard.Enter();
+        ScheduleCore(new ScheduledActionItem(action), UtcNow + delay);
     }
 
     /// <summary>
@@ -211,10 +123,8 @@ internal sealed class SimulationTaskQueue
     {
         ArgumentNullException.ThrowIfNull(item);
         ArgumentOutOfRangeException.ThrowIfLessThan(delay, TimeSpan.Zero);
-        lock (_queueLock)
-        {
-            ScheduleCore(item, UtcNow + delay);
-        }
+        using var _ = _guard.Enter();
+        ScheduleCore(item, UtcNow + delay);
         return item;
     }
 
@@ -222,10 +132,10 @@ internal sealed class SimulationTaskQueue
     /// Schedules an item to be executed at a specific absolute time.
     /// The item's DueTime, SequenceNumber, and queue reference are set by this method.
     /// Returns the scheduled item which can be disposed to cancel it.
+    /// CALLER MUST HOLD _guard.
     /// </summary>
     /// <param name="item">The scheduled item to schedule.</param>
     /// <param name="dueTime">The absolute time when the item should be executed.</param>
-    /// <returns>The scheduled item that can be disposed to cancel it.</returns>
     private void ScheduleCore(ScheduledItem item, DateTimeOffset dueTime)
     {
         ArgumentNullException.ThrowIfNull(item);
@@ -235,15 +145,13 @@ internal sealed class SimulationTaskQueue
 
     /// <summary>
     /// Removes an item from the queue. Called by ScheduledItem.Dispose().
-    /// This method is thread-safe as it can be called from any thread.
+    /// This method must be called from the simulation thread.
     /// </summary>
     /// <param name="item">The item to remove.</param>
     internal void RemoveItem(ScheduledItem item)
     {
-        lock (_queueLock)
-        {
-            _queue.Remove(item);
-        }
+        using var _ = _guard.Enter();
+        _queue.Remove(item);
     }
 
     /// <summary>
@@ -254,7 +162,7 @@ internal sealed class SimulationTaskQueue
     public bool RunOnce()
     {
         ScheduledItem? item;
-        lock (_queueLock)
+        using (_guard.Enter())
         {
             if (_queue.Count == 0)
                 return false;
@@ -295,10 +203,8 @@ internal sealed class SimulationTaskQueue
     /// </summary>
     public void Clear()
     {
-        lock (_queueLock)
-        {
-            _queue.Clear();
-        }
+        using var _ = _guard.Enter();
+        _queue.Clear();
     }
 
     /// <summary>

@@ -9,8 +9,9 @@ public sealed class SimulationSchedulerTests
 {
     private static (SimulationTaskQueue TaskQueue, SimulationClock Clock, SimulationTaskScheduler Scheduler) CreateComponents()
     {
+        var guard = new SingleThreadedGuard();
         var clock = new SimulationClock(DateTimeOffset.UtcNow);
-        var taskQueue = new SimulationTaskQueue(clock);
+        var taskQueue = new SimulationTaskQueue(clock, guard);
         var scheduler = new SimulationTaskScheduler(taskQueue);
         return (taskQueue, clock, scheduler);
     }

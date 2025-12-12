@@ -46,7 +46,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
 
         // Create shared clock and harness-level queue
         Clock = new SimulationClock(StartDateTime);
-        TaskQueue = new SimulationTaskQueue(Clock);
+        TaskQueue = new SimulationTaskQueue(Clock, _lock);
         TaskScheduler = new SimulationTaskScheduler(TaskQueue);
 
         // Create time provider using harness queue (for GetUtcNow queries)
@@ -134,6 +134,12 @@ internal sealed class SimulationHarness : IAsyncDisposable
     /// Install this on the test thread to capture async continuations in the simulation.
     /// </summary>
     public SimulationSynchronizationContext SynchronizationContext => TaskQueue.SynchronizationContext;
+
+    /// <summary>
+    /// Gets the single-threaded guard used to detect accidental concurrent access.
+    /// This guard should be shared with all simulation components to ensure single-threaded execution.
+    /// </summary>
+    public SingleThreadedGuard Guard => _lock;
 
     #endregion
 
@@ -821,9 +827,10 @@ internal sealed class SimulationHarness : IAsyncDisposable
         // Use the harness queue's sync context for the task factory invocation
         using var _ = TaskQueue.SynchronizationContext.Install();
 
-        var task = taskFactory();
+        var task = new Task<Task>(taskFactory);
+        task.Start(TaskScheduler);
 
-        if (!RunUntilCore(() => task.IsCompleted, maxIterations))
+        if (!RunUntilCore(() => task.IsCompleted && task.Result.IsCompleted, maxIterations))
         {
             if (!task.IsCompleted)
             {

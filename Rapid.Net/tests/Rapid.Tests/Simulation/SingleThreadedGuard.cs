@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 namespace Rapid.Tests.Simulation;
 
 /// <summary>
@@ -10,6 +12,7 @@ internal sealed class SingleThreadedGuard
 {
     private int _ownerThreadId;
     private int _entryCount;
+    private string? _ownerStackTrace;
 
     /// <summary>
     /// Enters the guarded section. Throws if another thread is already inside.
@@ -23,10 +26,17 @@ internal sealed class SingleThreadedGuard
 
         if (existingOwner != 0 && existingOwner != currentThreadId)
         {
+            var ownerStack = _ownerStackTrace ?? "(unknown)";
             throw new InvalidOperationException(
                 $"Concurrent access detected in single-threaded simulation code. " +
                 $"Thread {currentThreadId} attempted to enter while thread {existingOwner} is inside. " +
-                $"This indicates a bug - simulation code must not be accessed concurrently.");
+                $"This indicates a bug - simulation code must not be accessed concurrently.\n" +
+                $"Owner thread stack trace:\n{ownerStack}");
+        }
+
+        if (_entryCount == 0)
+        {
+            _ownerStackTrace = new StackTrace(fNeedFileInfo: true).ToString();
         }
 
         Interlocked.Increment(ref _entryCount);

@@ -122,7 +122,7 @@ public sealed partial class PingPongFailureDetector : IEdgeFailureDetector
 
     private async Task ProbeAsync()
     {
-        while (!_cts.Token.IsCancellationRequested && _disposed == 0)
+        while (_disposed == 0)
         {
             await Task.Delay(TimeSpan.FromSeconds(1), _sharedResources.TimeProvider, _cts.Token).ConfigureAwait(true);
             await ProbeOnceAsync().ConfigureAwait(true);

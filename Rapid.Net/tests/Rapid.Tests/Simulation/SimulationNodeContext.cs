@@ -32,15 +32,17 @@ internal sealed class SimulationNodeContext
     /// Creates a new simulation node context using the specified shared clock and random generator.
     /// </summary>
     /// <param name="clock">The shared simulation clock for time coordination.</param>
+    /// <param name="guard">The shared single-threaded guard for detecting concurrent access.</param>
     /// <param name="random">The deterministic random number generator for this node.</param>
-    public SimulationNodeContext(SimulationClock clock, SimulationRandom random)
+    public SimulationNodeContext(SimulationClock clock, SingleThreadedGuard guard, SimulationRandom random)
     {
         ArgumentNullException.ThrowIfNull(clock);
+        ArgumentNullException.ThrowIfNull(guard);
         ArgumentNullException.ThrowIfNull(random);
 
         Clock = clock;
         Random = random;
-        TaskQueue = new SimulationTaskQueue(clock);
+        TaskQueue = new SimulationTaskQueue(clock, guard);
         TaskScheduler = new SimulationTaskScheduler(TaskQueue);
         TimeProvider = new SimulationTimeProvider(TaskQueue, clock);
     }

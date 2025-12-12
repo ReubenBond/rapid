@@ -22,8 +22,9 @@ public class SimulationTimeProviderTests
         public TestTimeProvider(DateTimeOffset? startDateTime = null)
         {
             Start = startDateTime ?? new DateTimeOffset(2000, 1, 1, 0, 0, 0, 0, TimeSpan.Zero);
+            var guard = new SingleThreadedGuard();
             Clock = new SimulationClock(Start);
-            TaskQueue = new SimulationTaskQueue(Clock);
+            TaskQueue = new SimulationTaskQueue(Clock, guard);
             TimeProvider = new SimulationTimeProvider(TaskQueue, Clock);
         }
 
