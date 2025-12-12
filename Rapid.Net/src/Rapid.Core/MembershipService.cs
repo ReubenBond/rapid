@@ -64,14 +64,15 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
     // View change accessor for publishing updates
     private readonly MembershipViewAccessor _viewAccessor;
 
-    // Flag to track if the kicked event has been published (to avoid multiple notifications)
-    private bool _kickedEventPublished;
-
     // Flag to track if a rejoin is in progress
     private bool _isRejoining;
 
     // Flag to track if a stale view refresh is in progress (to prevent concurrent refreshes)
     private bool _isRefreshingView;
+
+    // Background task tracking for graceful shutdown
+    private readonly List<Task> _backgroundTasks = [];
+    private readonly Lock _backgroundTasksLock = new();
 
     /// <summary>
     /// Result of a single join attempt. Used to avoid exception-based control flow for retryable conditions.
@@ -134,11 +135,9 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
         _sendQueue = Channel.CreateUnbounded<AlertMessage>();
         _eventChannel = new BroadcastChannel<ClusterEventNotification>();
 
-        // Configure the failure detector factory to detect when this node has been kicked
-        // or has a stale view (learner role - missed consensus decisions)
+        // Configure the failure detector factory to detect stale views (learner role - missed consensus decisions)
         if (edgeFailureDetector is PingPongFailureDetectorFactory pingPongFactory)
         {
-            pingPongFactory.OnKickedDetected = OnKickedDetected;
             pingPongFactory.OnStaleViewDetected = OnStaleViewDetected;
             pingPongFactory.GetLocalConfigurationId = () => _membershipView.ConfigurationId;
         }
@@ -168,7 +167,7 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
 
         // Start background jobs after initialization
         var alertBatcherTask = Task.Factory.StartNew(AlertBatcherAsync, _sharedResources.ShuttingDownToken, TaskCreationOptions.None, _sharedResources.TaskScheduler).Unwrap();
-        _sharedResources.TrackBackgroundTask(alertBatcherTask);
+        TrackBackgroundTask(alertBatcherTask);
 
         _initialized = true;
     }
@@ -971,72 +970,6 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
     public Dictionary<Endpoint, Metadata> GetMetadata() => new(_metadataManager.GetAllMetadata());
 
     /// <summary>
-    /// Shuts down all the executors.
-    /// </summary>
-    public void Shutdown()
-    {
-        _log.Shutdown();
-
-        // Dispose the event channel to signal completion to all subscribers
-        _eventChannel.Dispose();
-
-        foreach (var fd in _failureDetectors)
-        {
-            fd.Dispose();
-        }
-        _failureDetectors.Clear();
-    }
-
-    /// <summary>
-    /// Leaves the cluster by telling all the observers to proactively trigger failure.
-    /// This operation is blocking, as we need to wait to send the alert messages before shutting down the rest
-    /// </summary>
-    public async Task LeaveAsync(CancellationToken cancellationToken = default)
-    {
-        var leaveMessage = new LeaveMessage { Sender = _myAddr };
-        var leave = leaveMessage.ToRapidRequest();
-
-        try
-        {
-            var observers = _membershipView.GetObserversOf(_myAddr);
-            _log.LeavingWithObservers(new MembershipServiceLogger.LoggableEndpoint(_myAddr), observers.Length, new MembershipServiceLogger.LoggableEndpoints(observers));
-
-            var tasks = observers.Select(endpoint =>
-                _messagingClient.SendMessageBestEffortAsync(endpoint, leave, cancellationToken));
-
-            try
-            {
-                await Task.WhenAll(tasks).WaitAsync(_options.LeaveMessageTimeout, _sharedResources.TimeProvider, cancellationToken).ConfigureAwait(true);
-            }
-            catch (TimeoutException)
-            {
-                _log.TimeoutWhileLeaving();
-            }
-            catch (OperationCanceledException)
-            {
-                // Cancellation requested - propagate it
-                throw;
-            }
-            catch (Exception ex)
-            {
-                _log.ExceptionWhileLeaving(ex);
-                throw;
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            // Cancellation requested - propagate it
-            throw;
-        }
-        catch (Exception)
-        {
-            // we already were removed, so that's fine
-            _log.NodeAlreadyRemoved();
-            throw;
-        }
-    }
-
-    /// <summary>
     /// Queues a AlertMessage to be broadcasted after potentially being batched.
     /// </summary>
     /// <param name="msg">the AlertMessage to be broadcasted</param>
@@ -1152,39 +1085,6 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
     {
         var notification = new ClusterEventNotification(evt, statusChange);
         _eventChannel.Writer.TryPublish(notification);
-    }
-
-    /// <summary>
-    /// Called by the failure detector when a probe response indicates this node
-    /// is not in the remote node's membership view (i.e., we've been kicked).
-    /// </summary>
-    /// <param name="remoteConfigVersion">The configuration version from the probe response.</param>
-    private void OnKickedDetected(long remoteConfigVersion)
-    {
-        // Only process if we haven't already published the kicked event
-        if (_kickedEventPublished)
-        {
-            return;
-        }
-
-        _kickedEventPublished = true;
-        var localConfigVersion = _membershipView.ConfigurationId.Version;
-        _log.NodeKicked(new MembershipServiceLogger.LoggableEndpoint(_myAddr), remoteConfigVersion, localConfigVersion);
-
-        // Publish the kicked event so higher-level components can observe
-        var currentMembership = _membershipView.GetRing(0);
-        var nodeStatusChange = new NodeStatusChange(_myAddr, EdgeStatus.Down, _metadataManager.Get(_myAddr) ?? new Metadata());
-        var clusterStatusChange = new ClusterStatusChange(_membershipView.ConfigurationId, [.. currentMembership], [nodeStatusChange]);
-
-        PublishEvent(ClusterEvents.Kicked, clusterStatusChange);
-
-        // Schedule rejoin on the background task scheduler
-        var rejoinTask = Task.Factory.StartNew(
-            () => RejoinClusterAsync(_sharedResources.ShuttingDownToken),
-            _sharedResources.ShuttingDownToken,
-            TaskCreationOptions.None,
-            _sharedResources.TaskScheduler).Unwrap();
-        _sharedResources.TrackBackgroundTask(rejoinTask);
     }
 
     /// <summary>
@@ -1355,9 +1255,6 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
                 [.. response.Identifiers],
                 [.. response.Endpoints]).BuildWithConfigurationId(new ConfigurationId(response.ConfigurationId));
 
-            // Reset flags
-            _kickedEventPublished = false;
-
             // Use SetMembershipView to apply all changes - for rejoin, all nodes are treated as Up
             oldConsensus = SetMembershipView(newView, metadataMap, nodeStatusChanges: null, addedNodes: null);
         }
@@ -1387,7 +1284,7 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
             _sharedResources.ShuttingDownToken,
             TaskCreationOptions.None,
             _sharedResources.TaskScheduler).Unwrap();
-        _sharedResources.TrackBackgroundTask(refreshTask);
+        TrackBackgroundTask(refreshTask);
     }
 
     /// <summary>
@@ -1461,13 +1358,15 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
     /// <summary>
     /// Applies a learned membership view from a remote node.
     /// This is used by the Paxos learner mechanism to catch up on missed consensus decisions.
+    /// If the local node is not in the new view, it triggers a kicked event and rejoin.
     /// </summary>
     private void ApplyLearnedMembershipView(MembershipViewResponse viewResponse)
     {
         ConsensusCoordinator? oldConsensus;
+        bool wasKicked;
         lock (_membershipUpdateLock)
         {
-            // Double-check inside lock
+            // Guard against config ID regression - never allow a stale view to replace a fresher one
             if (viewResponse.ConfigurationId <= _membershipView.ConfigurationId)
             {
                 return;
@@ -1486,39 +1385,71 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
                 [.. viewResponse.Identifiers],
                 [.. viewResponse.Endpoints]).BuildWithConfigurationId(new ConfigurationId(viewResponse.ConfigurationId));
 
-            // Compute the status changes by comparing old and new membership
-            var oldMembers = new HashSet<Endpoint>(_membershipView.GetRing(0));
+            // Check if we were kicked (not in the new membership)
             var newMembers = new HashSet<Endpoint>(newView.GetRing(0));
+            wasKicked = !newMembers.Contains(_myAddr);
 
-            var nodeStatusChanges = new List<NodeStatusChange>();
-
-            // Nodes that left (in old but not in new)
-            foreach (var node in oldMembers)
+            if (wasKicked)
             {
-                if (!newMembers.Contains(node))
-                {
-                    nodeStatusChanges.Add(new NodeStatusChange(node, EdgeStatus.Down, _metadataManager.Get(node) ?? new Metadata()));
-                }
-            }
+                // We were kicked - publish kicked event but don't apply the view
+                // (we'll rejoin with a new identity)
+                _log.NodeKicked(
+                    new MembershipServiceLogger.LoggableEndpoint(_myAddr),
+                    viewResponse.ConfigurationId,
+                    _membershipView.ConfigurationId.Version);
 
-            // Nodes that joined (in new but not in old)
-            foreach (var node in newMembers)
+                var currentMembership = _membershipView.GetRing(0);
+                var nodeStatusChange = new NodeStatusChange(_myAddr, EdgeStatus.Down, _metadataManager.Get(_myAddr) ?? new Metadata());
+                var clusterStatusChange = new ClusterStatusChange(_membershipView.ConfigurationId, [.. currentMembership], [nodeStatusChange]);
+
+                PublishEvent(ClusterEvents.Kicked, clusterStatusChange);
+                oldConsensus = null;
+            }
+            else
             {
-                if (!oldMembers.Contains(node))
-                {
-                    var metadata = metadataMap.GetValueOrDefault(node, new Metadata());
-                    nodeStatusChanges.Add(new NodeStatusChange(node, EdgeStatus.Up, metadata));
-                }
-            }
+                // We're still in membership - compute status changes and apply the view
+                var oldMembers = new HashSet<Endpoint>(_membershipView.GetRing(0));
+                var nodeStatusChanges = new List<NodeStatusChange>();
 
-            // Apply the new view
-            oldConsensus = SetMembershipView(newView, metadataMap, nodeStatusChanges, addedNodes: null);
+                // Nodes that left (in old but not in new)
+                foreach (var node in oldMembers)
+                {
+                    if (!newMembers.Contains(node))
+                    {
+                        nodeStatusChanges.Add(new NodeStatusChange(node, EdgeStatus.Down, _metadataManager.Get(node) ?? new Metadata()));
+                    }
+                }
+
+                // Nodes that joined (in new but not in old)
+                foreach (var node in newMembers)
+                {
+                    if (!oldMembers.Contains(node))
+                    {
+                        var metadata = metadataMap.GetValueOrDefault(node, new Metadata());
+                        nodeStatusChanges.Add(new NodeStatusChange(node, EdgeStatus.Up, metadata));
+                    }
+                }
+
+                // Apply the new view
+                oldConsensus = SetMembershipView(newView, metadataMap, nodeStatusChanges, addedNodes: null);
+            }
         }
 
         // Dispose old consensus (fire and forget)
         if (oldConsensus != null)
         {
             _ = oldConsensus.DisposeAsync();
+        }
+
+        // If we were kicked, schedule rejoin outside the lock
+        if (wasKicked)
+        {
+            var rejoinTask = Task.Factory.StartNew(
+                () => RejoinClusterAsync(_sharedResources.ShuttingDownToken),
+                _sharedResources.ShuttingDownToken,
+                TaskCreationOptions.None,
+                _sharedResources.TaskScheduler).Unwrap();
+            TrackBackgroundTask(rejoinTask);
         }
     }
 
@@ -1677,7 +1608,100 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
     }
 
     /// <summary>
-    /// Asynchronously disposes the membership service, waiting for background tasks to complete.
+    /// Tracks a background task to ensure it can be awaited during shutdown.
+    /// </summary>
+    private void TrackBackgroundTask(Task task)
+    {
+        lock (_backgroundTasksLock)
+        {
+            _backgroundTasks.Add(task);
+        }
+    }
+
+    /// <summary>
+    /// Shuts down the membership service synchronously.
+    /// Disposes event channels and failure detectors but does not wait for background tasks.
+    /// </summary>
+    public void Shutdown()
+    {
+        _log.Shutdown();
+
+        // Dispose the event channel to signal completion to all subscribers
+        _eventChannel.Dispose();
+
+        foreach (var fd in _failureDetectors)
+        {
+            fd.Dispose();
+        }
+        _failureDetectors.Clear();
+    }
+
+    /// <summary>
+    /// Stops the membership service gracefully.
+    /// Sends leave messages to observers, then shuts down and waits for background tasks to complete.
+    /// Background tasks are responsible for responding to shutdown cancellation promptly.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token to observe.</param>
+    public async Task StopAsync(CancellationToken cancellationToken = default)
+    {
+        // Send leave messages to observers
+        try
+        {
+            var leaveMessage = new LeaveMessage { Sender = _myAddr };
+            var leave = leaveMessage.ToRapidRequest();
+
+            var observers = _membershipView.GetObserversOf(_myAddr);
+            _log.LeavingWithObservers(new MembershipServiceLogger.LoggableEndpoint(_myAddr), observers.Length, new MembershipServiceLogger.LoggableEndpoints(observers));
+
+            var leaveTasks = observers.Select(endpoint =>
+                _messagingClient.SendMessageBestEffortAsync(endpoint, leave, cancellationToken));
+
+            try
+            {
+                await Task.WhenAll(leaveTasks).WaitAsync(_options.LeaveMessageTimeout, _sharedResources.TimeProvider, cancellationToken).ConfigureAwait(true);
+            }
+            catch (TimeoutException)
+            {
+                _log.TimeoutWhileLeaving();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Cancellation requested - continue with shutdown
+        }
+        catch (NodeNotInRingException)
+        {
+            // We may already have been removed, continue with shutdown
+            _log.NodeAlreadyRemoved();
+        }
+
+        // Shutdown resources
+        Shutdown();
+
+        // Wait for background tasks
+        Task[] backgroundTasks;
+        lock (_backgroundTasksLock)
+        {
+            backgroundTasks = [.. _backgroundTasks];
+        }
+
+        if (backgroundTasks.Length > 0)
+        {
+            _log.WaitingForBackgroundTasks(backgroundTasks.Length);
+
+            try
+            {
+                await Task.WhenAll(backgroundTasks).WaitAsync(cancellationToken).ConfigureAwait(true);
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected during forced shutdown
+            }
+        }
+    }
+
+    /// <summary>
+    /// Asynchronously disposes the membership service.
     /// </summary>
     public async ValueTask DisposeAsync()
     {
@@ -1687,8 +1711,7 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
         }
 
         _log.Dispose();
-        Shutdown();
-
+        await StopAsync().ConfigureAwait(true);
         await _consensusInstance.DisposeAsync();
     }
 

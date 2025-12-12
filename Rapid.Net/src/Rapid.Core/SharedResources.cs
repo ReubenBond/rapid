@@ -1,21 +1,15 @@
-using Microsoft.Extensions.Logging;
-
 namespace Rapid;
 
 /// <summary>
 /// Holds all resources that are shared across a single instance of Rapid.
 /// </summary>
-public sealed partial class SharedResources(
-    ILogger<SharedResources> logger,
+public sealed class SharedResources(
     TimeProvider? timeProvider = null,
     TaskScheduler? taskScheduler = null,
     Random? random = null,
-    Func<Guid>? guidFactory = null) : IAsyncDisposable, IDisposable
+    Func<Guid>? guidFactory = null) : IDisposable
 {
-    private readonly ILogger<SharedResources> _logger = logger;
     private readonly CancellationTokenSource _shutdownCts = new();
-    private readonly List<Task> _backgroundTasks = [];
-    private readonly Lock _backgroundTasksLock = new();
     private readonly Random _random = random ?? Random.Shared;
     private readonly Func<Guid> _guidFactory = guidFactory ?? Guid.NewGuid;
     private int _disposed;
@@ -67,18 +61,6 @@ public sealed partial class SharedResources(
     public bool IsShuttingDown => Volatile.Read(ref _disposed) != 0 || _shutdownCts.IsCancellationRequested;
 
     /// <summary>
-    /// Tracks a background task to ensure it can be awaited during shutdown.
-    /// </summary>
-    /// <param name="task">The task to track.</param>
-    public void TrackBackgroundTask(Task task)
-    {
-        lock (_backgroundTasksLock)
-        {
-            _backgroundTasks.Add(task);
-        }
-    }
-
-    /// <summary>
     /// Initiates shutdown by cancelling the shutdown token.
     /// </summary>
     public void StartShutdown()
@@ -94,57 +76,7 @@ public sealed partial class SharedResources(
     }
 
     /// <summary>
-    /// Waits for all tracked background tasks to complete.
-    /// </summary>
-    /// <param name="timeout">Maximum time to wait for tasks to complete.</param>
-    /// <param name="cancellationToken">Cancellation token to observe.</param>
-    /// <returns>A task that completes when all background tasks finish or timeout occurs.</returns>
-    public async Task WaitForBackgroundTasksAsync(TimeSpan timeout, CancellationToken cancellationToken = default)
-    {
-        Task[] tasks;
-        lock (_backgroundTasksLock)
-        {
-            tasks = [.. _backgroundTasks];
-        }
-
-        if (tasks.Length == 0)
-        {
-            return;
-        }
-
-        LogWaitingForBackgroundTasks(tasks.Length);
-
-        try
-        {
-            await Task.WhenAll(tasks).WaitAsync(timeout, cancellationToken).ConfigureAwait(true);
-        }
-        catch (TimeoutException)
-        {
-            LogBackgroundTaskTimeout();
-        }
-        catch (OperationCanceledException)
-        {
-            // Expected during forced shutdown
-        }
-    }
-
-    /// <summary>
-    /// Asynchronously disposes the shared resources, waiting for background tasks to complete.
-    /// </summary>
-    public async ValueTask DisposeAsync()
-    {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0)
-        {
-            return; // Already disposed
-        }
-
-        StartShutdown();
-        await WaitForBackgroundTasksAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(true);
-        _shutdownCts.Dispose();
-    }
-
-    /// <summary>
-    /// Synchronously disposes the shared resources.
+    /// Disposes the shared resources.
     /// </summary>
     public void Dispose()
     {
@@ -156,10 +88,4 @@ public sealed partial class SharedResources(
         StartShutdown();
         _shutdownCts.Dispose();
     }
-
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Waiting for {Count} background tasks to complete")]
-    private partial void LogWaitingForBackgroundTasks(int Count);
-
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Timeout waiting for background tasks to complete")]
-    private partial void LogBackgroundTaskTimeout();
 }

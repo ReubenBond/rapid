@@ -61,17 +61,8 @@ internal sealed partial class RapidClusterService(
     {
         LogStopping();
 
-        // Wait for background tasks to complete gracefully
-        try
-        {
-            sharedResources.StartShutdown();
-            await sharedResources.WaitForBackgroundTasksAsync(TimeSpan.FromSeconds(5), cancellationToken)
-                .ConfigureAwait(true);
-        }
-        catch (OperationCanceledException)
-        {
-            // Expected if forced shutdown
-        }
+        sharedResources.StartShutdown();
+        await MembershipService.StopAsync(cancellationToken).ConfigureAwait(true);
 
         await base.StopAsync(cancellationToken).ConfigureAwait(true);
     }

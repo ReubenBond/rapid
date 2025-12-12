@@ -50,9 +50,7 @@ public static class RapidServiceCollectionExtensions
         // Add core services
         services.AddGrpc();
         services.AddSingleton(sp =>
-            new SharedResources(
-                sp.GetRequiredService<ILogger<SharedResources>>(),
-                sp.GetRequiredService<TimeProvider>()));
+            new SharedResources(sp.GetRequiredService<TimeProvider>()));
 
         // Register messaging infrastructure
         // GrpcClient is registered as a hosted service so it shuts down AFTER RapidClusterService

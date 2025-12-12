@@ -80,7 +80,7 @@ internal sealed class RapidCluster(MembershipService membershipService, IMembers
 
     public async Task LeaveGracefullyAsync(CancellationToken cancellationToken = default)
     {
-        await membershipService.LeaveAsync(cancellationToken).ConfigureAwait(true);
+        await membershipService.StopAsync(cancellationToken).ConfigureAwait(true);
     }
 
     public IMembershipViewAccessor ViewAccessor => viewAccessor;

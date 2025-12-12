@@ -149,8 +149,7 @@ internal sealed class SimulationNode
         _protocolOptions = protocolOptions ?? new RapidProtocolOptions();
 
         // Create shared resources with the node's time provider and task scheduler
-        var sharedResourcesLogger = _loggerFactory.CreateLogger<SharedResources>();
-        _sharedResources = new SharedResources(sharedResourcesLogger, _context.TimeProvider, _context.TaskScheduler, _context.Random, _context.Random.NextGuid);
+        _sharedResources = new SharedResources(_context.TimeProvider, _context.TaskScheduler, _context.Random, _context.Random.NextGuid);
 
         // Create in-memory messaging client using GrpcTimeout from protocol options.
         // For tests with suspended nodes requiring Classic Paxos fallback,
@@ -254,7 +253,7 @@ internal sealed class SimulationNode
         }
 
         _log.NodeLeaving(RapidUtils.Loggable(Address));
-        await _membershipService.LeaveAsync().ConfigureAwait(true);
+        await _membershipService.StopAsync().ConfigureAwait(true);
         _log.NodeLeftGracefully(RapidUtils.Loggable(Address));
     }
 

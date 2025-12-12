@@ -232,4 +232,7 @@ internal sealed partial class MembershipServiceLogger(ILogger<MembershipService>
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Skipping stale view refresh - already in progress or received config {ReceivedConfigId} not newer than local {LocalConfigId}")]
     public partial void SkippingStaleViewRefresh(long receivedConfigId, long localConfigId);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Waiting for {Count} background tasks to complete")]
+    public partial void WaitingForBackgroundTasks(int count);
 }
