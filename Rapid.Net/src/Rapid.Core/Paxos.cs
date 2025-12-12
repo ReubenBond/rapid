@@ -121,7 +121,7 @@ internal sealed class Paxos
             Rank = _crnd
         };
 
-        var request = RapidUtils.ToRapidRequest(prepare);
+        var request = prepare.ToRapidRequest();
         _log.BroadcastingPhase1a();
 
         _broadcaster.Broadcast(request, cancellationToken);
@@ -157,7 +157,7 @@ internal sealed class Paxos
 
             _log.SendingPhase1b(new PaxosLogger.LoggableEndpoint(phase1aMessage.Sender), _rnd, _vrnd, new PaxosLogger.LoggableEndpoints(_vval));
 
-            var request = RapidUtils.ToRapidRequest(phase1b);
+            var request = phase1b.ToRapidRequest();
             _client.SendOneWayMessage(phase1aMessage.Sender, request, cancellationToken);
         }
         else
@@ -217,7 +217,7 @@ internal sealed class Paxos
                 };
                 phase2a.Vval.AddRange(_cval);
 
-                var request = RapidUtils.ToRapidRequest(phase2a);
+                var request = phase2a.ToRapidRequest();
                 _broadcaster.Broadcast(request, cancellationToken);
             }
         }
@@ -258,7 +258,7 @@ internal sealed class Paxos
 
             // Broadcast to all nodes so they can independently learn the decision
             // This matches the Java implementation
-            var request = RapidUtils.ToRapidRequest(phase2b);
+            var request = phase2b.ToRapidRequest();
             _broadcaster.Broadcast(request, cancellationToken);
         }
         else

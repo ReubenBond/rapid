@@ -70,6 +70,9 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
     // Flag to track if a rejoin is in progress
     private bool _isRejoining;
 
+    // Flag to track if a stale view refresh is in progress (to prevent concurrent refreshes)
+    private bool _isRefreshingView;
+
     /// <summary>
     /// Result of a single join attempt. Used to avoid exception-based control flow for retryable conditions.
     /// </summary>
@@ -132,9 +135,12 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
         _eventChannel = new BroadcastChannel<ClusterEventNotification>();
 
         // Configure the failure detector factory to detect when this node has been kicked
+        // or has a stale view (learner role - missed consensus decisions)
         if (edgeFailureDetector is PingPongFailureDetectorFactory pingPongFactory)
         {
             pingPongFactory.OnKickedDetected = OnKickedDetected;
+            pingPongFactory.OnStaleViewDetected = OnStaleViewDetected;
+            pingPongFactory.GetLocalConfigurationId = () => _membershipView.ConfigurationId;
         }
     }
 
@@ -279,7 +285,7 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
             {
                 preJoinResponse = await _messagingClient.SendMessageAsync(
                     _seedAddress!,
-                    RapidUtils.ToRapidRequest(preJoinMessage),
+                    preJoinMessage.ToRapidRequest(),
                     cancellationToken).ConfigureAwait(true);
             }
             catch (TimeoutException)
@@ -342,7 +348,7 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
 
             return await _messagingClient.SendMessageAsync(
                 entry.Key,
-                RapidUtils.ToRapidRequest(joinMessageForObserver),
+                joinMessageForObserver.ToRapidRequest(),
                 cancellationToken).WithDefaultOnException().ConfigureAwait(true);
         });
 
@@ -491,7 +497,7 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
                 response.MetadataKeys.AddRange(allMetadata.Keys);
                 response.MetadataValues.AddRange(allMetadata.Values);
 
-                var rapidResponse = RapidUtils.ToRapidResponse(response);
+                var rapidResponse = response.ToRapidResponse();
 
                 // Send response to all waiting tasks
                 while (channel.Reader.TryRead(out var tcs))
@@ -534,6 +540,7 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
             RapidRequest.ContentOneofCase.Phase2AMessage or
             RapidRequest.ContentOneofCase.Phase2BMessage => HandleConsensusMessages(msg, cancellationToken),
             RapidRequest.ContentOneofCase.LeaveMessage => HandleLeaveMessage(msg, cancellationToken),
+            RapidRequest.ContentOneofCase.MembershipViewRequest => HandleMembershipViewRequest(msg.MembershipViewRequest, cancellationToken),
             _ => throw new ArgumentException($"Unidentified RapidRequest type {msg.ContentCase}")
         };
 
@@ -572,7 +579,7 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
 
             _log.HandlePreJoinResult(new MembershipServiceLogger.LoggableEndpoint(joiningEndpoint), statusCode, observersCount);
 
-            return RapidUtils.ToRapidResponse(builder);
+            return builder.ToRapidResponse();
         }
     }
 
@@ -648,7 +655,7 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
                     responseBuilder.StatusCode = JoinStatusCode.ConfigChanged;
                 }
 
-                tcs.SetResult(RapidUtils.ToRapidResponse(responseBuilder));
+                tcs.SetResult(responseBuilder.ToRapidResponse());
             }
         }
 
@@ -672,7 +679,7 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
             if (!FilterAlertMessages(messageBatch, _membershipView.ConfigurationId))
             {
                 _log.BatchedAlertFiltered(new MembershipServiceLogger.CurrentConfigId(_membershipView));
-                return RapidUtils.ToRapidResponse(new ConsensusResponse());
+                return new ConsensusResponse().ToRapidResponse();
             }
 
             // Use SortedSet for deduplication and consistent ordering across all nodes.
@@ -739,7 +746,7 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
                 }
             }
 
-            return RapidUtils.ToRapidResponse(new ConsensusResponse());
+            return new ConsensusResponse().ToRapidResponse();
         }
     }
 
@@ -771,7 +778,7 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
                 }
                 pendingList.Add(request);
 
-                return RapidUtils.ToRapidResponse(new ConsensusResponse());
+                return new ConsensusResponse().ToRapidResponse();
             }
 
             // Message is for current or past configuration - process normally
@@ -779,7 +786,7 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
             _consensusInstance.HandleMessages(request, cancellationToken);
         }
 
-        return RapidUtils.ToRapidResponse(new ConsensusResponse());
+        return new ConsensusResponse().ToRapidResponse();
     }
 
     /// <summary>
@@ -806,7 +813,7 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
         var leaveMessage = request.LeaveMessage;
         _log.ReceivedLeaveMessage(new MembershipServiceLogger.LoggableEndpoint(leaveMessage.Sender), new MembershipServiceLogger.LoggableEndpoint(_myAddr));
         EdgeFailureNotification(leaveMessage.Sender, _membershipView.ConfigurationId);
-        return RapidUtils.ToRapidResponse(new ConsensusResponse());
+        return new ConsensusResponse().ToRapidResponse();
     }
 
     /// <summary>
@@ -816,11 +823,46 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
     {
         _log.HandleProbeMessage();
         var senderInMembership = probeMessage.Sender != null && _membershipView.IsHostPresent(probeMessage.Sender);
-        return RapidUtils.ToRapidResponse(new ProbeResponse
+        return new ProbeResponse
         {
             ConfigurationId = _membershipView.ConfigurationId,
             SenderInMembership = senderInMembership
-        });
+        }.ToRapidResponse();
+    }
+
+    /// <summary>
+    /// Handles a request from a node that has detected it has a stale view.
+    /// This is the "learner" role in Paxos - allowing nodes that missed consensus
+    /// decisions to catch up by requesting the current view from another node.
+    /// </summary>
+    private RapidResponse HandleMembershipViewRequest(MembershipViewRequest request, CancellationToken cancellationToken)
+    {
+        _log.HandleMembershipViewRequest(
+            new MembershipServiceLogger.LoggableEndpoint(request.Sender),
+            request.CurrentConfigurationId,
+            new MembershipServiceLogger.CurrentConfigId(_membershipView));
+
+        // Build response with current membership view
+        var response = new MembershipViewResponse
+        {
+            Sender = _myAddr,
+            ConfigurationId = _membershipView.ConfigurationId
+        };
+
+        // Add all endpoints and their node IDs
+        var ring0 = _membershipView.GetRing(0);
+        response.Endpoints.AddRange(ring0);
+        response.Identifiers.AddRange(_membershipView.NodeIds);
+
+        // Add metadata for all nodes
+        foreach (var endpoint in ring0)
+        {
+            var metadata = _metadataManager.Get(endpoint) ?? new Metadata();
+            response.MetadataKeys.Add(endpoint);
+            response.MetadataValues.Add(metadata);
+        }
+
+        return response.ToRapidResponse();
     }
 
     /// <summary>
@@ -952,7 +994,7 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
     public async Task LeaveAsync(CancellationToken cancellationToken = default)
     {
         var leaveMessage = new LeaveMessage { Sender = _myAddr };
-        var leave = RapidUtils.ToRapidRequest(leaveMessage);
+        var leave = leaveMessage.ToRapidRequest();
 
         try
         {
@@ -1034,7 +1076,7 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
                     };
                     batchedMessage.Messages.AddRange(buffer);
 
-                    var request = RapidUtils.ToRapidRequest(batchedMessage);
+                    var request = batchedMessage.ToRapidRequest();
                     _broadcaster.Broadcast(request, shutdownToken);
                 }
             }
@@ -1233,7 +1275,7 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
 
         var preJoinResponse = await _messagingClient.SendMessageAsync(
             seed,
-            RapidUtils.ToRapidRequest(preJoinMessage),
+            preJoinMessage.ToRapidRequest(),
             cancellationToken).ConfigureAwait(true);
 
         var joinResponse = preJoinResponse.JoinResponse;
@@ -1279,7 +1321,7 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
 
             return await _messagingClient.SendMessageBestEffortAsync(
                 entry.Key,
-                RapidUtils.ToRapidRequest(joinMessageForObserver),
+                joinMessageForObserver.ToRapidRequest(),
                 cancellationToken).ConfigureAwait(true);
         });
 
@@ -1318,6 +1360,159 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
 
             // Use SetMembershipView to apply all changes - for rejoin, all nodes are treated as Up
             oldConsensus = SetMembershipView(newView, metadataMap, nodeStatusChanges: null, addedNodes: null);
+        }
+
+        // Dispose old consensus (fire and forget)
+        if (oldConsensus != null)
+        {
+            _ = oldConsensus.DisposeAsync();
+        }
+    }
+
+    /// <summary>
+    /// Called by the failure detector when a probe response indicates this node
+    /// has a stale view (remote has higher config ID, but we're still in membership).
+    /// This is the Paxos "learner" role - requesting missed consensus decisions.
+    /// </summary>
+    /// <param name="remoteEndpoint">The endpoint that reported the higher config ID.</param>
+    /// <param name="remoteConfigId">The configuration ID from the probe response.</param>
+    /// <param name="localConfigId">The local configuration ID when the stale view was detected.</param>
+    private void OnStaleViewDetected(Endpoint remoteEndpoint, long remoteConfigId, long localConfigId)
+    {
+        _log.StaleViewDetected(new MembershipServiceLogger.LoggableEndpoint(remoteEndpoint), remoteConfigId, localConfigId);
+
+        // Schedule refresh on the background task scheduler
+        var refreshTask = Task.Factory.StartNew(
+            () => RefreshMembershipViewAsync(remoteEndpoint, remoteConfigId, _sharedResources.ShuttingDownToken),
+            _sharedResources.ShuttingDownToken,
+            TaskCreationOptions.None,
+            _sharedResources.TaskScheduler).Unwrap();
+        _sharedResources.TrackBackgroundTask(refreshTask);
+    }
+
+    /// <summary>
+    /// Requests an updated membership view from a remote node.
+    /// This implements the Paxos "learner" role - catching up on missed consensus decisions.
+    /// </summary>
+    private async Task RefreshMembershipViewAsync(Endpoint remoteEndpoint, long expectedConfigId, CancellationToken cancellationToken)
+    {
+        // Prevent concurrent refresh attempts
+        if (_isRefreshingView || _disposed != 0)
+        {
+            _log.SkippingStaleViewRefresh(expectedConfigId, _membershipView.ConfigurationId);
+            return;
+        }
+
+        // Double-check we still need to refresh (config may have been updated by another mechanism)
+        if (expectedConfigId <= _membershipView.ConfigurationId)
+        {
+            _log.SkippingStaleViewRefresh(expectedConfigId, _membershipView.ConfigurationId);
+            return;
+        }
+
+        _isRefreshingView = true;
+        try
+        {
+            _log.RequestingMembershipView(new MembershipServiceLogger.LoggableEndpoint(remoteEndpoint));
+
+            var request = new MembershipViewRequest
+            {
+                Sender = _myAddr,
+                CurrentConfigurationId = _membershipView.ConfigurationId
+            };
+
+            var response = await _messagingClient.SendMessageAsync(
+                remoteEndpoint,
+                request.ToRapidRequest(),
+                cancellationToken).ConfigureAwait(true);
+
+            var viewResponse = response.MembershipViewResponse;
+            if (viewResponse == null)
+            {
+                _log.MembershipViewRefreshFailed(new MembershipServiceLogger.LoggableEndpoint(remoteEndpoint), "No MembershipViewResponse in reply");
+                return;
+            }
+
+            // Only apply if the response is newer than our current view
+            if (viewResponse.ConfigurationId <= _membershipView.ConfigurationId)
+            {
+                _log.SkippingStaleViewRefresh(viewResponse.ConfigurationId, _membershipView.ConfigurationId);
+                return;
+            }
+
+            // Apply the learned view
+            ApplyLearnedMembershipView(viewResponse);
+
+            _log.MembershipViewRefreshed(
+                new MembershipServiceLogger.LoggableEndpoint(remoteEndpoint),
+                viewResponse.ConfigurationId,
+                viewResponse.Endpoints.Count);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _log.MembershipViewRefreshFailed(new MembershipServiceLogger.LoggableEndpoint(remoteEndpoint), ex.Message);
+        }
+        finally
+        {
+            _isRefreshingView = false;
+        }
+    }
+
+    /// <summary>
+    /// Applies a learned membership view from a remote node.
+    /// This is used by the Paxos learner mechanism to catch up on missed consensus decisions.
+    /// </summary>
+    private void ApplyLearnedMembershipView(MembershipViewResponse viewResponse)
+    {
+        ConsensusCoordinator? oldConsensus;
+        lock (_membershipUpdateLock)
+        {
+            // Double-check inside lock
+            if (viewResponse.ConfigurationId <= _membershipView.ConfigurationId)
+            {
+                return;
+            }
+
+            // Build metadata map from response
+            var metadataMap = new Dictionary<Endpoint, Metadata>();
+            for (var i = 0; i < viewResponse.MetadataKeys.Count && i < viewResponse.MetadataValues.Count; i++)
+            {
+                metadataMap[viewResponse.MetadataKeys[i]] = viewResponse.MetadataValues[i];
+            }
+
+            // Build the new view from the response
+            var newView = new MembershipViewBuilder(
+                _options.ObserversPerSubject,
+                [.. viewResponse.Identifiers],
+                [.. viewResponse.Endpoints]).BuildWithConfigurationId(new ConfigurationId(viewResponse.ConfigurationId));
+
+            // Compute the status changes by comparing old and new membership
+            var oldMembers = new HashSet<Endpoint>(_membershipView.GetRing(0));
+            var newMembers = new HashSet<Endpoint>(newView.GetRing(0));
+
+            var nodeStatusChanges = new List<NodeStatusChange>();
+
+            // Nodes that left (in old but not in new)
+            foreach (var node in oldMembers)
+            {
+                if (!newMembers.Contains(node))
+                {
+                    nodeStatusChanges.Add(new NodeStatusChange(node, EdgeStatus.Down, _metadataManager.Get(node) ?? new Metadata()));
+                }
+            }
+
+            // Nodes that joined (in new but not in old)
+            foreach (var node in newMembers)
+            {
+                if (!oldMembers.Contains(node))
+                {
+                    var metadata = metadataMap.GetValueOrDefault(node, new Metadata());
+                    nodeStatusChanges.Add(new NodeStatusChange(node, EdgeStatus.Up, metadata));
+                }
+            }
+
+            // Apply the new view
+            oldConsensus = SetMembershipView(newView, metadataMap, nodeStatusChanges, addedNodes: null);
         }
 
         // Dispose old consensus (fire and forget)

@@ -278,7 +278,7 @@ internal sealed class ConsensusCoordinator : IAsyncDisposable
             }
         }
 
-        return RapidUtils.ToRapidResponse(new ConsensusResponse());
+        return new ConsensusResponse().ToRapidResponse();
     }
 
     /// <summary>

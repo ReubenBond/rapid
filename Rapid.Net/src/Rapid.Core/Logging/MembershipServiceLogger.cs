@@ -122,6 +122,9 @@ internal sealed partial class MembershipServiceLogger(ILogger<MembershipService>
     [LoggerMessage(Level = LogLevel.Trace, Message = "HandleProbeMessage: responding to probe")]
     public partial void HandleProbeMessage();
 
+    [LoggerMessage(Level = LogLevel.Debug, Message = "HandleMembershipViewRequest: sender={Sender} requested view (their config={TheirConfig}, our config={OurConfig})")]
+    public partial void HandleMembershipViewRequest(LoggableEndpoint sender, long theirConfig, CurrentConfigId ourConfig);
+
     [LoggerMessage(Level = LogLevel.Debug, Message = "DecideViewChange: processing {Count} nodes in proposal")]
     public partial void DecideViewChange(int count);
 
@@ -214,4 +217,19 @@ internal sealed partial class MembershipServiceLogger(ILogger<MembershipService>
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Failed to join cluster after {Attempts} attempts")]
     public partial void JoinFailed(int attempts);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Stale view detected from {RemoteEndpoint}: remote config {RemoteConfigId} > local config {LocalConfigId}. Requesting updated view.")]
+    public partial void StaleViewDetected(LoggableEndpoint remoteEndpoint, long remoteConfigId, long localConfigId);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Requesting membership view from {RemoteEndpoint}")]
+    public partial void RequestingMembershipView(LoggableEndpoint remoteEndpoint);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Successfully refreshed membership view from {RemoteEndpoint}: new config {NewConfigId}, {MemberCount} members")]
+    public partial void MembershipViewRefreshed(LoggableEndpoint remoteEndpoint, long newConfigId, int memberCount);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to refresh membership view from {RemoteEndpoint}: {Message}")]
+    public partial void MembershipViewRefreshFailed(LoggableEndpoint remoteEndpoint, string message);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Skipping stale view refresh - already in progress or received config {ReceivedConfigId} not newer than local {LocalConfigId}")]
+    public partial void SkippingStaleViewRefresh(long receivedConfigId, long localConfigId);
 }

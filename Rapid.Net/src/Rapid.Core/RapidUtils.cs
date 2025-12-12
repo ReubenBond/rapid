@@ -58,44 +58,57 @@ public static class RapidUtils
     /// Creates a loggable string representation of endpoints.
     /// </summary>
     public static string Loggable(IEnumerable<Endpoint> endpoints) => $"[{string.Join(", ", endpoints.Select(Loggable))}]";
+}
 
-    // Helper methods to construct RapidRequest/RapidResponse
-    public static RapidRequest ToRapidRequest(PreJoinMessage msg) =>
+/// <summary>
+/// Extension methods to convert protocol messages to RapidRequest/RapidResponse wrappers.
+/// </summary>
+public static class RapidMessageExtensions
+{
+    // RapidRequest extensions
+    public static RapidRequest ToRapidRequest(this PreJoinMessage msg) =>
         new() { PreJoinMessage = msg };
 
-    public static RapidRequest ToRapidRequest(JoinMessage msg) =>
+    public static RapidRequest ToRapidRequest(this JoinMessage msg) =>
         new() { JoinMessage = msg };
 
-    public static RapidRequest ToRapidRequest(BatchedAlertMessage msg) =>
+    public static RapidRequest ToRapidRequest(this BatchedAlertMessage msg) =>
         new() { BatchedAlertMessage = msg };
 
-    public static RapidRequest ToRapidRequest(ProbeMessage msg) =>
+    public static RapidRequest ToRapidRequest(this ProbeMessage msg) =>
         new() { ProbeMessage = msg };
 
-    public static RapidRequest ToRapidRequest(FastRoundPhase2bMessage msg) =>
+    public static RapidRequest ToRapidRequest(this FastRoundPhase2bMessage msg) =>
         new() { FastRoundPhase2BMessage = msg };
 
-    public static RapidRequest ToRapidRequest(Phase1aMessage msg) =>
+    public static RapidRequest ToRapidRequest(this Phase1aMessage msg) =>
         new() { Phase1AMessage = msg };
 
-    public static RapidRequest ToRapidRequest(Phase1bMessage msg) =>
+    public static RapidRequest ToRapidRequest(this Phase1bMessage msg) =>
         new() { Phase1BMessage = msg };
 
-    public static RapidRequest ToRapidRequest(Phase2aMessage msg) =>
+    public static RapidRequest ToRapidRequest(this Phase2aMessage msg) =>
         new() { Phase2AMessage = msg };
 
-    public static RapidRequest ToRapidRequest(Phase2bMessage msg) =>
+    public static RapidRequest ToRapidRequest(this Phase2bMessage msg) =>
         new() { Phase2BMessage = msg };
 
-    public static RapidRequest ToRapidRequest(LeaveMessage msg) =>
+    public static RapidRequest ToRapidRequest(this LeaveMessage msg) =>
         new() { LeaveMessage = msg };
 
-    public static RapidResponse ToRapidResponse(JoinResponse msg) =>
+    public static RapidRequest ToRapidRequest(this MembershipViewRequest msg) =>
+        new() { MembershipViewRequest = msg };
+
+    // RapidResponse extensions
+    public static RapidResponse ToRapidResponse(this JoinResponse msg) =>
         new() { JoinResponse = msg };
 
-    public static RapidResponse ToRapidResponse(ConsensusResponse msg) =>
+    public static RapidResponse ToRapidResponse(this ConsensusResponse msg) =>
         new() { ConsensusResponse = msg };
 
-    public static RapidResponse ToRapidResponse(ProbeResponse msg) =>
+    public static RapidResponse ToRapidResponse(this ProbeResponse msg) =>
         new() { ProbeResponse = msg };
+
+    public static RapidResponse ToRapidResponse(this MembershipViewResponse msg) =>
+        new() { MembershipViewResponse = msg };
 }

@@ -29,6 +29,20 @@ public sealed partial class PingPongFailureDetectorFactory(
     /// </summary>
     public Action<long>? OnKickedDetected { get; set; }
 
+    /// <summary>
+    /// Gets or sets the callback invoked when a probe response indicates
+    /// the local node has a stale view (remote has higher config ID, but local is still in membership).
+    /// This is the Paxos "learner" role - requesting missed consensus decisions.
+    /// Parameters: (remoteEndpoint, remoteConfigId, localConfigId)
+    /// </summary>
+    public Action<Endpoint, long, long>? OnStaleViewDetected { get; set; }
+
+    /// <summary>
+    /// Gets or sets a function that returns the current local configuration ID.
+    /// Used to detect stale views.
+    /// </summary>
+    public Func<long>? GetLocalConfigurationId { get; set; }
+
     public IEdgeFailureDetector CreateInstance(Endpoint subject, Action notifier) =>
         new PingPongFailureDetector(
             subject,
@@ -38,6 +52,8 @@ public sealed partial class PingPongFailureDetectorFactory(
             notifier,
             _protocolOptions.FailureDetectorConsecutiveFailures,
             OnKickedDetected,
+            OnStaleViewDetected,
+            GetLocalConfigurationId,
             _logger);
 }
 
@@ -56,6 +72,8 @@ public sealed partial class PingPongFailureDetector : IEdgeFailureDetector
     private readonly Action _notifier;
     private readonly int _consecutiveFailuresThreshold;
     private readonly Action<long>? _onKickedDetected;
+    private readonly Action<Endpoint, long, long>? _onStaleViewDetected;
+    private readonly Func<long>? _getLocalConfigurationId;
     private readonly ILogger<PingPongFailureDetector> _logger;
     private readonly CancellationTokenSource _cts = new();
     private int _disposed;
@@ -72,6 +90,8 @@ public sealed partial class PingPongFailureDetector : IEdgeFailureDetector
     /// <param name="notifier">Action to invoke when the subject is detected as failed.</param>
     /// <param name="consecutiveFailuresThreshold">Number of consecutive failures required before declaring node down.</param>
     /// <param name="onKickedDetected">Optional callback when kicked from cluster is detected.</param>
+    /// <param name="onStaleViewDetected">Optional callback when stale view is detected (learner role).</param>
+    /// <param name="getLocalConfigurationId">Optional function to get local configuration ID.</param>
     /// <param name="logger">Optional logger.</param>
     public PingPongFailureDetector(
         Endpoint subject,
@@ -81,6 +101,8 @@ public sealed partial class PingPongFailureDetector : IEdgeFailureDetector
         Action notifier,
         int consecutiveFailuresThreshold = 3,
         Action<long>? onKickedDetected = null,
+        Action<Endpoint, long, long>? onStaleViewDetected = null,
+        Func<long>? getLocalConfigurationId = null,
         ILogger<PingPongFailureDetector>? logger = null)
     {
         _subject = subject;
@@ -90,6 +112,8 @@ public sealed partial class PingPongFailureDetector : IEdgeFailureDetector
         _notifier = notifier;
         _consecutiveFailuresThreshold = consecutiveFailuresThreshold;
         _onKickedDetected = onKickedDetected;
+        _onStaleViewDetected = onStaleViewDetected;
+        _getLocalConfigurationId = getLocalConfigurationId;
         _logger = logger ?? NullLogger<PingPongFailureDetector>.Instance;
     }
 
@@ -113,6 +137,9 @@ public sealed partial class PingPongFailureDetector : IEdgeFailureDetector
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Kicked from cluster detected: not in {Subject}'s membership view (remote config: {RemoteConfigId})")]
     private partial void LogKickedDetected(LoggableEndpoint Subject, long RemoteConfigId);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Stale view detected from {Subject}: remote config {RemoteConfigId} > local config {LocalConfigId}")]
+    private partial void LogStaleViewDetected(LoggableEndpoint Subject, long RemoteConfigId, long LocalConfigId);
 
     public void Start()
     {
@@ -139,7 +166,7 @@ public sealed partial class PingPongFailureDetector : IEdgeFailureDetector
 #pragma warning disable CA1031
         try
         {
-            var request = RapidUtils.ToRapidRequest(new ProbeMessage { Sender = _observer });
+            var request = new ProbeMessage { Sender = _observer }.ToRapidRequest();
             var response = await _client.SendMessageAsync(_subject, request, _cts.Token).ConfigureAwait(true);
 
             if (response.ProbeResponse == null)
@@ -156,8 +183,8 @@ public sealed partial class PingPongFailureDetector : IEdgeFailureDetector
                 }
                 _consecutiveFailures = 0;
 
-                // Check if we've been kicked from the cluster
-                CheckForKicked(response.ProbeResponse);
+                // Check if we've been kicked or have a stale view
+                CheckForKickedOrStaleView(response.ProbeResponse);
             }
         }
         catch (Exception ex)
@@ -169,18 +196,31 @@ public sealed partial class PingPongFailureDetector : IEdgeFailureDetector
 #pragma warning restore CA1031
     }
 
-    private void CheckForKicked(ProbeResponse probeResponse)
+    private void CheckForKickedOrStaleView(ProbeResponse probeResponse)
     {
-        if (_onKickedDetected == null)
-        {
-            return;
-        }
-
         // If the remote node says we're not in their membership, we've been kicked
         if (!probeResponse.SenderInMembership)
         {
-            LogKickedDetected(new LoggableEndpoint(_subject), probeResponse.ConfigurationId);
-            _onKickedDetected(probeResponse.ConfigurationId);
+            if (_onKickedDetected != null)
+            {
+                LogKickedDetected(new LoggableEndpoint(_subject), probeResponse.ConfigurationId);
+                _onKickedDetected(probeResponse.ConfigurationId);
+            }
+            return;
+        }
+
+        // We're still in membership, but check if we have a stale view
+        // (remote has higher config ID - we missed consensus decisions)
+        if (_onStaleViewDetected != null && _getLocalConfigurationId != null)
+        {
+            var localConfigId = _getLocalConfigurationId();
+            var remoteConfigId = probeResponse.ConfigurationId;
+
+            if (remoteConfigId > localConfigId)
+            {
+                LogStaleViewDetected(new LoggableEndpoint(_subject), remoteConfigId, localConfigId);
+                _onStaleViewDetected(_subject, remoteConfigId, localConfigId);
+            }
         }
     }
 

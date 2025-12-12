@@ -84,7 +84,7 @@ internal sealed class FastPaxos
         };
         consensusMessage.Endpoints.AddRange(proposal);
 
-        var proposalMessage = RapidUtils.ToRapidRequest(consensusMessage);
+        var proposalMessage = consensusMessage.ToRapidRequest();
 
         // Calculate threshold for early fallback detection
         // Fast Paxos requires N - f votes, where f = floor((N-1)/4)

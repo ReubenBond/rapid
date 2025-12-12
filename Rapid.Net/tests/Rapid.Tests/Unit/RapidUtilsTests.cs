@@ -187,7 +187,7 @@ public class RapidUtilsTests
             NodeId = RapidUtils.NodeIdFromUuid(Guid.NewGuid())
         };
 
-        var request = RapidUtils.ToRapidRequest(msg);
+        var request = msg.ToRapidRequest();
 
         Assert.NotNull(request.PreJoinMessage);
         Assert.Equal(msg.Sender, request.PreJoinMessage.Sender);
@@ -203,7 +203,7 @@ public class RapidUtilsTests
             ConfigurationId = 100
         };
 
-        var request = RapidUtils.ToRapidRequest(msg);
+        var request = msg.ToRapidRequest();
 
         Assert.NotNull(request.JoinMessage);
         Assert.Equal(msg.Sender, request.JoinMessage.Sender);
@@ -222,7 +222,7 @@ public class RapidUtilsTests
             ConfigurationId = 100
         });
 
-        var request = RapidUtils.ToRapidRequest(msg);
+        var request = msg.ToRapidRequest();
 
         Assert.NotNull(request.BatchedAlertMessage);
         Assert.Single(request.BatchedAlertMessage.Messages);
@@ -236,7 +236,7 @@ public class RapidUtilsTests
             Sender = RapidUtils.HostFromParts("127.0.0.1", 1234)
         };
 
-        var request = RapidUtils.ToRapidRequest(msg);
+        var request = msg.ToRapidRequest();
 
         Assert.NotNull(request.ProbeMessage);
         Assert.Equal(msg.Sender, request.ProbeMessage.Sender);
@@ -252,7 +252,7 @@ public class RapidUtilsTests
         };
         msg.Endpoints.Add(RapidUtils.HostFromParts("127.0.0.1", 1235));
 
-        var request = RapidUtils.ToRapidRequest(msg);
+        var request = msg.ToRapidRequest();
 
         Assert.NotNull(request.FastRoundPhase2BMessage);
         Assert.Equal(100, request.FastRoundPhase2BMessage.ConfigurationId);
@@ -268,7 +268,7 @@ public class RapidUtilsTests
             Rank = new Rank { Round = 2, NodeIndex = 5 }
         };
 
-        var request = RapidUtils.ToRapidRequest(msg);
+        var request = msg.ToRapidRequest();
 
         Assert.NotNull(request.Phase1AMessage);
         Assert.Equal(2, request.Phase1AMessage.Rank.Round);
@@ -285,7 +285,7 @@ public class RapidUtilsTests
             Vrnd = new Rank { Round = 1, NodeIndex = 3 }
         };
 
-        var request = RapidUtils.ToRapidRequest(msg);
+        var request = msg.ToRapidRequest();
 
         Assert.NotNull(request.Phase1BMessage);
         Assert.Equal(2, request.Phase1BMessage.Rnd.Round);
@@ -302,7 +302,7 @@ public class RapidUtilsTests
         };
         msg.Vval.Add(RapidUtils.HostFromParts("127.0.0.1", 1235));
 
-        var request = RapidUtils.ToRapidRequest(msg);
+        var request = msg.ToRapidRequest();
 
         Assert.NotNull(request.Phase2AMessage);
         Assert.Single(request.Phase2AMessage.Vval);
@@ -319,7 +319,7 @@ public class RapidUtilsTests
         };
         msg.Endpoints.Add(RapidUtils.HostFromParts("127.0.0.1", 1235));
 
-        var request = RapidUtils.ToRapidRequest(msg);
+        var request = msg.ToRapidRequest();
 
         Assert.NotNull(request.Phase2BMessage);
         Assert.Single(request.Phase2BMessage.Endpoints);
@@ -333,7 +333,7 @@ public class RapidUtilsTests
             Sender = RapidUtils.HostFromParts("127.0.0.1", 1234)
         };
 
-        var request = RapidUtils.ToRapidRequest(msg);
+        var request = msg.ToRapidRequest();
 
         Assert.NotNull(request.LeaveMessage);
         Assert.Equal(msg.Sender, request.LeaveMessage.Sender);
@@ -351,7 +351,7 @@ public class RapidUtilsTests
         };
         msg.Endpoints.Add(RapidUtils.HostFromParts("127.0.0.1", 1234));
 
-        var response = RapidUtils.ToRapidResponse(msg);
+        var response = msg.ToRapidResponse();
 
         Assert.NotNull(response.JoinResponse);
         Assert.Equal(JoinStatusCode.SafeToJoin, response.JoinResponse.StatusCode);
@@ -362,7 +362,7 @@ public class RapidUtilsTests
     {
         var msg = new ConsensusResponse();
 
-        var response = RapidUtils.ToRapidResponse(msg);
+        var response = msg.ToRapidResponse();
 
         Assert.NotNull(response.ConsensusResponse);
     }
@@ -372,7 +372,7 @@ public class RapidUtilsTests
     {
         var msg = new ProbeResponse { Status = NodeStatus.Ok };
 
-        var response = RapidUtils.ToRapidResponse(msg);
+        var response = msg.ToRapidResponse();
 
         Assert.NotNull(response.ProbeResponse);
         Assert.Equal(NodeStatus.Ok, response.ProbeResponse.Status);

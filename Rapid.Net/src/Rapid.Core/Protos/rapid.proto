@@ -32,6 +32,7 @@ message RapidRequest
         Phase2aMessage phase2aMessage = 8;
         Phase2bMessage phase2bMessage = 9;
         LeaveMessage leaveMessage = 10;
+        MembershipViewRequest membershipViewRequest = 11;
    }
 }
 
@@ -42,6 +43,7 @@ message RapidResponse
         Response response = 2;
         ConsensusResponse consensusResponse = 3;
         ProbeResponse probeResponse = 4;
+        MembershipViewResponse membershipViewResponse = 5;
    }
 }
 
@@ -207,3 +209,30 @@ enum NodeStatus {
     OK = 0;             // this is the default value
     BOOTSTRAPPING = 1;
 };
+
+// ******* Paxos Learner - Membership view synchronization *******
+//
+// In Paxos terminology, a "learner" is a node that needs to discover
+// the decided value. When a node misses consensus messages (e.g., due
+// to network issues), it can detect this via probe responses showing
+// a higher configuration ID, then request the current view from that node.
+
+// Request to fetch the current membership view from a node.
+// Used when a node detects it has a stale view (e.g., via probe response).
+message MembershipViewRequest
+{
+    Endpoint sender = 1;
+    int64 currentConfigurationId = 2;  // The requester's current configuration ID
+}
+
+// Response containing the full membership view.
+// Reuses the same structure as JoinResponse for consistency.
+message MembershipViewResponse
+{
+    Endpoint sender = 1;
+    int64 configurationId = 2;
+    repeated Endpoint endpoints = 3;
+    repeated NodeId identifiers = 4;
+    repeated Endpoint metadataKeys = 5;
+    repeated Metadata metadataValues = 6;
+}
