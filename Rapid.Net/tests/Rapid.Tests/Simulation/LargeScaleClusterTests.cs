@@ -591,8 +591,8 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
         // Grow the cluster
         for (var i = 1; i <= 5; i++)
         {
-            var joiner = _harness.CreateJoinerNode(seedNode, nodeId: i);
-            _harness.WaitForConvergence(expectedSize: i + 1);
+            _harness.CreateJoinerNode(seedNode, nodeId: i);
+            _harness.WaitForConvergence();
             configIds.Add(seedNode.CurrentView.ConfigurationId);
         }
 
