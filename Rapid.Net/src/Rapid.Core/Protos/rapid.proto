@@ -196,6 +196,7 @@ message ProbeMessage
 {
     Endpoint sender = 1;
     repeated bytes payload = 3;
+    int64 configurationId = 4;  // Sender's configuration ID for bidirectional stale view detection
 }
 
 message ProbeResponse

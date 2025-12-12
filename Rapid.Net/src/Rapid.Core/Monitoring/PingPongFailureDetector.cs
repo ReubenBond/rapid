@@ -153,7 +153,8 @@ public sealed partial class PingPongFailureDetector : IEdgeFailureDetector
 #pragma warning disable CA1031
         try
         {
-            var request = new ProbeMessage { Sender = _observer }.ToRapidRequest();
+            var localConfigId = _getLocalConfigurationId?.Invoke() ?? 0;
+            var request = new ProbeMessage { Sender = _observer, ConfigurationId = localConfigId }.ToRapidRequest();
             var response = await _client.SendMessageAsync(_subject, request, _cts.Token).ConfigureAwait(true);
 
             if (response.ProbeResponse == null)

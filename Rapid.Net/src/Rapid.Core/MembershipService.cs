@@ -434,7 +434,7 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
         _cutDetection = _cutDetectorFactory.Create(_membershipView);
 
         // Update broadcaster membership
-        _broadcaster.SetMembership([.. _membershipView.GetRing(0)]);
+        _broadcaster.SetMembership([.. _membershipView.Members]);
 
         // Dispose old failure detectors and create new ones
         foreach (var fd in _failureDetectors)
@@ -465,7 +465,7 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
 
         // Publish VIEW_CHANGE event
         var statusChanges = nodeStatusChanges ?? GetInitialViewChange();
-        var currentMembership = _membershipView.GetRing(0);
+        var currentMembership = _membershipView.Members;
         var clusterStatusChange = new ClusterStatusChange(_membershipView.ConfigurationId, [.. currentMembership], statusChanges);
 
         _log.PublishingViewChange(new MembershipServiceLogger.CurrentConfigId(_membershipView), new MembershipServiceLogger.MembershipSize(_membershipView));
@@ -743,7 +743,7 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
 
                     // Inform subscribers that a proposal has been announced.
                     var nodeStatusChanges = CreateNodeStatusChangeList(proposalList);
-                    var currentMembership = _membershipView.GetRing(0);
+                    var currentMembership = _membershipView.Members;
                     var clusterStatusChange = new ClusterStatusChange(currentConfigurationId, [.. currentMembership], nodeStatusChanges);
 
                     PublishEvent(ClusterEvents.ViewChangeProposal, clusterStatusChange);
@@ -824,11 +824,24 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
 
     /// <summary>
     /// Invoked by observers of a node for failure detection.
+    /// Also performs bidirectional stale view detection: if the prober has a higher
+    /// configuration ID than us, we trigger the learner protocol to catch up.
     /// </summary>
     private RapidResponse HandleProbeMessage(ProbeMessage probeMessage, CancellationToken cancellationToken)
     {
         _log.HandleProbeMessage();
         var senderInMembership = probeMessage.Sender != null && _membershipView.IsHostPresent(probeMessage.Sender);
+
+        // Bidirectional stale view detection: if the prober has a higher config ID,
+        // we need to catch up. This handles the case where we're being monitored by
+        // nodes that have advanced past us (e.g., we missed a consensus round).
+        var senderConfigId = probeMessage.ConfigurationId;
+        var localConfigId = _membershipView.ConfigurationId;
+        if (senderConfigId > localConfigId && probeMessage.Sender != null)
+        {
+            OnStaleViewDetected(probeMessage.Sender, senderConfigId, localConfigId);
+        }
+
         return new ProbeResponse
         {
             ConfigurationId = _membershipView.ConfigurationId,
@@ -856,12 +869,12 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
         };
 
         // Add all endpoints and their node IDs
-        var ring0 = _membershipView.GetRing(0);
-        response.Endpoints.AddRange(ring0);
+        var members = _membershipView.Members;
+        response.Endpoints.AddRange(members);
         response.Identifiers.AddRange(_membershipView.NodeIds);
 
         // Add metadata for all nodes
-        foreach (var endpoint in ring0)
+        foreach (var endpoint in members)
         {
             var metadata = _metadataManager.Get(endpoint) ?? new Metadata();
             response.MetadataKeys.Add(endpoint);
@@ -962,7 +975,7 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
     /// Gets the list of endpoints currently in the membership view.
     /// </summary>
     /// <returns>list of endpoints in the membership view</returns>
-    public List<Endpoint> GetMembershipView() => [.. _membershipView.GetRing(0)];
+    public List<Endpoint> GetMembershipView() => [.. _membershipView.Members];
 
     /// <summary>
     /// Gets the list of endpoints currently in the membership view.
@@ -1076,7 +1089,7 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
     private List<NodeStatusChange> GetInitialViewChange()
     {
         var list = new List<NodeStatusChange>();
-        foreach (var node in _membershipView.GetRing(0))
+        foreach (var node in _membershipView.Members)
         {
             list.Add(new NodeStatusChange(node, EdgeStatus.Up, _metadataManager.Get(node) ?? new Metadata()));
         }
@@ -1112,7 +1125,7 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
             _log.StartingRejoin(new MembershipServiceLogger.LoggableEndpoint(_myAddr));
 
             // Get known members from our current (stale) view to try as seeds
-            var knownMembers = _membershipView.GetRing(0).Where(e => !e.Equals(_myAddr)).ToList();
+            var knownMembers = _membershipView.Members.Where(e => !e.Equals(_myAddr)).ToList();
 
             // Generate a new node ID for the rejoin
             var nodeId = RapidUtils.NodeIdFromUuid(_sharedResources.NewGuid());
@@ -1393,29 +1406,36 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
                 [.. viewResponse.Endpoints]).BuildWithConfigurationId(new ConfigurationId(viewResponse.ConfigurationId));
 
             // Check if we were kicked (not in the new membership)
-            var newMembers = new HashSet<Endpoint>(newView.GetRing(0));
+            var newMembers = new HashSet<Endpoint>(newView.Members);
             wasKicked = !newMembers.Contains(_myAddr);
+
+            // Get old members (Members property safely returns empty for empty views)
+            var oldMembers = new HashSet<Endpoint>(_membershipView.Members);
 
             if (wasKicked)
             {
-                // We were kicked - publish kicked event but don't apply the view
-                // (we'll rejoin with a new identity)
-                _log.NodeKicked(
-                    new MembershipServiceLogger.LoggableEndpoint(_myAddr),
-                    viewResponse.ConfigurationId,
-                    _membershipView.ConfigurationId.Version);
+                // If we had no previous membership (empty view), we weren't really "kicked" -
+                // we just haven't joined yet. Skip the kicked event in this case.
+                if (oldMembers.Count > 0)
+                {
+                    // We were kicked - publish kicked event but don't apply the view
+                    // (we'll rejoin with a new identity)
+                    _log.NodeKicked(
+                        new MembershipServiceLogger.LoggableEndpoint(_myAddr),
+                        viewResponse.ConfigurationId,
+                        _membershipView.ConfigurationId.Version);
 
-                var currentMembership = _membershipView.GetRing(0);
-                var nodeStatusChange = new NodeStatusChange(_myAddr, EdgeStatus.Down, _metadataManager.Get(_myAddr) ?? new Metadata());
-                var clusterStatusChange = new ClusterStatusChange(_membershipView.ConfigurationId, [.. currentMembership], [nodeStatusChange]);
+                    var currentMembership = _membershipView.Members;
+                    var nodeStatusChange = new NodeStatusChange(_myAddr, EdgeStatus.Down, _metadataManager.Get(_myAddr) ?? new Metadata());
+                    var clusterStatusChange = new ClusterStatusChange(_membershipView.ConfigurationId, [.. currentMembership], [nodeStatusChange]);
 
-                PublishEvent(ClusterEvents.Kicked, clusterStatusChange);
+                    PublishEvent(ClusterEvents.Kicked, clusterStatusChange);
+                }
                 oldConsensus = null;
             }
             else
             {
                 // We're still in membership - compute status changes and apply the view
-                var oldMembers = new HashSet<Endpoint>(_membershipView.GetRing(0));
                 var nodeStatusChanges = new List<NodeStatusChange>();
 
                 // Nodes that left (in old but not in new)

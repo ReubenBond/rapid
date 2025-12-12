@@ -38,3 +38,6 @@ Note: This project uses xUnit v3 with Microsoft.Testing.Platform (MTP). Use `dot
 ## Project Structure
 - `Rapid.Net/src/Rapid.Core/` - Main library
 - `Rapid.Net/tests/Rapid.Tests/` - xUnit v3 tests (underscores allowed in test names)
+
+## Debugging Tips
+- **Log files**: Simulation tests produce log files that can be very large (multi-MB). When reading log files, always use tools to limit the amount of text read at once (e.g., `Get-Content -Tail 100` or `Get-Content -Head 100` in PowerShell, or use offset/limit parameters with Read tool).

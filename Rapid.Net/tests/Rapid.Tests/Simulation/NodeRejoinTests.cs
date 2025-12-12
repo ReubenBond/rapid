@@ -326,8 +326,6 @@ public sealed class NodeRejoinTests : IAsyncLifetime
         Assert.Equal(4, joiner1.MembershipSize);
     }
 
-
-
     /// <summary>
     /// Tests that a cluster can recover from losing half its nodes (but maintaining quorum).
     /// </summary>
