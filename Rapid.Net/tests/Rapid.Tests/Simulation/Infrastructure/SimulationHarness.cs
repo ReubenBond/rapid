@@ -108,9 +108,16 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
     public SimulationNetwork Network { get; }
 
     /// <summary>
-    /// Gets all nodes in the simulation (snapshot).
+    /// Gets all nodes in the simulation, including suspended nodes (snapshot).
+    /// Consider using <see cref="ActiveNodes"/> for most operations.
     /// </summary>
-    public IReadOnlyList<SimulationNode> Nodes => [.. _nodes.Values];
+    public IReadOnlyList<SimulationNode> AllNodes => [.. _nodes.Values];
+
+    /// <summary>
+    /// Gets all active (non-suspended) nodes in the simulation (snapshot).
+    /// Suspended nodes cannot process messages and are excluded from convergence checks.
+    /// </summary>
+    public IReadOnlyList<SimulationNode> ActiveNodes => [.. _nodes.Values.Where(n => !n.IsSuspended)];
 
     /// <summary>
     /// Gets the harness-level task queue for scheduling general simulation work.
@@ -280,6 +287,7 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
             result.Add(joiner);
         }
 
+        WaitForConvergence();
         return result;
     }
 
@@ -360,11 +368,7 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
             // Drive the simulation until all joins in this batch complete.
             // IMPORTANT: Join tasks must be started inside DriveToCompletion so they
             // capture the simulation's SynchronizationContext for their continuations.
-            Run(() =>
-            {
-                var joinTasks = batchNodes.Select(node => node.InitializeAsync()).ToList();
-                return Task.WhenAll(joinTasks);
-            }, maxIterationsPerBatch);
+            Run(() => Task.WhenAll(batchNodes.Select(node => node.InitializeAsync())), maxIterationsPerBatch);
 
             // Log completion
             foreach (var node in batchNodes)
@@ -400,7 +404,7 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(node);
         _log.NodeLeaving();
 
-        var remainingNodes = Nodes.Where(n => n != node).ToList();
+        var remainingNodes = AllNodes.Where(n => n != node).ToList();
         var targetSize = remainingNodes.Count;
 
         // Drive the stop operation to completion (sends LeaveMessages to observers)
@@ -450,7 +454,7 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
         }
 
         // Get the starting configuration version to measure changes
-        var remainingNodes = Nodes.Where(n => !nodesToRemove.Contains(n)).ToList();
+        var remainingNodes = AllNodes.Where(n => !nodesToRemove.Contains(n)).ToList();
         var startingConfigVersion = remainingNodes[0].CurrentView.ConfigurationId.Version;
         var targetSize = remainingNodes.Count;
 
@@ -661,7 +665,7 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
         }
 
         // Try to execute from non-suspended node contexts (round-robin)
-        foreach (var node in Nodes)
+        foreach (var node in AllNodes)
         {
             var context = node.Context;
             if (context.State == SimulationNodeState.Running && context.Step())
@@ -679,14 +683,15 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
     private DateTimeOffset? GetNextWaitingDueTime()
     {
         using var _ = Guard.Enter();
-        return Nodes.Select(n => n.Context.NextWaitingDueTime).Concat([TaskQueue.NextWaitingDueTime]).Min();
+        return AllNodes.Select(n => n.Context.NextWaitingDueTime).Concat([TaskQueue.NextWaitingDueTime]).Min();
     }
 
     /// <summary>
-    /// Runs until all nodes have the expected membership size.
+    /// Runs until all non-suspended nodes have the expected membership size.
+    /// Suspended nodes are excluded from the check since they cannot process messages.
     /// </summary>
     public bool RunUntilConverged(int expectedSize, int maxIterations = 100000) =>
-        RunUntil(() => Nodes.All(n => n.MembershipSize == expectedSize), maxIterations);
+        RunUntil(() => ActiveNodes.All(n => n.MembershipSize == expectedSize), maxIterations);
 
     /// <summary>
     /// Runs until the specified nodes have the expected membership size.
@@ -823,14 +828,40 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
     }
 
     /// <summary>
-    /// Waits for all nodes to converge to the same membership size.
+    /// Waits for all active (non-suspended) nodes to converge to a consistent view where
+    /// each node sees exactly the number of active nodes in its membership.
+    /// This is the preferred overload when nodes may be suspended during the test.
+    /// </summary>
+    public void WaitForConvergence(int maxIterations = 100000)
+    {
+        var converged = RunUntil(() =>
+        {
+            var activeCount = ActiveNodes.Count;
+            return activeCount > 0 && ActiveNodes.All(n => n.MembershipSize == activeCount);
+        }, maxIterations);
+
+        if (!converged)
+        {
+            var suspendedNodes = AllNodes.Where(n => n.IsSuspended).ToList();
+            throw new TimeoutException($"Nodes did not converge. " +
+                $"Active node count: {ActiveNodes.Count}, " +
+                $"Active node sizes: [{string.Join(", ", ActiveNodes.Select(n => n.MembershipSize))}], " +
+                $"Suspended nodes: {suspendedNodes.Count}");
+        }
+    }
+
+    /// <summary>
+    /// Waits for all non-suspended nodes to converge to the same membership size.
+    /// Suspended nodes are excluded from the check since they cannot process messages.
     /// </summary>
     public void WaitForConvergence(int expectedSize, int maxIterations = 100000)
     {
         if (!RunUntilConverged(expectedSize, maxIterations))
         {
+            var suspendedNodes = AllNodes.Where(n => n.IsSuspended).ToList();
             throw new TimeoutException($"Nodes did not converge to size {expectedSize}. " +
-                $"Current sizes: [{string.Join(", ", Nodes.Select(n => n.MembershipSize))}]");
+                $"Active node sizes: [{string.Join(", ", ActiveNodes.Select(n => n.MembershipSize))}], " +
+                $"Suspended nodes: {suspendedNodes.Count}");
         }
     }
 
@@ -923,7 +954,7 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
         TaskQueue.Clear();
 
         // Unregister all nodes (hard crash - no cleanup needed, just drop references)
-        foreach (var node in Nodes.ToList())
+        foreach (var node in AllNodes.ToList())
         {
             UnregisterNode(node);
         }

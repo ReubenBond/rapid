@@ -52,7 +52,7 @@ public sealed class ChaosTests : IAsyncLifetime
         // Run chaos - should leave at least 3 nodes alive
         _chaos.RunChaos(steps: 100);
 
-        Assert.True(_harness.Nodes.Count >= 3);
+        Assert.True(_harness.AllNodes.Count >= 3);
     }
 
     [Fact]
@@ -65,12 +65,12 @@ public sealed class ChaosTests : IAsyncLifetime
         // Before scheduled time - node should still exist
         _harness.RunForDuration(TimeSpan.FromSeconds(4));
         _chaos.MaybeInjectFault(); // Process scheduled faults
-        Assert.Contains(node, _harness.Nodes);
+        Assert.Contains(node, _harness.AllNodes);
 
         // After scheduled time - node should be crashed
         _harness.RunForDuration(TimeSpan.FromSeconds(2));
         _chaos.MaybeInjectFault(); // Process scheduled faults
-        Assert.DoesNotContain(node, _harness.Nodes);
+        Assert.DoesNotContain(node, _harness.AllNodes);
     }
 
     [Fact]
@@ -122,7 +122,7 @@ public sealed class ChaosTests : IAsyncLifetime
 
         // Some faults should have been injected
         // Note: With probabilistic injection, we may or may not have faults
-        Assert.True(_harness.Nodes.Count >= 2);
+        Assert.True(_harness.AllNodes.Count >= 2);
     }
 
     [Fact]
@@ -153,7 +153,7 @@ public sealed class ChaosTests : IAsyncLifetime
 
             // Output node membership info
             output?.WriteLine($"Node membership states:");
-            foreach (var node in _harness.Nodes)
+            foreach (var node in _harness.AllNodes)
             {
                 var view = node.CurrentView;
                 output?.WriteLine($"  {RapidUtils.Loggable(node.Address)}: IsInitialized={node.IsInitialized}, MembershipSize={node.MembershipSize}, ConfigId={view?.ConfigurationId}");
@@ -176,7 +176,7 @@ public sealed class ChaosTests : IAsyncLifetime
         _chaos.MaybeInjectFault();
 
         // Node should still exist
-        Assert.Contains(node, _harness.Nodes);
+        Assert.Contains(node, _harness.AllNodes);
     }
 
 
@@ -302,7 +302,7 @@ public sealed class ChaosTests : IAsyncLifetime
         _chaos.RunChaos(steps: 200, stepInterval: TimeSpan.FromMilliseconds(5));
 
         // Cluster should still have nodes
-        Assert.NotEmpty(_harness.Nodes);
+        Assert.NotEmpty(_harness.AllNodes);
     }
 
     /// <summary>
@@ -365,7 +365,7 @@ public sealed class ChaosTests : IAsyncLifetime
         var faultsInjected = _chaos.RunChaos(steps: 300, stepInterval: TimeSpan.FromMilliseconds(10));
 
         // Verify minimum alive nodes maintained
-        Assert.True(_harness.Nodes.Count >= 3);
+        Assert.True(_harness.AllNodes.Count >= 3);
     }
 
     /// <summary>
@@ -391,7 +391,7 @@ public sealed class ChaosTests : IAsyncLifetime
         _chaos.RunChaos(steps: 1000, stepInterval: TimeSpan.FromMilliseconds(1));
 
         // System should survive
-        Assert.True(_harness.Nodes.Count >= 2);
+        Assert.True(_harness.AllNodes.Count >= 2);
     }
 
 }

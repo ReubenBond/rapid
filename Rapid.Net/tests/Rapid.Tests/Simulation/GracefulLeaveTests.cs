@@ -128,8 +128,8 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         _harness.RemoveNodeGracefully(leavingNode);
 
         // Assert: Leaving node is removed from harness
-        Assert.DoesNotContain(leavingNode, _harness.Nodes);
-        Assert.Equal(2, _harness.Nodes.Count);
+        Assert.DoesNotContain(leavingNode, _harness.AllNodes);
+        Assert.Equal(2, _harness.AllNodes.Count);
     }
 
     [Fact]
@@ -203,8 +203,8 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 3);
 
         // Assert: Three nodes remain
-        Assert.Equal(3, _harness.Nodes.Count);
-        Assert.All(_harness.Nodes, n => Assert.Equal(3, n.MembershipSize));
+        Assert.Equal(3, _harness.AllNodes.Count);
+        Assert.All(_harness.AllNodes, n => Assert.Equal(3, n.MembershipSize));
     }
 
     [Fact]
@@ -225,8 +225,8 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 3);
 
         // Assert: Three nodes remain
-        Assert.Equal(3, _harness.Nodes.Count);
-        Assert.All(_harness.Nodes, n => Assert.Equal(3, n.MembershipSize));
+        Assert.Equal(3, _harness.AllNodes.Count);
+        Assert.All(_harness.AllNodes, n => Assert.Equal(3, n.MembershipSize));
     }
 
     [Fact]
@@ -247,10 +247,10 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 3);
 
         // Assert: Correct nodes remain
-        Assert.Contains(nodes[0], _harness.Nodes);
-        Assert.Contains(nodes[2], _harness.Nodes);
-        Assert.Contains(nodes[4], _harness.Nodes);
-        Assert.Equal(3, _harness.Nodes.Count);
+        Assert.Contains(nodes[0], _harness.AllNodes);
+        Assert.Contains(nodes[2], _harness.AllNodes);
+        Assert.Contains(nodes[4], _harness.AllNodes);
+        Assert.Equal(3, _harness.AllNodes.Count);
     }
 
     [Fact]
@@ -268,8 +268,8 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         _harness.RemoveNodeGracefully(nodes[1]);
 
         // Assert: One node remains (it's still "in the cluster" from its own perspective)
-        Assert.Single(_harness.Nodes);
-        Assert.Contains(keepNode, _harness.Nodes);
+        Assert.Single(_harness.AllNodes);
+        Assert.Contains(keepNode, _harness.AllNodes);
     }
 
     [Fact]
@@ -287,10 +287,10 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 3);
 
         // Assert: Three nodes remain (1, 2, 3)
-        Assert.Equal(3, _harness.Nodes.Count);
-        Assert.Contains(nodes[1], _harness.Nodes);
-        Assert.Contains(nodes[2], _harness.Nodes);
-        Assert.Contains(nodes[3], _harness.Nodes);
+        Assert.Equal(3, _harness.AllNodes.Count);
+        Assert.Contains(nodes[1], _harness.AllNodes);
+        Assert.Contains(nodes[2], _harness.AllNodes);
+        Assert.Contains(nodes[3], _harness.AllNodes);
     }
 
 
@@ -426,7 +426,7 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         _harness.Network.MessageDropRate = 0;
 
         // Assert: Cluster converged despite drops
-        Assert.Equal(3, _harness.Nodes.Count);
+        Assert.Equal(3, _harness.AllNodes.Count);
     }
 
     [Fact]
@@ -451,7 +451,7 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         _harness.Network.EnableDelays = false;
 
         // Assert: Cluster converged
-        Assert.Equal(3, _harness.Nodes.Count);
+        Assert.Equal(3, _harness.AllNodes.Count);
     }
 
     [Fact]
@@ -476,7 +476,7 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         _harness.RunUntilIdle(maxSimulatedTime: TimeSpan.FromMinutes(2));
 
         // Assert: Cluster should eventually converge (leaving node removed)
-        Assert.DoesNotContain(leavingNode, _harness.Nodes);
+        Assert.DoesNotContain(leavingNode, _harness.AllNodes);
     }
 
     [Fact]
@@ -497,7 +497,7 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 3);
 
         // Assert: Leave succeeded
-        Assert.Equal(3, _harness.Nodes.Count);
+        Assert.Equal(3, _harness.AllNodes.Count);
     }
 
 
@@ -517,9 +517,9 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 4);
 
         // Assert: New configuration is correct
-        Assert.Equal(4, _harness.Nodes.Count);
-        Assert.Contains(newNode, _harness.Nodes);
-        Assert.DoesNotContain(nodes[3], _harness.Nodes);
+        Assert.Equal(4, _harness.AllNodes.Count);
+        Assert.Contains(newNode, _harness.AllNodes);
+        Assert.DoesNotContain(nodes[3], _harness.AllNodes);
     }
 
     [Fact]
@@ -537,9 +537,9 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 3);
 
         // Assert: Correct membership
-        Assert.Equal(3, _harness.Nodes.Count);
-        Assert.Contains(newNode, _harness.Nodes);
-        Assert.DoesNotContain(nodes[2], _harness.Nodes);
+        Assert.Equal(3, _harness.AllNodes.Count);
+        Assert.Contains(newNode, _harness.AllNodes);
+        Assert.DoesNotContain(nodes[2], _harness.AllNodes);
     }
 
     [Fact]
@@ -563,11 +563,11 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 5);
 
         // Assert: Final state correct
-        Assert.Equal(5, _harness.Nodes.Count);
-        Assert.Contains(newNode1, _harness.Nodes);
-        Assert.Contains(newNode2, _harness.Nodes);
-        Assert.DoesNotContain(nodes[3], _harness.Nodes);
-        Assert.DoesNotContain(nodes[4], _harness.Nodes);
+        Assert.Equal(5, _harness.AllNodes.Count);
+        Assert.Contains(newNode1, _harness.AllNodes);
+        Assert.Contains(newNode2, _harness.AllNodes);
+        Assert.DoesNotContain(nodes[3], _harness.AllNodes);
+        Assert.DoesNotContain(nodes[4], _harness.AllNodes);
     }
 
     [Fact]
@@ -586,7 +586,7 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 3);
 
         // Assert: Cluster converged correctly
-        Assert.Equal(3, _harness.Nodes.Count);
+        Assert.Equal(3, _harness.AllNodes.Count);
     }
 
     [Fact]
@@ -604,7 +604,7 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 3);
 
         // Assert: Cluster converged correctly
-        Assert.Equal(3, _harness.Nodes.Count);
+        Assert.Equal(3, _harness.AllNodes.Count);
     }
 
 
@@ -621,7 +621,7 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 2);
 
         // Assert: Cluster still functional with 2 nodes
-        Assert.Equal(2, _harness.Nodes.Count);
+        Assert.Equal(2, _harness.AllNodes.Count);
     }
 
     [Fact]
@@ -660,7 +660,7 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 3, maxIterations: 300000);
 
         // Assert: Final state correct
-        Assert.Equal(3, _harness.Nodes.Count);
+        Assert.Equal(3, _harness.AllNodes.Count);
     }
 
     [Fact]
@@ -675,7 +675,7 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 3);
 
         // Assert: All remaining nodes have identical membership views
-        var membershipSets = _harness.Nodes
+        var membershipSets = _harness.AllNodes
             .Select(n => new HashSet<Endpoint>(n.CurrentView.Members))
             .ToList();
 
@@ -698,7 +698,7 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 3);
 
         // Assert: All remaining nodes have same configuration ID
-        var configIds = _harness.Nodes.Select(n => n.CurrentView.ConfigurationId).Distinct().ToList();
+        var configIds = _harness.AllNodes.Select(n => n.CurrentView.ConfigurationId).Distinct().ToList();
         Assert.Single(configIds);
     }
 
@@ -721,8 +721,8 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 3);
 
         // Assert: Cluster restructures and remains healthy
-        Assert.Equal(3, _harness.Nodes.Count);
-        Assert.All(_harness.Nodes, n => Assert.Equal(3, n.MembershipSize));
+        Assert.Equal(3, _harness.AllNodes.Count);
+        Assert.All(_harness.AllNodes, n => Assert.Equal(3, n.MembershipSize));
     }
 
     [Fact]
@@ -741,8 +741,8 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         _harness.RunUntilIdle();
 
         // Assert: Remaining nodes are still monitored (cluster stable)
-        Assert.Equal(4, _harness.Nodes.Count);
-        Assert.All(_harness.Nodes, n => Assert.Equal(4, n.MembershipSize));
+        Assert.Equal(4, _harness.AllNodes.Count);
+        Assert.All(_harness.AllNodes, n => Assert.Equal(4, n.MembershipSize));
     }
 
     [Fact]
@@ -763,8 +763,8 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 3);
 
         // Assert: Remaining nodes are healthy
-        Assert.Equal(3, _harness.Nodes.Count);
-        Assert.All(_harness.Nodes, n => Assert.Equal(3, n.MembershipSize));
+        Assert.Equal(3, _harness.AllNodes.Count);
+        Assert.All(_harness.AllNodes, n => Assert.Equal(3, n.MembershipSize));
     }
 
 
@@ -794,7 +794,7 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 4, maxIterations: 200000);
 
         // Assert: Cluster converged to 4 nodes (only the leaving node removed)
-        Assert.Equal(4, _harness.Nodes.Count);
+        Assert.Equal(4, _harness.AllNodes.Count);
     }
 
     [Fact]
@@ -821,8 +821,8 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 4, maxIterations: 200000);
 
         // Assert: Suspended node should have rejoined after being kicked
-        Assert.Contains(suspendedNode, _harness.Nodes);
-        Assert.Equal(4, _harness.Nodes.Count);
+        Assert.Contains(suspendedNode, _harness.AllNodes);
+        Assert.Equal(4, _harness.AllNodes.Count);
     }
 
     [Fact]
@@ -848,8 +848,8 @@ public sealed class GracefulLeaveTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 4, maxIterations: 200000);
 
         // Assert: Suspended node should have rejoined after being kicked
-        Assert.Equal(4, _harness.Nodes.Count);
-        Assert.Contains(suspendedNode, _harness.Nodes);
+        Assert.Equal(4, _harness.AllNodes.Count);
+        Assert.Contains(suspendedNode, _harness.AllNodes);
     }
 
 }

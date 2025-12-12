@@ -202,7 +202,7 @@ public sealed class AsymmetricFailureTests : IAsyncLifetime
         _harness.RunUntilIdle(maxSimulatedTime: TimeSpan.FromMinutes(1));
 
         // All remaining nodes should have consistent view
-        var remainingNodes = _harness.Nodes;
+        var remainingNodes = _harness.AllNodes;
         if (remainingNodes.Count > 1)
         {
             var sizes = remainingNodes.Select(n => n.MembershipSize).Distinct().ToList();
@@ -233,7 +233,7 @@ public sealed class AsymmetricFailureTests : IAsyncLifetime
 
         // The cluster should eventually reach a stable state
         // Due to asymmetric failure, node B might be reported as failed by A
-        Assert.True(_harness.Nodes.Count >= 3, "At least 3 nodes should remain for quorum");
+        Assert.True(_harness.AllNodes.Count >= 3, "At least 3 nodes should remain for quorum");
     }
 
     [Fact]
@@ -260,7 +260,7 @@ public sealed class AsymmetricFailureTests : IAsyncLifetime
         _harness.RunUntilIdle(maxSimulatedTime: TimeSpan.FromSeconds(30));
 
         // Cluster should remain intact
-        Assert.Equal(4, _harness.Nodes.Count);
+        Assert.Equal(4, _harness.AllNodes.Count);
     }
 
 
@@ -293,7 +293,7 @@ public sealed class AsymmetricFailureTests : IAsyncLifetime
         _harness.RunUntilIdle(maxSimulatedTime: TimeSpan.FromMinutes(1));
 
         // Cluster should maintain quorum capability
-        Assert.True(_harness.Nodes.Count >= 3, "Cluster should maintain quorum");
+        Assert.True(_harness.AllNodes.Count >= 3, "Cluster should maintain quorum");
     }
 
     [Fact]
@@ -327,7 +327,7 @@ public sealed class AsymmetricFailureTests : IAsyncLifetime
 
         // The central node might be removed or the cluster adapts
         // Key assertion: cluster remains operational
-        Assert.True(_harness.Nodes.Count >= 3, "Cluster should remain operational");
+        Assert.True(_harness.AllNodes.Count >= 3, "Cluster should remain operational");
     }
 
     [Fact]
@@ -360,7 +360,7 @@ public sealed class AsymmetricFailureTests : IAsyncLifetime
         _harness.RunUntilIdle(maxSimulatedTime: TimeSpan.FromMinutes(2));
 
         // Cluster should adapt - central may be removed as other nodes can't reach it
-        Assert.True(_harness.Nodes.Count >= 3, "Cluster should remain operational");
+        Assert.True(_harness.AllNodes.Count >= 3, "Cluster should remain operational");
     }
 
     [Fact]
@@ -396,7 +396,7 @@ public sealed class AsymmetricFailureTests : IAsyncLifetime
         _harness.RunUntilIdle(maxSimulatedTime: TimeSpan.FromMinutes(1));
 
         // Cluster should recover
-        Assert.True(_harness.Nodes.Count >= 3, "Cluster should recover from oscillating failures");
+        Assert.True(_harness.AllNodes.Count >= 3, "Cluster should recover from oscillating failures");
     }
 
     [Fact]
@@ -439,7 +439,7 @@ public sealed class AsymmetricFailureTests : IAsyncLifetime
         _harness.RunUntilIdle(maxSimulatedTime: TimeSpan.FromMinutes(2));
 
         // Cluster should adapt - some nodes may be removed
-        Assert.True(_harness.Nodes.Count >= 3, "Cluster should maintain quorum");
+        Assert.True(_harness.AllNodes.Count >= 3, "Cluster should maintain quorum");
     }
 
 
@@ -491,7 +491,7 @@ public sealed class AsymmetricFailureTests : IAsyncLifetime
         _harness.RunUntilIdle(maxSimulatedTime: TimeSpan.FromMinutes(1));
 
         // Assert: Remaining nodes should converge
-        var remainingNodes = _harness.Nodes;
+        var remainingNodes = _harness.AllNodes;
         Assert.True(remainingNodes.Count == 3, "Leaving node should be removed");
     }
 
@@ -558,7 +558,7 @@ public sealed class AsymmetricFailureTests : IAsyncLifetime
         _harness.RunUntilIdle(maxSimulatedTime: TimeSpan.FromMinutes(2));
 
         // Cluster should remain operational with 3+ nodes
-        Assert.True(_harness.Nodes.Count >= 3, "Cluster should remain operational");
+        Assert.True(_harness.AllNodes.Count >= 3, "Cluster should remain operational");
     }
 
     [Fact]
@@ -590,7 +590,7 @@ public sealed class AsymmetricFailureTests : IAsyncLifetime
         _harness.RunUntilIdle(maxSimulatedTime: TimeSpan.FromMinutes(2));
 
         // Cluster should remain operational
-        Assert.True(_harness.Nodes.Count >= 3, "Cluster should remain operational");
+        Assert.True(_harness.AllNodes.Count >= 3, "Cluster should remain operational");
     }
 
     [Fact]
@@ -646,7 +646,7 @@ public sealed class AsymmetricFailureTests : IAsyncLifetime
         _harness.RunUntilIdle(maxSimulatedTime: TimeSpan.FromMinutes(1));
 
         // Assert: Cluster should still be operational
-        Assert.True(_harness.Nodes.Count >= 2, "Cluster should survive rapid partition toggling");
+        Assert.True(_harness.AllNodes.Count >= 2, "Cluster should survive rapid partition toggling");
     }
 
     [Fact]
@@ -679,7 +679,7 @@ public sealed class AsymmetricFailureTests : IAsyncLifetime
         _harness.RunUntilIdle(maxSimulatedTime: TimeSpan.FromMinutes(2));
 
         // Cluster should adapt somehow
-        Assert.True(_harness.Nodes.Count >= 2, "Cluster should handle cyclic partitions");
+        Assert.True(_harness.AllNodes.Count >= 2, "Cluster should handle cyclic partitions");
     }
 
 }

@@ -109,7 +109,7 @@ public sealed class EdgeCaseTests : IAsyncLifetime
         // Crash immediately after join - should not throw
         _harness.CrashNode(joiner);
 
-        Assert.DoesNotContain(joiner, _harness.Nodes);
+        Assert.DoesNotContain(joiner, _harness.AllNodes);
     }
 
 

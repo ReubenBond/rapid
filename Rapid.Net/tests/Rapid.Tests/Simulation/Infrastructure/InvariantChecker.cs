@@ -61,7 +61,7 @@ internal sealed class InvariantChecker(SimulationHarness harness)
     /// </summary>
     public bool CheckMembershipConsistency()
     {
-        var nodes = _harness.Nodes;
+        var nodes = _harness.AllNodes;
         if (nodes.Count < 2)
         {
             return true;
@@ -88,7 +88,7 @@ internal sealed class InvariantChecker(SimulationHarness harness)
     /// </summary>
     public bool CheckNoSplitBrain()
     {
-        var nodes = _harness.Nodes;
+        var nodes = _harness.AllNodes;
         if (nodes.Count < 2)
         {
             return true;
@@ -138,7 +138,7 @@ internal sealed class InvariantChecker(SimulationHarness harness)
         // This check requires tracking historical configuration IDs
         // Configuration IDs are computed from membership hashes and can be any long value,
         // including negative values. The only invalid state is if we have no view at all.
-        foreach (var node in _harness.Nodes)
+        foreach (var node in _harness.AllNodes)
         {
             if (!node.IsInitialized) continue;
 

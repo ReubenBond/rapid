@@ -18,6 +18,12 @@ dotnet run -- --help                                               # Show all op
 
 Note: This project uses xUnit v3 with Microsoft.Testing.Platform (MTP). Use `dotnet run --` to run tests, not `dotnet test`. The `--timeout` parameter sets a global test execution timeout (format: `<value>[h|m|s]`).
 
+## CLI Tools
+- **Shell**: Use `pwsh` (modern PowerShell), not `cmd` or legacy `powershell`
+- **Platform**: Windows
+- **ripgrep (rg)**: Use `rg` for searching, not `grep`. Example: `rg "pattern" --type cs`
+- **sed**: Available for batch text replacements. Example: `sed -i 's/old/new/g' file.cs`
+
 ## Code Style (enforced via .editorconfig)
 - **Framework**: .NET 10, nullable enabled, warnings as errors
 - **Namespaces**: File-scoped (`namespace Foo;`)

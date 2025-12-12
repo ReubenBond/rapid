@@ -41,16 +41,16 @@ public sealed class IntegrationTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 3);
 
         // All nodes operational
-        Assert.All(_harness.Nodes, n => Assert.True(n.IsInitialized));
-        Assert.All(_harness.Nodes, n => Assert.Equal(3, n.MembershipSize));
+        Assert.All(_harness.AllNodes, n => Assert.True(n.IsInitialized));
+        Assert.All(_harness.AllNodes, n => Assert.Equal(3, n.MembershipSize));
 
         // Shutdown all nodes
-        foreach (var node in _harness.Nodes.ToList())
+        foreach (var node in _harness.AllNodes.ToList())
         {
             _harness.CrashNode(node);
         }
 
-        Assert.Empty(_harness.Nodes);
+        Assert.Empty(_harness.AllNodes);
     }
 
     [Fact]
@@ -65,13 +65,13 @@ public sealed class IntegrationTests : IAsyncLifetime
         var joiner3 = _harness.CreateJoinerNode(seedNode, nodeId: 3);
 
         _harness.WaitForConvergence(expectedSize: 4);
-        Assert.Equal(4, _harness.Nodes.Count);
+        Assert.Equal(4, _harness.AllNodes.Count);
 
         // Scale down by removing nodes
         _harness.CrashNode(joiner3);
         _harness.CrashNode(joiner2);
 
-        Assert.Equal(2, _harness.Nodes.Count);
+        Assert.Equal(2, _harness.AllNodes.Count);
     }
 
     [Fact]
@@ -83,16 +83,16 @@ public sealed class IntegrationTests : IAsyncLifetime
             _harness.CreateSeedNode(i);
         }
 
-        Assert.Equal(5, _harness.Nodes.Count);
+        Assert.Equal(5, _harness.AllNodes.Count);
 
         // Emergency shutdown all nodes at once
-        var nodesToCrash = _harness.Nodes.ToList();
+        var nodesToCrash = _harness.AllNodes.ToList();
         foreach (var node in nodesToCrash)
         {
             _harness.CrashNode(node);
         }
 
-        Assert.Empty(_harness.Nodes);
+        Assert.Empty(_harness.AllNodes);
     }
 
     [Fact]
@@ -110,7 +110,7 @@ public sealed class IntegrationTests : IAsyncLifetime
         _harness.WaitForConvergence(expectedSize: 3);
 
         Assert.True(joiner2.IsInitialized);
-        Assert.All(_harness.Nodes, n => Assert.Equal(3, n.MembershipSize));
+        Assert.All(_harness.AllNodes, n => Assert.Equal(3, n.MembershipSize));
     }
 
 
@@ -151,7 +151,7 @@ public sealed class IntegrationTests : IAsyncLifetime
         // Remaining nodes should continue operating
         Assert.True(joiner1.IsInitialized);
         Assert.True(joiner2.IsInitialized);
-        Assert.Equal(2, _harness.Nodes.Count);
+        Assert.Equal(2, _harness.AllNodes.Count);
     }
 
     [Fact]
@@ -274,17 +274,17 @@ public sealed class IntegrationTests : IAsyncLifetime
     [Fact]
     public void HarnessNodesListIsUpToDate()
     {
-        Assert.Empty(_harness.Nodes);
+        Assert.Empty(_harness.AllNodes);
 
         var node1 = _harness.CreateSeedNode(0);
-        Assert.Single(_harness.Nodes);
+        Assert.Single(_harness.AllNodes);
 
         var node2 = _harness.CreateSeedNode(1);
-        Assert.Equal(2, _harness.Nodes.Count);
+        Assert.Equal(2, _harness.AllNodes.Count);
 
         _harness.CrashNode(node1);
-        Assert.Single(_harness.Nodes);
-        Assert.Contains(node2, _harness.Nodes);
+        Assert.Single(_harness.AllNodes);
+        Assert.Contains(node2, _harness.AllNodes);
     }
 
     [Fact]

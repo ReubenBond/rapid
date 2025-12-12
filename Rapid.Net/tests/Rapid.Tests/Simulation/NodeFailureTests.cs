@@ -58,7 +58,7 @@ public sealed class NodeFailureTests : IAsyncLifetime
         _harness.CrashNode(joiner);
 
         // Verify crashed node is removed from harness nodes list
-        Assert.DoesNotContain(joiner, _harness.Nodes);
+        Assert.DoesNotContain(joiner, _harness.AllNodes);
     }
 
     [Fact]
@@ -86,7 +86,7 @@ public sealed class NodeFailureTests : IAsyncLifetime
         // Crash immediately - should not throw
         _harness.CrashNode(seedNode);
 
-        Assert.DoesNotContain(seedNode, _harness.Nodes);
+        Assert.DoesNotContain(seedNode, _harness.AllNodes);
     }
 
 
@@ -106,7 +106,7 @@ public sealed class NodeFailureTests : IAsyncLifetime
         // 3 out of 5 nodes remain, which is a majority for consensus
         _harness.WaitForConvergence(expectedSize: 3);
 
-        Assert.All(_harness.Nodes, node => Assert.Equal(3, node.MembershipSize));
+        Assert.All(_harness.AllNodes, node => Assert.Equal(3, node.MembershipSize));
     }
 
     [Fact]
@@ -120,10 +120,10 @@ public sealed class NodeFailureTests : IAsyncLifetime
 
         // Crash nodes sequentially
         _harness.CrashNode(joiner2);
-        Assert.Equal(2, _harness.Nodes.Count);
+        Assert.Equal(2, _harness.AllNodes.Count);
 
         _harness.CrashNode(joiner1);
-        Assert.Single(_harness.Nodes);
+        Assert.Single(_harness.AllNodes);
     }
 
     [Fact]
@@ -140,9 +140,9 @@ public sealed class NodeFailureTests : IAsyncLifetime
         _harness.CrashNode(joiner2);
         _harness.CrashNode(joiner3);
 
-        Assert.Equal(2, _harness.Nodes.Count);
-        Assert.Contains(seedNode, _harness.Nodes);
-        Assert.Contains(joiner1, _harness.Nodes);
+        Assert.Equal(2, _harness.AllNodes.Count);
+        Assert.Contains(seedNode, _harness.AllNodes);
+        Assert.Contains(joiner1, _harness.AllNodes);
     }
 
 
@@ -162,7 +162,7 @@ public sealed class NodeFailureTests : IAsyncLifetime
         // Remaining nodes should still be operational
         Assert.True(joiner1.IsInitialized);
         Assert.True(joiner2.IsInitialized);
-        Assert.Equal(2, _harness.Nodes.Count);
+        Assert.Equal(2, _harness.AllNodes.Count);
     }
 
     [Fact]
@@ -236,7 +236,7 @@ public sealed class NodeFailureTests : IAsyncLifetime
         // Crash the joiner immediately
         _harness.CrashNode(joiner);
 
-        Assert.DoesNotContain(joiner, _harness.Nodes);
+        Assert.DoesNotContain(joiner, _harness.AllNodes);
     }
 
 }

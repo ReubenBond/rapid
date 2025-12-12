@@ -207,7 +207,7 @@ internal sealed class ChaosInjector(SimulationHarness harness)
         switch (fault.Type)
         {
             case FaultType.NodeCrash:
-                if (fault.Node1 != null && _harness.Nodes.Contains(fault.Node1))
+                if (fault.Node1 != null && _harness.AllNodes.Contains(fault.Node1))
                 {
                     _harness.CrashNode(fault.Node1);
                 }
@@ -228,14 +228,14 @@ internal sealed class ChaosInjector(SimulationHarness harness)
                 break;
 
             case FaultType.Isolation:
-                if (fault.Node1 != null && _harness.Nodes.Contains(fault.Node1))
+                if (fault.Node1 != null && _harness.AllNodes.Contains(fault.Node1))
                 {
                     _harness.IsolateNode(fault.Node1);
                 }
                 break;
 
             case FaultType.Reconnect:
-                if (fault.Node1 != null && _harness.Nodes.Contains(fault.Node1))
+                if (fault.Node1 != null && _harness.AllNodes.Contains(fault.Node1))
                 {
                     _harness.ReconnectNode(fault.Node1);
                 }
@@ -245,7 +245,7 @@ internal sealed class ChaosInjector(SimulationHarness harness)
 
     private bool TryCrashRandomNode()
     {
-        var nodes = _harness.Nodes;
+        var nodes = _harness.AllNodes;
         if (nodes.Count <= MinimumAliveNodes)
         {
             return false;
@@ -258,7 +258,7 @@ internal sealed class ChaosInjector(SimulationHarness harness)
 
     private bool TryCreateRandomPartition()
     {
-        var nodes = _harness.Nodes;
+        var nodes = _harness.AllNodes;
         if (nodes.Count < 2)
         {
             return false;

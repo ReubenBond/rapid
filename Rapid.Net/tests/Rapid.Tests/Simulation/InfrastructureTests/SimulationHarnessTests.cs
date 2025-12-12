@@ -110,7 +110,7 @@ public sealed class SimulationHarnessTests : IAsyncLifetime
         _harness.CrashNode(seed);
 
         // Verify node is removed from harness
-        Assert.Empty(_harness.Nodes);
+        Assert.Empty(_harness.AllNodes);
     }
 
 
