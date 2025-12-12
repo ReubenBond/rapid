@@ -45,7 +45,7 @@ internal static class SimulationTaskQueueExtensions
             var count = 0;
             foreach (var item in queue.ScheduledItems)
             {
-                if (item.DueTime > queue.CurrentTime)
+                if (item.DueTime > queue.UtcNow)
                     break; // Queue is sorted by due time, no more ready items
                 if (item is T)
                 {
@@ -65,7 +65,7 @@ internal static class SimulationTaskQueueExtensions
             var count = 0;
             foreach (var item in queue.ScheduledItems)
             {
-                if (item.DueTime > queue.CurrentTime && item is T)
+                if (item.DueTime > queue.UtcNow && item is T)
                 {
                     count++;
                 }
@@ -84,7 +84,7 @@ internal static class SimulationTaskQueueExtensions
 
             foreach (var item in queue.ScheduledItems)
             {
-                if (item.DueTime > queue.CurrentTime && item is T typedItem)
+                if (item.DueTime > queue.UtcNow && item is T typedItem)
                 {
                     results.Add(typedItem);
                 }

@@ -55,7 +55,7 @@ public class SimulationTimeProviderTests
                 if (!nextDueTime.HasValue)
                     return null;
 
-                var currentTime = TaskQueue.CurrentTime;
+                var currentTime = TaskQueue.UtcNow;
                 var duration = nextDueTime.Value - currentTime;
                 return duration > TimeSpan.Zero ? duration : TimeSpan.Zero;
             }
@@ -67,7 +67,7 @@ public class SimulationTimeProviderTests
             if (!nextDueTime.HasValue)
                 return false;
 
-            var delta = nextDueTime.Value - TaskQueue.CurrentTime;
+            var delta = nextDueTime.Value - TaskQueue.UtcNow;
             if (delta > TimeSpan.Zero)
                 Clock.Advance(delta);
 
@@ -76,7 +76,7 @@ public class SimulationTimeProviderTests
 
         public IReadOnlyList<(DateTimeOffset DueTime, TimeSpan Period)> GetPendingTimers()
         {
-            var result = SimulationTimer.GetTimers(TaskQueue, Start);
+            var result = SimulationTimer.GetTimers(TaskQueue);
             return [.. result.OrderBy(t => t.DueTime)];
         }
 

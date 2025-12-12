@@ -20,19 +20,16 @@ internal sealed class SimulationNode
     private readonly SimulationHarness _harness;
     private readonly SimulationNodeContext _context;
     private readonly RapidProtocolOptions _protocolOptions;
-    private readonly ILoggerFactory? _loggerFactory;
+    private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<SimulationNode> _logger;
     private readonly MembershipService _membershipService;
-
-    // These are mutable because they need to be recreated during rejoin
-    private SharedResources _sharedResources;
-    private PingPongFailureDetectorFactory _failureDetectorFactory;
-    private IConsensusCoordinatorFactory _consensusCoordinatorFactory;
-    private CutDetectorFactory _cutDetectorFactory;
-    private MembershipViewAccessor _viewAccessor;
-    private ILogger<MembershipService> _membershipServiceLogger;
+    private readonly SharedResources _sharedResources;
+    private readonly PingPongFailureDetectorFactory _failureDetectorFactory;
+    private readonly IConsensusCoordinatorFactory _consensusCoordinatorFactory;
+    private readonly CutDetectorFactory _cutDetectorFactory;
+    private readonly MembershipViewAccessor _viewAccessor;
+    private readonly ILogger<MembershipService> _membershipServiceLogger;
     private bool _disposed;
-    private bool _initialized;
 
     /// <summary>
     /// Gets the endpoint address of this node.
@@ -62,7 +59,7 @@ internal sealed class SimulationNode
     /// <summary>
     /// Gets whether this node is initialized and part of a cluster.
     /// </summary>
-    public bool IsInitialized => _initialized;
+    public bool IsInitialized { get; private set; }
 
     /// <summary>
     /// Gets the membership size of this node's view.
@@ -145,18 +142,20 @@ internal sealed class SimulationNode
         _context = new SimulationNodeContext(harness.Clock, harness.CreateDerivedRandom());
         Address = address;
 
-        _loggerFactory = loggerFactory ?? harness.LoggerFactory;
-        _logger = _loggerFactory?.CreateLogger<SimulationNode>()
-            ?? NullLogger<SimulationNode>.Instance;
-        _membershipServiceLogger = _loggerFactory?.CreateLogger<MembershipService>()
-            ?? NullLogger<MembershipService>.Instance;
+        // Wrap the logger factory to prepend the node name to all log messages
+        var baseLoggerFactory = loggerFactory ?? harness.LoggerFactory;
+        var nodeName = $"{address.Hostname.ToStringUtf8()}:{address.Port}";
+        _loggerFactory = baseLoggerFactory != null
+            ? new NodePrefixedLoggerFactory(baseLoggerFactory, nodeName)
+            : NullLoggerFactory.Instance;
+        _logger = _loggerFactory.CreateLogger<SimulationNode>();
+        _membershipServiceLogger = _loggerFactory.CreateLogger<MembershipService>();
 
         // Create protocol options
         _protocolOptions = protocolOptions ?? new RapidProtocolOptions();
 
         // Create shared resources with the node's time provider and task scheduler
-        var sharedResourcesLogger = _loggerFactory?.CreateLogger<SharedResources>()
-            ?? NullLogger<SharedResources>.Instance;
+        var sharedResourcesLogger = _loggerFactory.CreateLogger<SharedResources>();
         _sharedResources = new SharedResources(sharedResourcesLogger, _context.TimeProvider, _context.TaskScheduler, _context.Random, _context.Random.NextGuid);
 
         // Create in-memory messaging client using GrpcTimeout from protocol options.
@@ -169,8 +168,7 @@ internal sealed class SimulationNode
         _viewAccessor = new MembershipViewAccessor();
 
         // Create failure detector factory
-        var failureDetectorLogger = _loggerFactory?.CreateLogger<PingPongFailureDetector>()
-            ?? NullLogger<PingPongFailureDetector>.Instance;
+        var failureDetectorLogger = _loggerFactory.CreateLogger<PingPongFailureDetector>();
         _failureDetectorFactory = new PingPongFailureDetectorFactory(
             address,
             MessagingClient,
@@ -179,12 +177,9 @@ internal sealed class SimulationNode
             failureDetectorLogger);
 
         // Create consensus coordinator factory
-        var consensusCoordinatorLogger = _loggerFactory?.CreateLogger<ConsensusCoordinator>()
-            ?? NullLogger<ConsensusCoordinator>.Instance;
-        var fastPaxosLogger = _loggerFactory?.CreateLogger<FastPaxos>()
-            ?? NullLogger<FastPaxos>.Instance;
-        var paxosLogger = _loggerFactory?.CreateLogger<Paxos>()
-            ?? NullLogger<Paxos>.Instance;
+        var consensusCoordinatorLogger = _loggerFactory.CreateLogger<ConsensusCoordinator>();
+        var fastPaxosLogger = _loggerFactory.CreateLogger<FastPaxos>();
+        var paxosLogger = _loggerFactory.CreateLogger<Paxos>();
         _consensusCoordinatorFactory = new ConsensusCoordinatorFactory(
             MessagingClient,
             Options.Create(_protocolOptions),
@@ -194,10 +189,8 @@ internal sealed class SimulationNode
             paxosLogger);
 
         // Create cut detector factory
-        var simpleCutDetectorLogger = _loggerFactory?.CreateLogger<SimpleCutDetector>()
-            ?? NullLogger<SimpleCutDetector>.Instance;
-        var multiNodeCutDetectorLogger = _loggerFactory?.CreateLogger<MultiNodeCutDetector>()
-            ?? NullLogger<MultiNodeCutDetector>.Instance;
+        var simpleCutDetectorLogger = _loggerFactory.CreateLogger<SimpleCutDetector>();
+        var multiNodeCutDetectorLogger = _loggerFactory.CreateLogger<MultiNodeCutDetector>();
         _cutDetectorFactory = new CutDetectorFactory(Options.Create(_protocolOptions), simpleCutDetectorLogger, multiNodeCutDetectorLogger);
 
         // Create the MembershipService (but don't initialize it yet)
@@ -227,7 +220,7 @@ internal sealed class SimulationNode
     internal async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
         await _membershipService.InitializeAsync(cancellationToken).ConfigureAwait(true);
-        _initialized = true;
+        IsInitialized = true;
 
         _logger.LogInformation("Node {Address} initialized with {MembershipSize} members, ConfigId={ConfigId}",
             RapidUtils.Loggable(Address), CurrentView.Size, CurrentView.ConfigurationId);

@@ -10,10 +10,10 @@ internal abstract class ScheduledItem : IDisposable, IComparable<ScheduledItem>
     private bool _disposed;
 
     /// <summary>
-    /// The time offset from start when this item is due.
+    /// The absolute time when this item is due.
     /// Set internally by <see cref="SimulationTaskQueue"/> when the item is scheduled.
     /// </summary>
-    public TimeSpan DueTime { get; private set; }
+    public DateTimeOffset DueTime { get; private set; }
 
     /// <summary>
     /// The sequence number for ordering items with the same due time.
@@ -26,9 +26,9 @@ internal abstract class ScheduledItem : IDisposable, IComparable<ScheduledItem>
     /// Sets the queue reference, due time, and sequence number.
     /// </summary>
     /// <param name="queue">The queue this item belongs to.</param>
-    /// <param name="dueTime">The time when this item is due.</param>
+    /// <param name="dueTime">The absolute time when this item is due.</param>
     /// <param name="sequenceNumber">The sequence number for ordering.</param>
-    internal void OnScheduled(SimulationTaskQueue queue, TimeSpan dueTime, long sequenceNumber)
+    internal void OnScheduled(SimulationTaskQueue queue, DateTimeOffset dueTime, long sequenceNumber)
     {
         if (_queue is not null)
         {
@@ -87,7 +87,7 @@ internal sealed class ScheduledActionItem(Action callback) : ScheduledItem
 /// <see cref="TaskScheduler"/> and <see cref="SimulationTimeProvider"/>.
 /// 
 /// Items are stored in a single queue ordered by due time, then sequence number.
-/// Items with DueTime &lt;= CurrentTime are considered "ready" for execution.
+/// Items with DueTime &lt;= UtcNow are considered "ready" for execution.
 /// This enables deterministic simulation testing by providing unified control
 /// over task execution order and time advancement.
 /// 
@@ -99,7 +99,11 @@ internal sealed class SimulationTaskQueue
     // Single queue ordered by due time, then sequence number
     private readonly SortedSet<ScheduledItem> _queue = new(new ScheduledItemComparer());
     private readonly SimulationClock _clock;
-    private readonly Lock _lock = new();
+
+    // Real lock for all queue operations since some can be called cross-thread
+    // (e.g., Enqueue called from SimulationSynchronizationContext.Post on thread pool threads
+    // due to CancellationToken callbacks or other async work escaping the simulation).
+    private readonly Lock _queueLock = new();
     private long _sequenceNumber;
 
     /// <summary>
@@ -122,9 +126,9 @@ internal sealed class SimulationTaskQueue
     }
 
     /// <summary>
-    /// Gets the current time offset from the start.
+    /// Gets the current simulated date/time.
     /// </summary>
-    public TimeSpan CurrentTime => _clock.CurrentTime;
+    public DateTimeOffset UtcNow => _clock.UtcNow;
 
     /// <summary>
     /// Gets the synchronization context used to execute callbacks.
@@ -133,12 +137,13 @@ internal sealed class SimulationTaskQueue
 
     /// <summary>
     /// Gets whether there are any items in the queue.
+    /// This is called from the simulation thread only.
     /// </summary>
     public bool HasItems
     {
         get
         {
-            lock (_lock)
+            lock (_queueLock)
             {
                 return _queue.Count > 0;
             }
@@ -147,16 +152,17 @@ internal sealed class SimulationTaskQueue
 
     /// <summary>
     /// Gets the due time of the next waiting (not yet ready) task, or null if no waiting tasks exist.
+    /// This is called from the simulation thread only.
     /// </summary>
-    public TimeSpan? NextWaitingDueTime
+    public DateTimeOffset? NextWaitingDueTime
     {
         get
         {
-            lock (_lock)
+            lock (_queueLock)
             {
                 foreach (var item in _queue)
                 {
-                    if (item.DueTime > CurrentTime)
+                    if (item.DueTime > UtcNow)
                         return item.DueTime;
                 }
                 return null;
@@ -166,20 +172,22 @@ internal sealed class SimulationTaskQueue
     /// <summary>
     /// Enqueues a scheduled item to be executed immediately (at current time).
     /// The item's DueTime, SequenceNumber, and queue reference are set by this method.
+    /// This method is thread-safe and can be called from any thread (e.g., from SynchronizationContext.Post).
     /// </summary>
     /// <param name="item">The scheduled item to enqueue.</param>
     public void Enqueue(ScheduledItem item)
     {
         ArgumentNullException.ThrowIfNull(item);
-        lock (_lock)
+        lock (_queueLock)
         {
-            ScheduleCore(item, CurrentTime);
+            ScheduleCore(item, UtcNow);
         }
     }
 
     /// <summary>
     /// Enqueues an action to be executed after a delay from the current time.
     /// Convenience method that creates a <see cref="ScheduledActionItem"/>.
+    /// This is called from the simulation thread only.
     /// </summary>
     /// <param name="action">The action to execute.</param>
     /// <param name="delay">The delay from the current time.</param>
@@ -187,14 +195,15 @@ internal sealed class SimulationTaskQueue
     {
         ArgumentNullException.ThrowIfNull(action);
         ArgumentOutOfRangeException.ThrowIfLessThan(delay, TimeSpan.Zero);
-        lock (_lock)
+        lock (_queueLock)
         {
-            ScheduleCore(new ScheduledActionItem(action), CurrentTime + delay);
+            ScheduleCore(new ScheduledActionItem(action), UtcNow + delay);
         }
     }
 
     /// <summary>
     /// Enqueues an item to be executed after a delay from the current time.
+    /// This is called from the simulation thread only.
     /// </summary>
     /// <param name="item">The item to execute.</param>
     /// <param name="delay">The delay from the current time.</param>
@@ -202,22 +211,22 @@ internal sealed class SimulationTaskQueue
     {
         ArgumentNullException.ThrowIfNull(item);
         ArgumentOutOfRangeException.ThrowIfLessThan(delay, TimeSpan.Zero);
-        lock (_lock)
+        lock (_queueLock)
         {
-            ScheduleCore(item, CurrentTime + delay);
+            ScheduleCore(item, UtcNow + delay);
         }
         return item;
     }
 
     /// <summary>
-    /// Schedules an item to be executed at a specific time.
+    /// Schedules an item to be executed at a specific absolute time.
     /// The item's DueTime, SequenceNumber, and queue reference are set by this method.
     /// Returns the scheduled item which can be disposed to cancel it.
     /// </summary>
     /// <param name="item">The scheduled item to schedule.</param>
-    /// <param name="dueTime">The time offset when the item should be executed.</param>
+    /// <param name="dueTime">The absolute time when the item should be executed.</param>
     /// <returns>The scheduled item that can be disposed to cancel it.</returns>
-    private void ScheduleCore(ScheduledItem item, TimeSpan dueTime)
+    private void ScheduleCore(ScheduledItem item, DateTimeOffset dueTime)
     {
         ArgumentNullException.ThrowIfNull(item);
         item.OnScheduled(this, dueTime, _sequenceNumber++);
@@ -226,11 +235,12 @@ internal sealed class SimulationTaskQueue
 
     /// <summary>
     /// Removes an item from the queue. Called by ScheduledItem.Dispose().
+    /// This method is thread-safe as it can be called from any thread.
     /// </summary>
     /// <param name="item">The item to remove.</param>
     internal void RemoveItem(ScheduledItem item)
     {
-        lock (_lock)
+        lock (_queueLock)
         {
             _queue.Remove(item);
         }
@@ -238,18 +248,19 @@ internal sealed class SimulationTaskQueue
 
     /// <summary>
     /// Tries to dequeue and execute the next ready item.
+    /// This is called from the simulation thread only.
     /// </summary>
     /// <returns>True if an item was dequeued and executed, false if no items are ready.</returns>
     public bool RunOnce()
     {
         ScheduledItem? item;
-        lock (_lock)
+        lock (_queueLock)
         {
             if (_queue.Count == 0)
                 return false;
 
             item = _queue.Min!;
-            if (item.DueTime > CurrentTime)
+            if (item.DueTime > UtcNow)
                 return false; // No ready items
 
             _queue.Remove(item);
@@ -280,10 +291,11 @@ internal sealed class SimulationTaskQueue
 
     /// <summary>
     /// Clears all items from the queue.
+    /// This is called from the simulation thread only.
     /// </summary>
     public void Clear()
     {
-        lock (_lock)
+        lock (_queueLock)
         {
             _queue.Clear();
         }

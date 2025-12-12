@@ -13,8 +13,7 @@ internal sealed class SimulationSynchronizationContext(SimulationTaskQueue taskQ
     public override void Send(SendOrPostCallback d, object? state)
     {
         ArgumentNullException.ThrowIfNull(d);
-        // For Send, we execute synchronously
-        d(state);
+        throw new InvalidOperationException($"Cannot synchonously execute callback {d} with state {state}. Current ctx is {SynchronizationContext.Current}");
     }
 
     public override SynchronizationContext CreateCopy() => new SimulationSynchronizationContext(taskQueue);

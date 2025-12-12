@@ -26,7 +26,7 @@ internal sealed class SimulationNetwork
     private readonly SimulationHarness _harness;
     private readonly SimulationRandom _random;
     private readonly ConcurrentDictionary<string, HashSet<string>> _partitions = new();
-    private readonly Lock _partitionLock = new();
+    private readonly Lock _lock = new();
     private ILogger<SimulationNetwork> _logger;
 
     /// <summary>
@@ -64,12 +64,12 @@ internal sealed class SimulationNetwork
     /// </summary>
     public void CreatePartition(string sourceAddress, string targetAddress)
     {
-        lock (_partitionLock)
+        lock (_lock)
         {
             var blocked = _partitions.GetOrAdd(sourceAddress, _ => []);
             blocked.Add(targetAddress);
-            _logger.LogInformation("Created partition: {Source} -> {Target}", sourceAddress, targetAddress);
         }
+        _logger.LogInformation("Created partition: {Source} -> {Target}", sourceAddress, targetAddress);
     }
 
     /// <summary>
@@ -87,14 +87,14 @@ internal sealed class SimulationNetwork
     /// </summary>
     public void HealPartition(string sourceAddress, string targetAddress)
     {
-        lock (_partitionLock)
+        lock (_lock)
         {
             if (_partitions.TryGetValue(sourceAddress, out var blocked))
             {
                 blocked.Remove(targetAddress);
-                _logger.LogInformation("Healed partition: {Source} -> {Target}", sourceAddress, targetAddress);
             }
         }
+        _logger.LogInformation("Healed partition: {Source} -> {Target}", sourceAddress, targetAddress);
     }
 
     /// <summary>
@@ -112,12 +112,13 @@ internal sealed class SimulationNetwork
     /// </summary>
     public void HealAllPartitions()
     {
-        lock (_partitionLock)
+        int count;
+        lock (_lock)
         {
-            var count = _partitions.Count;
+            count = _partitions.Count;
             _partitions.Clear();
-            _logger.LogInformation("Healed all {Count} partitions", count);
         }
+        _logger.LogInformation("Healed all {Count} partitions", count);
     }
 
     /// <summary>
@@ -166,7 +167,7 @@ internal sealed class SimulationNetwork
         }
 
         // Check for network partition first (persistent)
-        lock (_partitionLock)
+        lock (_lock)
         {
             if (_partitions.TryGetValue(sourceAddress, out var blocked) && blocked.Contains(targetAddress))
             {

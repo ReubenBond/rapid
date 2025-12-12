@@ -28,7 +28,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
     /// Maximum size in bytes for full log attachment (1 MB).
     /// If logs exceed this size, only Information level and above will be attached.
     /// </summary>
-    private const long MaxFullLogSizeBytes = 1024 * 1024;
+    private const long MaxFullLogSizeBytes = 100 * 1024 * 1024;
 
     /// <summary>
     /// Creates a new simulation harness with the specified seed.
@@ -655,7 +655,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
             }
 
             // Check if we've been advancing time without making progress
-            var timeDelta = nextScheduledTime.Value - Clock.CurrentTime;
+            var timeDelta = nextScheduledTime.Value - Clock.UtcNow;
             if (timeDelta > maxEndTime)
             {
                 LogEvent(SimulationEventType.MaxStepsReached,
@@ -714,7 +714,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
     /// <summary>
     /// Gets the earliest due time across all queues (node contexts + harness queue).
     /// </summary>
-    private TimeSpan? GetNextWaitingDueTime()
+    private DateTimeOffset? GetNextWaitingDueTime()
     {
         using var _ = _lock.Enter();
         return Nodes.Select(n => n.Context.NextWaitingDueTime).Concat([TaskQueue.NextWaitingDueTime]).Min();
@@ -779,7 +779,7 @@ internal sealed class SimulationHarness : IAsyncDisposable
                 return i;
             }
 
-            var timeDelta = nextScheduledTime.Value - Clock.CurrentTime;
+            var timeDelta = nextScheduledTime.Value - Clock.UtcNow;
             if (timeDelta > maxEndTime)
             {
                 LogEvent(SimulationEventType.MaxStepsReached,
@@ -898,10 +898,11 @@ internal sealed class SimulationHarness : IAsyncDisposable
 
         using var lockScope = _lock.Enter();
 
-        var iterations = RunUntilIdleCore(maxSimulatedTime: Clock.CurrentTime + delta, maxIterations);
-        if (Clock.CurrentTime < delta)
+        var targetTime = Clock.UtcNow + delta;
+        var iterations = RunUntilIdleCore(maxSimulatedTime: delta, maxIterations);
+        if (Clock.UtcNow < targetTime)
         {
-            Clock.Advance(delta - Clock.CurrentTime);
+            Clock.Advance(targetTime - Clock.UtcNow);
         }
 
         // If first call didn't exhaust max iterations, it reached idle or a time limit
@@ -1107,49 +1108,4 @@ internal readonly record struct SimulationEvent(
     SimulationEventType Type,
     string Description);
 
-/// <summary>
-/// A debug guard that detects accidental concurrent access in single-threaded code.
-/// Unlike a real lock, this throws immediately if concurrent access is detected
-/// rather than blocking. Allows reentrant access by the same thread.
-/// Use this for simulation code that must be single-threaded.
-/// </summary>
-internal sealed class SingleThreadedGuard
-{
-    private int _ownerThreadId;
-    private int _entryCount;
 
-    /// <summary>
-    /// Enters the guarded section. Throws if another thread is already inside.
-    /// Allows reentrant access by the same thread.
-    /// </summary>
-    /// <returns>A disposable scope that exits the guard when disposed.</returns>
-    public Scope Enter()
-    {
-        var currentThreadId = Environment.CurrentManagedThreadId;
-        var existingOwner = Interlocked.CompareExchange(ref _ownerThreadId, currentThreadId, 0);
-
-        if (existingOwner != 0 && existingOwner != currentThreadId)
-        {
-            throw new InvalidOperationException(
-                $"Concurrent access detected in single-threaded simulation code. " +
-                $"Thread {currentThreadId} attempted to enter while thread {existingOwner} is inside. " +
-                $"This indicates a bug - simulation code must not be accessed concurrently.");
-        }
-
-        Interlocked.Increment(ref _entryCount);
-        return new Scope(this);
-    }
-
-    private void Exit()
-    {
-        if (Interlocked.Decrement(ref _entryCount) == 0)
-        {
-            Interlocked.Exchange(ref _ownerThreadId, 0);
-        }
-    }
-
-    public readonly struct Scope(SingleThreadedGuard guard) : IDisposable
-    {
-        public void Dispose() => guard.Exit();
-    }
-}

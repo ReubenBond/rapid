@@ -104,10 +104,9 @@ internal sealed class SimulationTimer(SimulationTaskQueue taskQueue, TimerCallba
     /// Gets information about all pending timers from the task queue.
     /// </summary>
     /// <param name="taskQueue">The task queue to query.</param>
-    /// <param name="start">The start time offset to convert due times to absolute times.</param>
     /// <returns>A list of timer info for all pending timers.</returns>
-    internal static IReadOnlyList<(DateTimeOffset DueTime, TimeSpan Period)> GetTimers(SimulationTaskQueue taskQueue, DateTimeOffset start)
-        => taskQueue.GetItemsOfType<ScheduledTimerItem, (DateTimeOffset, TimeSpan)>(timer => (start + timer.DueTime, timer.Timer.Period));
+    internal static IReadOnlyList<(DateTimeOffset DueTime, TimeSpan Period)> GetTimers(SimulationTaskQueue taskQueue)
+        => taskQueue.GetItemsOfType<ScheduledTimerItem, (DateTimeOffset, TimeSpan)>(timer => (timer.DueTime, timer.Timer.Period));
 
     /// <summary>
     /// Gets the count of pending timers from the task queue.

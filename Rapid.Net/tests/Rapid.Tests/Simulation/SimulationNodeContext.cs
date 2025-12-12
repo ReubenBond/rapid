@@ -102,7 +102,7 @@ internal sealed class SimulationNodeContext
             // The first item in the sorted set has the earliest due time
             // Use FirstOrDefault since IReadOnlySet doesn't have Min
             var firstItem = items.FirstOrDefault();
-            return firstItem != null && firstItem.DueTime <= Clock.CurrentTime;
+            return firstItem != null && firstItem.DueTime <= Clock.UtcNow;
         }
     }
 
@@ -110,7 +110,7 @@ internal sealed class SimulationNodeContext
     /// Gets the due time of the next waiting (not yet ready) task on this node's queue,
     /// or null if no tasks are waiting.
     /// </summary>
-    public TimeSpan? NextWaitingDueTime => TaskQueue.NextWaitingDueTime;
+    public DateTimeOffset? NextWaitingDueTime => TaskQueue.NextWaitingDueTime;
 
     /// <summary>
     /// Executes one ready task from this node's queue.
