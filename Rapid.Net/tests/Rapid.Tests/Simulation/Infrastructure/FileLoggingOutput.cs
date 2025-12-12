@@ -192,7 +192,7 @@ internal sealed class FileLoggingOutput : IDisposable
 /// </summary>
 internal sealed class FileLoggerProvider(string filePath, TimeProvider? timeProvider = null) : ILoggerProvider
 {
-    private readonly FileLoggingOutput _output = new FileLoggingOutput(filePath, timeProvider);
+    private readonly FileLoggingOutput _output = new(filePath, timeProvider);
     private bool _disposed;
 
     public ILogger CreateLogger(string categoryName) => new FileLogger(categoryName, _output);

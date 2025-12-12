@@ -11,7 +11,7 @@ public delegate void DeliveryFailureCallback(Endpoint remote);
 /// <summary>
 /// Interface for sending messages to remote nodes in the cluster.
 /// </summary>
-public interface IMessagingClient : IDisposable, IAsyncDisposable
+public interface IMessagingClient : IAsyncDisposable
 {
     /// <summary>
     /// Sends a message to a remote node without waiting for a response.
@@ -54,9 +54,4 @@ public interface IMessagingClient : IDisposable, IAsyncDisposable
     /// <returns>The response from the remote node, or an error response.</returns>
     Task<RapidResponse> SendMessageBestEffortAsync(Endpoint remote, RapidRequest request,
         CancellationToken cancellationToken);
-
-    /// <summary>
-    /// Shuts down the messaging client and releases resources.
-    /// </summary>
-    void Shutdown();
 }

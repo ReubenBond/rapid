@@ -162,15 +162,6 @@ internal sealed partial class GrpcClient(IOptions<RapidProtocolOptions> options,
         });
     }
 
-    public void Shutdown() => Dispose();
-
-    public void Dispose()
-    {
-        if (_disposed) return;
-        _disposed = true;
-        _clients.Clear();
-    }
-
     public async ValueTask DisposeAsync()
     {
         if (_disposed) return;

@@ -24,6 +24,7 @@ internal sealed class InMemoryMessagingClient : IMessagingClient
     private readonly TimeSpan _messageTimeout;
     private readonly InMemoryMessagingClientLogger _log;
     private readonly ConcurrentDictionary<int, Task> _pendingTasks = new();
+    private readonly CancellationTokenSource _disposeCts = new();
     private int _taskIdCounter;
     private bool _disposed;
 
@@ -40,8 +41,7 @@ internal sealed class InMemoryMessagingClient : IMessagingClient
         _sourceNode = sourceNode;
         _localEndpoint = localEndpoint;
         _messageTimeout = options.GrpcTimeout;
-        _log = new InMemoryMessagingClientLogger(harness.LoggerFactory?.CreateLogger<InMemoryMessagingClient>()
-            ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<InMemoryMessagingClient>.Instance);
+        _log = new InMemoryMessagingClientLogger(harness.LoggerFactory.CreateLogger<InMemoryMessagingClient>());
     }
 
     public Task<RapidResponse> SendMessageAsync(Endpoint remote, RapidRequest request, CancellationToken cancellationToken)
@@ -88,10 +88,34 @@ internal sealed class InMemoryMessagingClient : IMessagingClient
         // if the caller abandons the task or the simulation tears down.
         responseTcs.Task.Ignore();
 
+        // Create a linked CTS that cancels when either the caller's token or the disposal token is cancelled
+        // CA2000: The linked CTS is disposed in the continuation below when the task completes
+#pragma warning disable CA2000
+        var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _disposeCts.Token);
+#pragma warning restore CA2000
+
+        // Register for cancellation on the linked token
+        var ctr = linkedCts.Token.Register(
+            static state => ((TaskCompletionSource<RapidResponse>)state!).TrySetCanceled(),
+            responseTcs);
+
+        // Clean up registration and linked CTS when the task completes
+        responseTcs.Task.ContinueWith(
+            static (_, state) =>
+            {
+                var (reg, cts) = ((CancellationTokenRegistration, CancellationTokenSource))state!;
+                reg.Dispose();
+                cts.Dispose();
+            },
+            state: (ctr, linkedCts),
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+
         _log.SchedulingDelivery(request.ContentCase, localAddr, remoteAddr);
 
         // Schedule message delivery on the target node's task queue
-        ScheduleMessageDelivery(targetNode, request, responseTcs, cancellationToken, localAddr, remoteAddr);
+        ScheduleMessageDelivery(targetNode, request, responseTcs, linkedCts.Token, localAddr, remoteAddr);
 
         return responseTcs.Task;
     }
@@ -254,19 +278,13 @@ internal sealed class InMemoryMessagingClient : IMessagingClient
 #pragma warning disable CA1031
         try
         {
-            await SendMessageAsync(remote, request, cancellationToken).ConfigureAwait(true);
-        }
-        catch (InvalidOperationException ex) when (ex.Message.Contains("partition", StringComparison.OrdinalIgnoreCase))
-        {
-            onDeliveryFailure?.Invoke(remote);
-        }
-        catch (TimeoutException)
-        {
-            onDeliveryFailure?.Invoke(remote);
+            // Create a linked token that cancels when either the caller's token or the disposal token is cancelled
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _disposeCts.Token);
+            await SendMessageAsync(remote, request, linkedCts.Token).ConfigureAwait(true);
         }
         catch (OperationCanceledException)
         {
-            // User cancellation - don't invoke callback
+            // User cancellation or disposal - don't invoke callback
         }
         catch
         {
@@ -279,32 +297,34 @@ internal sealed class InMemoryMessagingClient : IMessagingClient
 #pragma warning restore CA1031
     }
 
-    public void Shutdown() => Dispose();
-
-    public void Dispose()
-    {
-        if (_disposed) return;
-        _disposed = true;
-    }
-
     public async ValueTask DisposeAsync()
     {
         if (_disposed) return;
         _disposed = true;
 
-        // Wait for pending tasks
+        // Cancel any pending operations
+#pragma warning disable CA1849 // CancelAsync posts to SynchronizationContext which breaks simulation determinism
+        _disposeCts.Cancel();
+#pragma warning restore CA1849
+
+        // Wait for pending tasks to complete (they should cancel quickly due to the CTS)
         var pending = _pendingTasks.Values.ToArray();
         if (pending.Length > 0)
         {
+            // Use Task.WhenAll without timeout - tasks should complete quickly due to cancellation
+#pragma warning disable CA1031 // Catch general exception - we're just waiting for completion during disposal
             try
             {
-                await Task.WhenAll(pending).WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(true);
+                await Task.WhenAll(pending).ConfigureAwait(true);
             }
-            catch (TimeoutException)
+            catch
             {
-                // Ignore timeout
+                // Ignore all exceptions during disposal - tasks may have been cancelled or failed
             }
+#pragma warning restore CA1031
         }
+
+        _disposeCts.Dispose();
     }
 
     private sealed class SimulatedNetworkException : Exception
