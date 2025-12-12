@@ -169,13 +169,17 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
 
     /// <summary>
     /// Unregisters a node from the simulation.
+    /// The node is removed from the routing table so it won't receive new messages.
+    /// Note: This does NOT clear the node's task queue - the node may still have
+    /// pending work that needs to complete (e.g., during disposal).
     /// </summary>
     internal void UnregisterNode(SimulationNode node)
     {
         var key = RapidUtils.Loggable(node.Address);
         using var _ = Guard.Enter();
         _nodes.Remove(key);
-        node.Context.Clear();
+        // Note: We intentionally do NOT clear the queue here.
+        // The node may still need to process disposal tasks.
     }
 
     /// <summary>
@@ -422,16 +426,12 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
                 targetSize, sizes);
         }
 
+        // Dispose the node's resources while it's still registered.
+        // This ensures Run() can drive the node's task queue during disposal.
+        Run(() => node.DisposeAsync().AsTask());
+
         // Unregister the node from the network (no more messages will be delivered)
         UnregisterNode(node);
-
-        // Note: We intentionally do NOT dispose the node here.
-        // After UnregisterNode:
-        // 1. The node can no longer receive messages (network won't route to it)
-        // 2. The node's task queue has been cleared
-        // 3. Disposing would require driving async work (e.g., ConsensusCoordinator awaits its loop task)
-        //    which could hang if timers are involved
-        // The harness's DisposeAsync will clean up all remaining resources at test end.
 
         _log.NodeLeft();
     }
@@ -489,20 +489,20 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
                 targetSize, sizes);
         }
 
+        // Dispose all leaving nodes' resources while they're still registered.
+        // This ensures Run() can drive each node's task queue during disposal.
+        Run(() =>
+        {
+            var disposeTasks = nodesToRemove.Select(node => node.DisposeAsync().AsTask());
+            return Task.WhenAll(disposeTasks);
+        });
+
         // Unregister leaving nodes from the network (no more messages will be delivered)
         foreach (var node in nodesToRemove)
         {
             UnregisterNode(node);
             _log.NodeLeftParallel(RapidUtils.Loggable(node.Address));
         }
-
-        // Note: We intentionally do NOT dispose the nodes here.
-        // After UnregisterNode:
-        // 1. The nodes can no longer receive messages (network won't route to them)
-        // 2. The nodes' task queues have been cleared
-        // 3. Disposing would require driving async work (e.g., ConsensusCoordinator awaits its loop task)
-        //    which could hang if timers are involved
-        // The harness's DisposeAsync will clean up all remaining resources at test end.
 
         // Calculate configuration changes
         var endingConfigVersion = remainingNodes[0].CurrentView.ConfigurationId.Version;

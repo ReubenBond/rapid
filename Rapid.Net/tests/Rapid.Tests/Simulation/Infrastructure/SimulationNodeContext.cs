@@ -155,13 +155,4 @@ internal sealed class SimulationNodeContext
     {
         State = SimulationNodeState.Running;
     }
-
-    /// <summary>
-    /// Clears all pending tasks from this node's queue.
-    /// Typically called when a node is crashed or removed from the simulation.
-    /// </summary>
-    internal void Clear()
-    {
-        TaskQueue.Clear();
-    }
 }
