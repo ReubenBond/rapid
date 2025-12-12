@@ -1667,7 +1667,9 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
         }
 
         // Cancel background tasks
-        await _stoppingCts.CancelAsync().ConfigureAwait(true);
+#pragma warning disable CA1849 // Call async methods when in an async method
+        _stoppingCts.Cancel();
+#pragma warning restore CA1849 // Call async methods when in an async method
 
         // Wait for background tasks to complete
         Task[] backgroundTasks;
@@ -1709,7 +1711,9 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
         _log.Dispose();
 
         // Cancel background tasks (in case StopAsync wasn't called)
-        await _stoppingCts.CancelAsync().ConfigureAwait(true);
+#pragma warning disable CA1849 // Call async methods when in an async method
+        _stoppingCts.Cancel();
+#pragma warning restore CA1849 // Call async methods when in an async method
         _stoppingCts.Dispose();
 
         // Dispose the event channel to signal completion to all subscribers

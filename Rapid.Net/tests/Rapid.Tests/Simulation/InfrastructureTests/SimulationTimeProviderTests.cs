@@ -676,7 +676,9 @@ public class SimulationTimeProviderTests
         var delay = Task.Delay(InfiniteTimeout, p.TimeProvider, cts.Token);
         Assert.False(delay.IsCompleted);
 
-        await cts.CancelAsync();
+#pragma warning disable CA1849 // Call async methods when in an async method
+        cts.Cancel();
+#pragma warning restore CA1849 // Call async methods when in an async method
 
         await Assert.ThrowsAsync<TaskCanceledException>(async () => await delay);
     }

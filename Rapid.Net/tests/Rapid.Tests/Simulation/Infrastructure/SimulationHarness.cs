@@ -403,7 +403,8 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
         var remainingNodes = Nodes.Where(n => n != node).ToList();
         var targetSize = remainingNodes.Count;
 
-        // Drive the stop operation to completion (sends LeaveMessages to observers, disposes node)
+        // Drive the stop operation to completion (sends LeaveMessages to observers)
+        // Node can still receive messages after this
         Run(node.StopAsync);
 
         // The leaving node must remain active to participate in consensus.
@@ -421,8 +422,11 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
                 targetSize, sizes);
         }
 
-        // Unregister the node (already disposed by StopAsync)
+        // Unregister the node from the network (no more messages will be delivered)
         UnregisterNode(node);
+
+        // Dispose the node's resources
+        Run(() => node.DisposeAsync().AsTask());
 
         _log.NodeLeft();
     }
@@ -460,7 +464,7 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
         // Drive the simulation until all leave operations complete.
         // IMPORTANT: Leave tasks must be started inside DriveToCompletion so they
         // capture the simulation's SynchronizationContext for their continuations.
-        // StopAsync also disposes the nodes.
+        // StopAsync sends leave messages but keeps nodes alive to participate in consensus.
         Run(() =>
         {
             var leaveTasks = nodesToRemove.Select(node => node.StopAsync());
@@ -480,12 +484,19 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
                 targetSize, sizes);
         }
 
-        // Unregister leaving nodes (already disposed by StopAsync)
+        // Unregister leaving nodes from the network (no more messages will be delivered)
         foreach (var node in nodesToRemove)
         {
             UnregisterNode(node);
             _log.NodeLeftParallel(RapidUtils.Loggable(node.Address));
         }
+
+        // Dispose all leaving nodes' resources
+        Run(() =>
+        {
+            var disposeTasks = nodesToRemove.Select(node => node.DisposeAsync().AsTask());
+            return Task.WhenAll(disposeTasks);
+        });
 
         // Calculate configuration changes
         var endingConfigVersion = remainingNodes[0].CurrentView.ConfigurationId.Version;

@@ -72,7 +72,6 @@ internal sealed class SimulationNode
     /// </summary>
     internal InMemoryMessagingClient MessagingClient { get; }
 
-
     /// <summary>
     /// Gets whether this node is currently suspended.
     /// </summary>
@@ -248,24 +247,33 @@ internal sealed class SimulationNode
         _membershipService?.Events ?? throw new InvalidOperationException("Membership service has not been initialized.");
 
     /// <summary>
-    /// Gracefully stops the node by notifying observers and disposing resources.
-    /// Sends leave messages to observers, waits for background tasks, then disposes resources.
+    /// Gracefully stops the node by notifying observers and waiting for background tasks.
+    /// The node can still receive messages after this method returns.
+    /// Call <see cref="DisposeAsync"/> after unregistering from the network to release resources.
     /// </summary>
     public async Task StopAsync()
     {
         if (_disposed) return;
-        _disposed = true;
 
         _log.NodeLeaving(RapidUtils.Loggable(Address));
 
         // Graceful stop: notify observers and wait for background tasks
+        // Keep MessagingClient alive so we can still participate in consensus
         await _membershipService.StopAsync().ConfigureAwait(true);
 
-        // Dispose resources
+        _log.NodeLeftGracefully(RapidUtils.Loggable(Address));
+    }
+
+    /// <summary>
+    /// Disposes the node's resources. Should be called after unregistering from the network.
+    /// </summary>
+    public async ValueTask DisposeAsync()
+    {
+        if (_disposed) return;
+        _disposed = true;
+
         await _membershipService.DisposeAsync().ConfigureAwait(true);
         await MessagingClient.DisposeAsync().ConfigureAwait(true);
-
-        _log.NodeLeftGracefully(RapidUtils.Loggable(Address));
     }
 
     /// <summary>
