@@ -709,12 +709,12 @@ public class PaxosTests
 
         var result = Paxos.ChooseValue(messages, n: 20);
 
-        // No value exceeds N/4, should fall back to first non-empty
+        // No value exceeds N/4, should fall back to smallest proposal (deterministic)
         Assert.NotNull(result);
         Assert.Single(result.Members);
-        // Falls back to first message's value
-        Assert.Equal(node2.Hostname, result.Members[0].Endpoint.Hostname);
-        Assert.Equal(node2.Port, result.Members[0].Endpoint.Port);
+        // Falls back to smallest proposal by lexicographic order: node1 < node2
+        Assert.Equal(node1.Hostname, result.Members[0].Endpoint.Hostname);
+        Assert.Equal(node1.Port, result.Members[0].Endpoint.Port);
     }
 
     [Fact]
@@ -801,6 +801,75 @@ public class PaxosTests
         Assert.Single(result.Members);
         Assert.Equal(node1.Hostname, result.Members[0].Endpoint.Hostname);
         Assert.Equal(node1.Port, result.Members[0].Endpoint.Port);
+    }
+
+    [Fact]
+    public void ChooseValue_IsDeterministic_WithMultipleDifferentProposals()
+    {
+        var node1 = Utils.HostFromParts("10.0.0.1", 5001);
+        var node2 = Utils.HostFromParts("10.0.0.2", 5002);
+        var node3 = Utils.HostFromParts("10.0.0.3", 5003);
+
+        // Run multiple times with the same inputs to verify determinism
+        var results = new List<MembershipProposal?>();
+        for (var iteration = 0; iteration < 10; iteration++)
+        {
+            // Create messages in different orders to stress-test determinism
+            var messages = new List<Phase1bMessage>
+            {
+                CreatePhase1bMessage(1, 1, node3), // node3 first
+                CreatePhase1bMessage(1, 1, node1), // node1 second
+                CreatePhase1bMessage(1, 1, node2)  // node2 third
+            };
+
+            // Shuffle messages on each iteration using a seeded approach for deterministic test behavior
+#pragma warning disable CA5394 // Random is fine for deterministic test shuffling (not security)
+            var random = new Random(iteration * 12345);
+            messages = [.. messages.OrderBy(_ => random.Next())];
+#pragma warning restore CA5394
+
+            var result = Paxos.ChooseValue(messages, n: 20);
+            results.Add(result);
+        }
+
+        // All results should be identical (deterministic)
+        var firstResult = results[0];
+        Assert.NotNull(firstResult);
+        Assert.All(results, r =>
+        {
+            Assert.NotNull(r);
+            Assert.True(MembershipProposalComparer.Instance.Equals(firstResult, r));
+        });
+
+        // The result should be the "smallest" proposal by lexicographic order
+        // node1 (10.0.0.1) < node2 (10.0.0.2) < node3 (10.0.0.3)
+        Assert.Equal(node1.Hostname, firstResult.Members[0].Endpoint.Hostname);
+        Assert.Equal(node1.Port, firstResult.Members[0].Endpoint.Port);
+    }
+
+    [Fact]
+    public void ChooseValue_SelectsSmallestProposal_WhenNoMajority()
+    {
+        // Create proposals with predictable ordering
+        var nodeA = Utils.HostFromParts("10.0.0.1", 5001); // Smallest
+        var nodeB = Utils.HostFromParts("10.0.0.2", 5002);
+        var nodeC = Utils.HostFromParts("10.0.0.3", 5003); // Largest
+
+        // N=20, so N/4 = 5. Each value has only 1 vote, no majority
+        var messages = new List<Phase1bMessage>
+        {
+            CreatePhase1bMessage(1, 1, nodeC), // Largest first (would be picked by non-deterministic FirstOrDefault)
+            CreatePhase1bMessage(1, 1, nodeB),
+            CreatePhase1bMessage(1, 1, nodeA)  // Smallest last
+        };
+
+        var result = Paxos.ChooseValue(messages, n: 20);
+
+        // Should select nodeA (smallest by lexicographic order), not nodeC (first in list)
+        Assert.NotNull(result);
+        Assert.Single(result.Members);
+        Assert.Equal(nodeA.Hostname, result.Members[0].Endpoint.Hostname);
+        Assert.Equal(nodeA.Port, result.Members[0].Endpoint.Port);
     }
 
 }

@@ -493,4 +493,45 @@ public class SimpleCutDetectorTests
     }
 
     #endregion
+
+    #region Unstable Mode Detection
+
+    [Fact]
+    public void HasNodesInUnstableMode_ReturnsTrue_WhenPendingProposals()
+    {
+        var view = CreateTestView(5, 2); // Small cluster uses SimpleCutDetector
+        var detector = new SimpleCutDetector(view);
+        var dst = Utils.HostFromParts("127.0.0.2", 2);
+
+        // Add 1 report (pending, needs 2)
+        detector.AggregateForProposal(CreateAlertMessage(
+            Utils.HostFromParts("127.0.0.1", 1), dst, EdgeStatus.Up, ConfigurationId, 0));
+
+        Assert.True(detector.HasNodesInUnstableMode());
+    }
+
+    [Fact]
+    public void ForcePromoteUnstableNodes_PromotesPendingNodes()
+    {
+        var view = CreateTestView(5, 2); // Small cluster uses SimpleCutDetector
+        var detector = new SimpleCutDetector(view);
+        var dst = Utils.HostFromParts("127.0.0.2", 2);
+
+        // Add 1 report (pending, needs 2)
+        detector.AggregateForProposal(CreateAlertMessage(
+            Utils.HostFromParts("127.0.0.1", 1), dst, EdgeStatus.Up, ConfigurationId, 0));
+
+        Assert.True(detector.HasNodesInUnstableMode());
+        Assert.Equal(0, detector.GetNumProposals());
+
+        // Force promote
+        var result = detector.ForcePromoteUnstableNodes();
+
+        Assert.Single(result);
+        Assert.Equal(dst, result[0]);
+        Assert.False(detector.HasNodesInUnstableMode());
+        Assert.Equal(1, detector.GetNumProposals());
+    }
+
+    #endregion
 }

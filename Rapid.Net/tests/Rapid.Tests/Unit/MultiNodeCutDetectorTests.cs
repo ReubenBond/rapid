@@ -1859,4 +1859,133 @@ public class MultiNodeCutDetectorTests
 
     #endregion
 
+    #region Unstable Mode Detection
+
+    [Fact]
+    public void HasNodesInUnstableMode_ReturnsFalse_Initially()
+    {
+        var view = CreateTestView();
+        var detector = new MultiNodeCutDetector(H, L, view);
+
+        Assert.False(detector.HasNodesInUnstableMode());
+    }
+
+    [Fact]
+    public void HasNodesInUnstableMode_ReturnsTrue_WhenNodesBetweenLAndH()
+    {
+        var view = CreateTestView();
+        var detector = new MultiNodeCutDetector(H, L, view);
+        var dst = Utils.HostFromParts("127.0.0.2", 2);
+
+        // Add L reports (node enters unstable mode)
+        for (var i = 0; i < L; i++)
+        {
+            detector.AggregateForProposal(CreateAlertMessage(
+                Utils.HostFromParts("127.0.0.1", i + 1), dst, EdgeStatus.Up, ConfigurationId, i));
+        }
+
+        Assert.True(detector.HasNodesInUnstableMode());
+    }
+
+    [Fact]
+    public void HasNodesInUnstableMode_ReturnsFalse_AfterReachingH()
+    {
+        var view = CreateTestView();
+        var detector = new MultiNodeCutDetector(H, L, view);
+        var dst = Utils.HostFromParts("127.0.0.2", 2);
+
+        // Add H reports (node leaves unstable mode)
+        for (var i = 0; i < H; i++)
+        {
+            detector.AggregateForProposal(CreateAlertMessage(
+                Utils.HostFromParts("127.0.0.1", i + 1), dst, EdgeStatus.Up, ConfigurationId, i));
+        }
+
+        Assert.False(detector.HasNodesInUnstableMode());
+    }
+
+    [Fact]
+    public void ForcePromoteUnstableNodes_ReturnsEmpty_WhenNoUnstableNodes()
+    {
+        var view = CreateTestView();
+        var detector = new MultiNodeCutDetector(H, L, view);
+
+        var result = detector.ForcePromoteUnstableNodes();
+
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public void ForcePromoteUnstableNodes_PromotesUnstableNodes()
+    {
+        var view = CreateTestView();
+        var detector = new MultiNodeCutDetector(H, L, view);
+        var dst1 = Utils.HostFromParts("127.0.0.2", 2);
+        var dst2 = Utils.HostFromParts("127.0.0.3", 3);
+
+        // Bring dst1 to H-1 reports (almost stable but still unstable)
+        for (var i = 0; i < H - 1; i++)
+        {
+            detector.AggregateForProposal(CreateAlertMessage(
+                Utils.HostFromParts("127.0.0.1", i + 1), dst1, EdgeStatus.Up, ConfigurationId, i));
+        }
+
+        // Bring dst2 to L reports (unstable)
+        for (var i = 0; i < L; i++)
+        {
+            detector.AggregateForProposal(CreateAlertMessage(
+                Utils.HostFromParts("127.0.0.1", i + 100), dst2, EdgeStatus.Up, ConfigurationId, i));
+        }
+
+        Assert.True(detector.HasNodesInUnstableMode());
+        Assert.Equal(0, detector.GetNumProposals());
+
+        // Force promote
+        var result = detector.ForcePromoteUnstableNodes();
+
+        // Both nodes should be proposed
+        Assert.Equal(2, result.Count);
+        Assert.Contains(dst1, result);
+        Assert.Contains(dst2, result);
+        Assert.False(detector.HasNodesInUnstableMode());
+        Assert.Equal(1, detector.GetNumProposals());
+    }
+
+    [Fact]
+    public void ForcePromoteUnstableNodes_IncludesStableNodesWaiting()
+    {
+        var view = CreateTestView();
+        var detector = new MultiNodeCutDetector(H, L, view);
+        var dst1 = Utils.HostFromParts("127.0.0.2", 2);
+        var dst2 = Utils.HostFromParts("127.0.0.3", 3);
+
+        // Bring dst1 to H reports (stable, but blocked by dst2)
+        for (var i = 0; i < H - 1; i++)
+        {
+            detector.AggregateForProposal(CreateAlertMessage(
+                Utils.HostFromParts("127.0.0.1", i + 1), dst1, EdgeStatus.Up, ConfigurationId, i));
+        }
+
+        // Bring dst2 to L reports (unstable - blocking dst1)
+        for (var i = 0; i < L; i++)
+        {
+            detector.AggregateForProposal(CreateAlertMessage(
+                Utils.HostFromParts("127.0.0.1", i + 100), dst2, EdgeStatus.Up, ConfigurationId, i));
+        }
+
+        // Now bring dst1 to H (should NOT trigger proposal due to dst2 blocking)
+        var intermediateResult = detector.AggregateForProposal(CreateAlertMessage(
+            Utils.HostFromParts("127.0.0.1", H), dst1, EdgeStatus.Up, ConfigurationId, H - 1));
+        Assert.Empty(intermediateResult); // Blocked
+
+        // Force promote - both should be included
+        var result = detector.ForcePromoteUnstableNodes();
+
+        Assert.Equal(2, result.Count);
+        Assert.Contains(dst1, result);
+        Assert.Contains(dst2, result);
+    }
+
+    #endregion
+
 }

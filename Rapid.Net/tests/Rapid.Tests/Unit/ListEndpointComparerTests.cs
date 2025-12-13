@@ -324,4 +324,95 @@ public class ListEndpointComparerTests
     }
 
     #endregion
+
+    #region MembershipProposalComparer Tests
+
+    [Fact]
+    public void MembershipProposalComparer_Compare_OrdersByConfigurationId()
+    {
+        var node = Utils.HostFromParts("10.0.0.1", 5001);
+        var proposalLowConfig = CreateProposal(node, configId: 1);
+        var proposalHighConfig = CreateProposal(node, configId: 2);
+
+        var result = MembershipProposalComparer.Instance.Compare(proposalLowConfig, proposalHighConfig);
+
+        Assert.True(result < 0); // Lower config ID comes first
+    }
+
+    [Fact]
+    public void MembershipProposalComparer_Compare_OrdersByMemberCount()
+    {
+        var node1 = Utils.HostFromParts("10.0.0.1", 5001);
+        var node2 = Utils.HostFromParts("10.0.0.2", 5002);
+
+        var proposalSingle = CreateProposal(node1, configId: 100);
+        var proposalDouble = CreateProposal([node1, node2], configId: 100);
+
+        var result = MembershipProposalComparer.Instance.Compare(proposalSingle, proposalDouble);
+
+        Assert.True(result < 0); // Fewer members comes first
+    }
+
+    [Fact]
+    public void MembershipProposalComparer_Compare_OrdersByEndpoint()
+    {
+        var nodeA = Utils.HostFromParts("10.0.0.1", 5001);
+        var nodeB = Utils.HostFromParts("10.0.0.2", 5002);
+
+        var proposalA = CreateProposal(nodeA, configId: 100);
+        var proposalB = CreateProposal(nodeB, configId: 100);
+
+        var result = MembershipProposalComparer.Instance.Compare(proposalA, proposalB);
+
+        Assert.True(result < 0); // nodeA < nodeB
+    }
+
+    [Fact]
+    public void MembershipProposalComparer_Compare_ReturnsZero_ForEqualProposals()
+    {
+        var node = Utils.HostFromParts("10.0.0.1", 5001);
+        var proposal1 = CreateProposal(node, configId: 100);
+        var proposal2 = CreateProposal(node, configId: 100);
+
+        var result = MembershipProposalComparer.Instance.Compare(proposal1, proposal2);
+
+        Assert.Equal(0, result);
+    }
+
+    [Fact]
+    public void MembershipProposalComparer_Compare_HandlesNull()
+    {
+        var node = Utils.HostFromParts("10.0.0.1", 5001);
+        var proposal = CreateProposal(node, configId: 100);
+
+        Assert.True(MembershipProposalComparer.Instance.Compare(null, proposal) < 0);
+        Assert.True(MembershipProposalComparer.Instance.Compare(proposal, null) > 0);
+        Assert.Equal(0, MembershipProposalComparer.Instance.Compare(null, null));
+    }
+
+    private static MembershipProposal CreateProposal(Endpoint endpoint, long configId)
+    {
+        return CreateProposal([endpoint], configId);
+    }
+
+    private static MembershipProposal CreateProposal(Endpoint[] endpoints, long configId)
+    {
+        var proposal = new MembershipProposal { ConfigurationId = configId };
+        var counter = 0;
+        foreach (var endpoint in endpoints)
+        {
+            proposal.Members.Add(new MemberInfo
+            {
+                Endpoint = endpoint,
+                NodeId = new NodeId
+                {
+                    High = (long)("node" + counter).GetHashCode(StringComparison.Ordinal),
+                    Low = (long)("node" + counter++).GetHashCode(StringComparison.Ordinal) * 31
+                }
+            });
+        }
+        return proposal;
+    }
+
+    #endregion
 }
