@@ -220,6 +220,9 @@ internal sealed partial class MembershipServiceLogger(ILogger<MembershipService>
     [LoggerMessage(Level = LogLevel.Debug, Message = "Node {MyAddr} rejoin skipped (already rejoining or disposed)")]
     public partial void RejoinSkipped(LoggableEndpoint myAddr);
 
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Node {MyAddr} waiting {WaitTime} before rejoin attempt (backoff attempt {AttemptCount})")]
+    public partial void RejoinBackoffWaiting(LoggableEndpoint myAddr, TimeSpan waitTime, int attemptCount);
+
     [LoggerMessage(Level = LogLevel.Information, Message = "Starting new cluster at {MyAddr}")]
     public partial void StartingNewCluster(LoggableEndpoint myAddr);
 

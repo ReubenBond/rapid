@@ -71,6 +71,9 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
     // Flag to track if a stale view refresh is in progress (to prevent concurrent refreshes)
     private bool _isRefreshingView;
 
+    // Last time a stale view refresh was completed (for rate limiting)
+    private long _lastStaleViewRefreshTicks;
+
     // Background task tracking for graceful shutdown
     private readonly List<Task> _backgroundTasks = [];
     private readonly Lock _backgroundTasksLock = new();
@@ -1457,6 +1460,16 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
             return;
         }
 
+        // Rate limit refresh attempts
+        var now = _sharedResources.TimeProvider.GetTimestamp();
+        var lastRefresh = Interlocked.Read(ref _lastStaleViewRefreshTicks);
+        var elapsed = _sharedResources.TimeProvider.GetElapsedTime(lastRefresh, now);
+        if (elapsed < _options.StaleViewRefreshInterval)
+        {
+            _log.SkippingStaleViewRefresh(expectedConfigId, _membershipView.ConfigurationId);
+            return;
+        }
+
         // Double-check we still need to refresh (config may have been updated by another mechanism)
         if (expectedConfigId <= _membershipView.ConfigurationId)
         {
@@ -1496,6 +1509,9 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
 
             // Apply the learned view
             ApplyLearnedMembershipView(viewResponse);
+
+            // Update last refresh timestamp on success
+            Interlocked.Exchange(ref _lastStaleViewRefreshTicks, _sharedResources.TimeProvider.GetTimestamp());
 
             _log.MembershipViewRefreshed(
                 new MembershipServiceLogger.LoggableEndpoint(remoteEndpoint),

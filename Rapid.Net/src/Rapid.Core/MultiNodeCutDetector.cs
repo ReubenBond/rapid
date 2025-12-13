@@ -76,6 +76,9 @@ internal sealed partial class MultiNodeCutDetector : ICutDetector
     [LoggerMessage(Level = LogLevel.Debug, Message = "InvalidateFailingEdges: implicit edge between observer={Observer} and nodeInFlux={NodeInFlux}, status={Status}")]
     private partial void LogImplicitEdge(LoggableEndpoint Observer, LoggableEndpoint NodeInFlux, EdgeStatus Status);
 
+    [LoggerMessage(Level = LogLevel.Information, Message = "ForcePromoteUnstableNodes: promoting {Count} nodes from unstable to proposal set")]
+    private partial void LogForcePromote(int Count);
+
     /// <summary>
     /// Creates a MultiNodeCutDetector for larger clusters.
     /// </summary>
@@ -258,6 +261,54 @@ internal sealed partial class MultiNodeCutDetector : ICutDetector
             }
 
             return proposalsToReturn;
+        }
+    }
+
+    /// <summary>
+    /// Gets whether there are nodes in "unstable mode" (between L and H reports).
+    /// </summary>
+    public bool HasNodesInUnstableMode()
+    {
+        lock (_lock)
+        {
+            return _updatesInProgress > 0;
+        }
+    }
+
+    /// <summary>
+    /// Forces nodes in unstable mode (between L and H reports) to be promoted to the proposal set.
+    /// This is called when the unstable mode timeout expires to prevent indefinite blocking.
+    /// </summary>
+    public List<Endpoint> ForcePromoteUnstableNodes()
+    {
+        lock (_lock)
+        {
+            if (_updatesInProgress == 0 || _preProposal.Count == 0)
+            {
+                return [];
+            }
+
+            LogForcePromote(_preProposal.Count);
+
+            // Move all nodes from preProposal to proposal
+            foreach (var node in _preProposal)
+            {
+                _proposal.Add(node);
+            }
+            var promoted = _preProposal.ToList();
+            _preProposal.Clear();
+            _updatesInProgress = 0;
+
+            // Now that updatesInProgress is 0, return all proposed nodes
+            if (_proposal.Count > 0)
+            {
+                _proposalCount++;
+                var ret = new List<Endpoint>(_proposal);
+                _proposal.Clear();
+                return ret;
+            }
+
+            return promoted;
         }
     }
 }

@@ -192,6 +192,55 @@ public sealed class RapidProtocolOptions
     public double JoinRetryBackoffMultiplier { get; set; } = 2.0;
 
     /// <summary>
+    /// Minimum delay before attempting to rejoin after being kicked. Default: 1 second
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This backoff prevents rapid kick-rejoin cycles that can destabilize the cluster.
+    /// When a node is repeatedly kicked (e.g., due to network partitions), the backoff
+    /// increases exponentially up to <see cref="RejoinBackoffMax"/>.
+    /// </para>
+    /// <para>
+    /// The backoff resets to this base value after a successful rejoin that lasts longer
+    /// than the current backoff period.
+    /// </para>
+    /// </remarks>
+    public TimeSpan RejoinBackoffBase { get; set; } = TimeSpan.FromSeconds(1);
+
+    /// <summary>
+    /// Maximum delay before attempting to rejoin after being kicked. Default: 30 seconds
+    /// </summary>
+    public TimeSpan RejoinBackoffMax { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// Minimum interval between stale view refresh attempts from the same remote endpoint. Default: 1 second.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// When a node detects it has a stale view (via probe responses with higher config IDs),
+    /// it requests the current membership from a remote node. This rate limit prevents
+    /// excessive refresh requests during rapid view changes or network instability.
+    /// </para>
+    /// </remarks>
+    public TimeSpan StaleViewRefreshInterval { get; set; } = TimeSpan.FromSeconds(1);
+
+    /// <summary>
+    /// Timeout for unstable mode in the cut detector. Default: 5 seconds.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// When nodes have between L and H reports (unstable mode), the cut detector waits for
+    /// them to reach the H threshold before proposing a view change. This timeout ensures
+    /// that stuck nodes in unstable mode don't block proposals indefinitely.
+    /// </para>
+    /// <para>
+    /// After this timeout expires, nodes in unstable mode are moved to the proposal set
+    /// even without reaching the H threshold, allowing the view change to proceed.
+    /// </para>
+    /// </remarks>
+    public TimeSpan UnstableModeTimeout { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
     /// Computes effective protocol parameters based on the actual cluster size.
     /// When the cluster is smaller than the configured ObserversPerSubject (K),
     /// the effective values are scaled down proportionally.

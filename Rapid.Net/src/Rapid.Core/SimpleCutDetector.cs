@@ -227,4 +227,44 @@ internal sealed partial class SimpleCutDetector : ICutDetector
             return proposalsToReturn;
         }
     }
+
+    /// <summary>
+    /// Gets whether there are nodes in "unstable mode" (have some reports but not enough).
+    /// For SimpleCutDetector, this is when there are pending proposals.
+    /// </summary>
+    public bool HasNodesInUnstableMode()
+    {
+        lock (_lock)
+        {
+            return _pendingProposals.Count > 0;
+        }
+    }
+
+    /// <summary>
+    /// Forces pending nodes to be proposed immediately.
+    /// This is called when the unstable mode timeout expires.
+    /// </summary>
+    public List<Endpoint> ForcePromoteUnstableNodes()
+    {
+        lock (_lock)
+        {
+            if (_pendingProposals.Count == 0)
+            {
+                return [];
+            }
+
+            var promoted = new List<Endpoint>();
+            foreach (var node in _pendingProposals)
+            {
+                if (_alreadyProposed.Add(node))
+                {
+                    _proposalCount++;
+                    promoted.Add(node);
+                }
+            }
+            _pendingProposals.Clear();
+
+            return promoted;
+        }
+    }
 }

@@ -46,6 +46,7 @@ public sealed partial class PingPongFailureDetectorFactory(
             _sharedResources,
             notifier,
             _protocolOptions.FailureDetectorConsecutiveFailures,
+            _protocolOptions.FailureDetectorInterval,
             OnStaleViewDetected,
             GetLocalConfigurationId,
             _logger);
@@ -65,6 +66,7 @@ public sealed partial class PingPongFailureDetector : IEdgeFailureDetector
 #pragma warning restore CA2213
     private readonly Action _notifier;
     private readonly int _consecutiveFailuresThreshold;
+    private readonly TimeSpan _probeInterval;
     private readonly Action<Endpoint, long, long>? _onStaleViewDetected;
     private readonly Func<long>? _getLocalConfigurationId;
     private readonly ILogger<PingPongFailureDetector> _logger;
@@ -82,6 +84,7 @@ public sealed partial class PingPongFailureDetector : IEdgeFailureDetector
     /// <param name="sharedResources">Shared resources including TimeProvider.</param>
     /// <param name="notifier">Action to invoke when the subject is detected as failed.</param>
     /// <param name="consecutiveFailuresThreshold">Number of consecutive failures required before declaring node down.</param>
+    /// <param name="probeInterval">Interval between failure detector probes.</param>
     /// <param name="onStaleViewDetected">Optional callback when stale view is detected (learner role).</param>
     /// <param name="getLocalConfigurationId">Optional function to get local configuration ID.</param>
     /// <param name="logger">Optional logger.</param>
@@ -92,6 +95,7 @@ public sealed partial class PingPongFailureDetector : IEdgeFailureDetector
         SharedResources sharedResources,
         Action notifier,
         int consecutiveFailuresThreshold = 3,
+        TimeSpan probeInterval = default,
         Action<Endpoint, long, long>? onStaleViewDetected = null,
         Func<long>? getLocalConfigurationId = null,
         ILogger<PingPongFailureDetector>? logger = null)
@@ -102,6 +106,7 @@ public sealed partial class PingPongFailureDetector : IEdgeFailureDetector
         _sharedResources = sharedResources;
         _notifier = notifier;
         _consecutiveFailuresThreshold = consecutiveFailuresThreshold;
+        _probeInterval = probeInterval == default ? TimeSpan.FromSeconds(1) : probeInterval;
         _onStaleViewDetected = onStaleViewDetected;
         _getLocalConfigurationId = getLocalConfigurationId;
         _logger = logger ?? NullLogger<PingPongFailureDetector>.Instance;
@@ -138,7 +143,7 @@ public sealed partial class PingPongFailureDetector : IEdgeFailureDetector
     {
         while (_disposed == 0)
         {
-            await Task.Delay(TimeSpan.FromSeconds(1), _sharedResources.TimeProvider, _cts.Token).ConfigureAwait(true);
+            await Task.Delay(_probeInterval, _sharedResources.TimeProvider, _cts.Token).ConfigureAwait(true);
             await ProbeOnceAsync().ConfigureAwait(true);
         }
     }

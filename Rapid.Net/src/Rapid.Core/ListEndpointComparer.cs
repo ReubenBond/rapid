@@ -91,7 +91,7 @@ internal sealed class ListEndpointComparer : IEqualityComparer<List<Endpoint>>
 /// Comparer for MembershipProposal instances.
 /// Two proposals are equal if they have the same configurationId and the same members (by endpoint).
 /// </summary>
-internal sealed class MembershipProposalComparer : IEqualityComparer<MembershipProposal>
+internal sealed class MembershipProposalComparer : IEqualityComparer<MembershipProposal>, IComparer<MembershipProposal>
 {
     public static readonly MembershipProposalComparer Instance = new();
 
@@ -125,6 +125,34 @@ internal sealed class MembershipProposalComparer : IEqualityComparer<MembershipP
             hash.Add(member.Endpoint?.GetHashCode() ?? 0);
         }
         return hash.ToHashCode();
+    }
+
+    /// <summary>
+    /// Compares two proposals for ordering. Used to provide deterministic selection when
+    /// the Paxos coordinator needs to pick a value and multiple values are possible.
+    /// </summary>
+    public int Compare(MembershipProposal? x, MembershipProposal? y)
+    {
+        if (ReferenceEquals(x, y)) return 0;
+        if (x is null) return -1;
+        if (y is null) return 1;
+
+        // First compare by configurationId
+        var configCompare = x.ConfigurationId.CompareTo(y.ConfigurationId);
+        if (configCompare != 0) return configCompare;
+
+        // Then by member count
+        var countCompare = x.Members.Count.CompareTo(y.Members.Count);
+        if (countCompare != 0) return countCompare;
+
+        // Then compare members lexicographically
+        for (var i = 0; i < x.Members.Count; i++)
+        {
+            var endpointCompare = EndpointComparer.Instance.Compare(x.Members[i].Endpoint, y.Members[i].Endpoint);
+            if (endpointCompare != 0) return endpointCompare;
+        }
+
+        return 0;
     }
 }
 

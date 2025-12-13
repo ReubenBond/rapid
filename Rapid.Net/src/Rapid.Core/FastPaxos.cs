@@ -155,24 +155,29 @@ internal sealed class FastPaxos
 
         _log.FastRoundVoteCount(count, _votesReceived.Count, threshold, f);
 
-        if (_votesReceived.Count >= _membershipSize - f)
+        // Early success detection: if any proposal reaches the threshold, we can decide immediately
+        // without waiting for all votes to arrive. This is safe because:
+        // 1. Fast Paxos requires N - f votes for success
+        // 2. Once a proposal has N - f votes, no other proposal can also reach N - f votes
+        //    (since that would require 2*(N-f) > N votes for N > 0)
+        if (count >= threshold)
         {
-            if (count >= _membershipSize - f)
-            {
-                _log.DecidedViewChange(new FastPaxosLogger.LoggableEndpoints(proposal.Members.Select(m => m.Endpoint)));
+            _log.DecidedViewChange(new FastPaxosLogger.LoggableEndpoints(proposal.Members.Select(m => m.Endpoint)));
 
-                // We have a successful proposal. Consume it.
-                if (_resultTcs.TrySetResult(new ConsensusResult.Decided(proposal)))
-                {
-                    _log.FastRoundSucceeded(_configurationId);
-                }
-            }
-            else
+            // We have a successful proposal. Consume it.
+            if (_resultTcs.TrySetResult(new ConsensusResult.Decided(proposal)))
             {
-                // Fast round cannot succeed due to vote split, complete with failure
-                _log.FastRoundMayNotSucceed();
-                _resultTcs.TrySetResult(ConsensusResult.VoteSplit.Instance);
+                _log.FastRoundSucceeded(_configurationId);
             }
+            return;
+        }
+
+        // Check if we've received enough total votes to determine that no proposal can succeed
+        if (_votesReceived.Count >= threshold)
+        {
+            // We have enough votes but no single proposal reached the threshold - vote split
+            _log.FastRoundMayNotSucceed();
+            _resultTcs.TrySetResult(ConsensusResult.VoteSplit.Instance);
         }
     }
 

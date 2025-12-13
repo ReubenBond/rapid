@@ -46,4 +46,18 @@ internal interface ICutDetector
     /// </summary>
     /// <returns>A list of endpoints representing a view change proposal.</returns>
     List<Endpoint> InvalidateFailingEdges();
+
+    /// <summary>
+    /// Gets whether there are nodes in "unstable mode" (between L and H reports).
+    /// This is used by the MembershipService to determine if a timeout should be applied.
+    /// </summary>
+    /// <returns>True if there are nodes in unstable mode, false otherwise.</returns>
+    bool HasNodesInUnstableMode();
+
+    /// <summary>
+    /// Forces nodes in unstable mode (between L and H reports) to be promoted to the proposal set.
+    /// This is called when the unstable mode timeout expires to prevent indefinite blocking.
+    /// </summary>
+    /// <returns>A list of endpoints that were promoted and are now proposed for view change.</returns>
+    List<Endpoint> ForcePromoteUnstableNodes();
 }

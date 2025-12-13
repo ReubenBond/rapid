@@ -366,7 +366,7 @@ internal sealed class Paxos
         }
 
         // At this point, no value has been selected yet and it is safe for the coordinator to pick any proposed value.
-        // Fall back to picking the first non-empty proposal from any message (matching Java behavior).
+        // To ensure deterministic selection across all coordinators, we sort proposals and pick the smallest.
         // This can happen because a quorum of acceptors that did not vote in prior rounds may have responded
         // to the coordinator first. This is safe to do here for two reasons:
         //      1) The coordinator will only proceed with phase 2 if it has a valid vote.
@@ -375,7 +375,8 @@ internal sealed class Paxos
         //         again.
         return phase1bMessages
             .Where(m => m.Proposal != null && m.Proposal.Members.Count > 0)
-            .Select(m => m.Proposal)
+            .Select(m => m.Proposal!)
+            .OrderBy(p => p, MembershipProposalComparer.Instance)
             .FirstOrDefault();
     }
 
