@@ -7,6 +7,11 @@ internal sealed partial class MembershipServiceLogger(ILogger<MembershipService>
 {
     private readonly ILogger _logger = logger;
 
+    /// <summary>
+    /// Gets the underlying logger instance.
+    /// </summary>
+    public ILogger Logger => _logger;
+
     // Logging helpers
     internal readonly struct LoggableEndpoint(Endpoint endpoint)
     {

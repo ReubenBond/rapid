@@ -9,6 +9,11 @@ internal sealed partial class InMemoryMessagingClientLogger(ILogger<InMemoryMess
 {
     private readonly ILogger _logger = logger;
 
+    /// <summary>
+    /// Gets the underlying logger instance.
+    /// </summary>
+    public ILogger Logger => _logger;
+
     [LoggerMessage(Level = LogLevel.Trace, Message = "Attempting to send {MessageType} from {Local} to {Remote}")]
     public partial void AttemptingSend(object messageType, string local, string remote);
 

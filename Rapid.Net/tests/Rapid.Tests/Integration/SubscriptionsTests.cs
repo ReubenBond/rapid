@@ -27,9 +27,7 @@ public sealed class SubscriptionsTests(ITestOutputHelper outputHelper) : IAsyncD
         // Cancel all async enumerable subscriptions
         foreach (var cts in _subscriptionCts)
         {
-#pragma warning disable CA1849 // Call async methods when in an async method
-            cts.Cancel();
-#pragma warning restore CA1849 // Call async methods when in an async method
+            cts.SafeCancel();
             cts.Dispose();
         }
         _subscriptionCts.Clear();

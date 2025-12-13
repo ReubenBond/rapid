@@ -102,9 +102,7 @@ internal sealed class InMemoryMessagingClient(
         if (_disposed) return ValueTask.CompletedTask;
         _disposed = true;
 
-#pragma warning disable CA1849 // CancelAsync posts to SynchronizationContext - use Cancel() for determinism
-        _disposeCts.Cancel();
-#pragma warning restore CA1849
+        _disposeCts.SafeCancel(_log.Logger);
         _disposeCts.Dispose();
 
         return ValueTask.CompletedTask;

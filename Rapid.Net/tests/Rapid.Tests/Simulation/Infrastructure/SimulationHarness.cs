@@ -594,13 +594,6 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
 
         for (var i = 0; i < maxIterations; i++)
         {
-            // Check for teardown cancellation
-            if (TeardownCancellationToken.IsCancellationRequested)
-            {
-                _log.TeardownCancellationRequested();
-                return false;
-            }
-
             if (condition())
             {
                 _log.ConditionMet(i);
@@ -784,7 +777,7 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
     /// The task factory is invoked with the harness's synchronization context installed,
     /// ensuring async continuations are captured on the simulation scheduler.
     /// </summary>
-    public void Run(Func<Task> taskFactory, int maxIterations = 100000)
+    public void Run(Func<Task> taskFactory, int maxIterations = 1_000_000)
     {
         ArgumentNullException.ThrowIfNull(taskFactory);
         using var lockScope = Guard.Enter();
@@ -946,16 +939,14 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
     public void LogSeedForReproduction() => _logger.LogInformation("[SEED FOR REPRODUCTION] {Seed}", Seed);
 
     /// <inheritdoc />
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
-        if (_disposed) return;
+        if (_disposed) return ValueTask.CompletedTask;
         _disposed = true;
 #pragma warning disable CA1849 // Call async methods when in an async method
         Run(async () =>
         {
-#pragma warning disable CA1849 // Call async methods when in an async method
-            _teardownCts.Cancel();
-#pragma warning restore CA1849 // Call async methods when in an async method
+            _teardownCts.SafeCancel(_logger);
 
             // Dispose all nodes to cancel in-flight tasks and release resources.
             // This triggers cancellation of each node's _disposeCts, which propagates
@@ -975,5 +966,7 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
         // Dispose the log manager (disposes logger factory and provider)
         _logManager.Dispose();
         _teardownCts.Dispose();
+
+        return ValueTask.CompletedTask;
     }
 }

@@ -282,9 +282,7 @@ internal sealed class SimulationNode
         _disposed = true;
 
         // Cancel any in-flight requests first so they complete promptly
-#pragma warning disable CA1849 // CancelAsync posts to SynchronizationContext which breaks simulation determinism
-        _disposeCts.Cancel();
-#pragma warning restore CA1849
+        _disposeCts.SafeCancel(_log.Logger);
 
         await _membershipService.DisposeAsync().ConfigureAwait(true);
         await MessagingClient.DisposeAsync().ConfigureAwait(true);

@@ -171,8 +171,6 @@ public sealed class ClusterBasicTests : IAsyncLifetime
         Assert.Equal(2, joiner2.MembershipSize);
     }
 
-
-
     [Fact]
     public void ThreeNodeClusterFormation()
     {

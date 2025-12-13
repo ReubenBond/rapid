@@ -9,6 +9,11 @@ internal sealed partial class SimulationHarnessLogger(ILogger<SimulationHarness>
 {
     private readonly ILogger _logger = logger;
 
+    /// <summary>
+    /// Gets the underlying logger instance.
+    /// </summary>
+    public ILogger Logger => _logger;
+
     [LoggerMessage(Level = LogLevel.Debug, Message = "Harness created with seed {Seed}")]
     public partial void HarnessCreated(int seed);
 

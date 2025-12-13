@@ -9,6 +9,11 @@ internal sealed partial class SimulationNodeLogger(ILogger<SimulationNode> logge
 {
     private readonly ILogger _logger = logger;
 
+    /// <summary>
+    /// Gets the underlying logger instance.
+    /// </summary>
+    public ILogger Logger => _logger;
+
     [LoggerMessage(Level = LogLevel.Debug, Message = "Node suspended")]
     public partial void NodeSuspended();
 

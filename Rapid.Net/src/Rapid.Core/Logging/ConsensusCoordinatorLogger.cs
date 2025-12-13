@@ -7,6 +7,11 @@ internal sealed partial class ConsensusCoordinatorLogger(ILogger<ConsensusCoordi
 {
     private readonly ILogger _logger = logger;
 
+    /// <summary>
+    /// Gets the underlying logger instance.
+    /// </summary>
+    public ILogger Logger => _logger;
+
     // Logging helpers
     internal readonly struct LoggableEndpoints(IEnumerable<Endpoint> endpoints)
     {

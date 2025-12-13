@@ -305,9 +305,7 @@ internal sealed class ConsensusCoordinator : IAsyncDisposable
         _log.Dispose();
 
         // Cancel the consensus loop first to unblock any Task.Delay calls
-#pragma warning disable CA1849 // Call async methods when in an async method
-        _disposeCts.Cancel();
-#pragma warning restore CA1849
+        _disposeCts.SafeCancel(_log.Logger);
 
         // Cancel both FastPaxos and Paxos to unblock any waiters
         _fastPaxos.Cancel();
