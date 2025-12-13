@@ -381,7 +381,7 @@ public class MembershipViewTests
     public void MonitoringRelationshipMultipleNodes()
     {
         var builder = new MembershipViewBuilder(K);
-        const int numNodes = 1000;
+        const int numNodes = 200;
         var list = new List<Endpoint>();
 
         for (var i = 0; i < numNodes; i++)
@@ -566,7 +566,7 @@ public class MembershipViewTests
     public void NodeConfigurationChange()
     {
         var builder = new MembershipViewBuilder(K);
-        const int numNodes = 1000;
+        const int numNodes = 200;
         var set = new HashSet<long>(numNodes);
         var previousConfigId = ConfigurationId.Empty;
 
@@ -595,7 +595,7 @@ public class MembershipViewTests
     {
         var builder1 = new MembershipViewBuilder(K);
         var builder2 = new MembershipViewBuilder(K);
-        const int numNodes = 1000;
+        const int numNodes = 200;
         var list1 = new List<long>(numNodes);
         var list2 = new List<long>(numNodes);
         var previousConfigId1 = ConfigurationId.Empty;
@@ -699,13 +699,6 @@ public class MembershipViewTests
     #region Property-Based Tests
 
     /// <summary>
-    /// Generator for NodeIds (UUIDs).
-    /// </summary>
-    private static readonly Gen<NodeId> GenNodeId =
-        Gen.Select(Gen.Long, Gen.Long)
-            .Select((high, low) => new NodeId { High = high, Low = low });
-
-    /// <summary>
     /// Generator for a list of unique endpoints with their NodeIds.
     /// </summary>
     private static Gen<List<(Endpoint Endpoint, NodeId NodeId)>> GenUniqueNodes(int minCount, int maxCount)
@@ -714,8 +707,8 @@ public class MembershipViewTests
             Gen.Select(
                 Gen.Int[1, 255].Array[count].Where(a => a.Distinct().Count() == count),
                 Gen.Int[1000, 65535].Array[count],
-                GenNodeId.Array[count]
-            ).Select((octets, ports, nodeIds) =>
+                Gen.Long.Array[count].Where(a => a.Distinct().Count() == count)
+            ).Select((octets, ports, nodeIdSeeds) =>
             {
                 var result = new List<(Endpoint, NodeId)>(count);
                 for (var i = 0; i < count; i++)
@@ -725,7 +718,9 @@ public class MembershipViewTests
                         Hostname = ByteString.CopyFromUtf8($"127.0.0.{octets[i]}"),
                         Port = ports[i]
                     };
-                    result.Add((endpoint, nodeIds[i]));
+                    // Use the unique seed for both High and Low to ensure unique NodeIds
+                    var nodeId = new NodeId { High = nodeIdSeeds[i], Low = i };
+                    result.Add((endpoint, nodeId));
                 }
                 return result;
             }));

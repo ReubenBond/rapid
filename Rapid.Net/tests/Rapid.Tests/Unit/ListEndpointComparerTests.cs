@@ -241,13 +241,6 @@ public class ListEndpointComparerTests
         });
 
     /// <summary>
-    /// Generator for NodeIds (UUIDs).
-    /// </summary>
-    private static readonly Gen<NodeId> GenNodeId =
-        Gen.Select(Gen.Long, Gen.Long)
-            .Select((high, low) => new NodeId { High = high, Low = low });
-
-    /// <summary>
     /// Generator for a list of unique endpoints with their NodeIds.
     /// </summary>
     private static Gen<List<(Endpoint Endpoint, NodeId NodeId)>> GenUniqueNodes(int minCount, int maxCount)
@@ -256,8 +249,8 @@ public class ListEndpointComparerTests
             Gen.Select(
                 Gen.Int[1, 255].Array[count].Where(a => a.Distinct().Count() == count),
                 Gen.Int[1000, 65535].Array[count],
-                GenNodeId.Array[count]
-            ).Select((octets, ports, nodeIds) =>
+                Gen.Long.Array[count].Where(a => a.Distinct().Count() == count)
+            ).Select((octets, ports, nodeIdSeeds) =>
             {
                 var result = new List<(Endpoint, NodeId)>(count);
                 for (var i = 0; i < count; i++)
@@ -267,7 +260,9 @@ public class ListEndpointComparerTests
                         Hostname = ByteString.CopyFromUtf8($"127.0.0.{octets[i]}"),
                         Port = ports[i]
                     };
-                    result.Add((endpoint, nodeIds[i]));
+                    // Use the unique seed for both High and Low to ensure unique NodeIds
+                    var nodeId = new NodeId { High = nodeIdSeeds[i], Low = i };
+                    result.Add((endpoint, nodeId));
                 }
                 return result;
             }));

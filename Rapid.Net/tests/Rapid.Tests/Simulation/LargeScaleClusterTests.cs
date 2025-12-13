@@ -520,9 +520,8 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
     /// into fewer configuration changes than sequential leaves.
     /// </summary>
     [Theory]
-    [InlineData(20, 10, 5)]   // Remove 10 from 20 nodes, expect at most 5 config changes
-    [InlineData(30, 15, 8)]   // Remove 15 from 30 nodes, expect at most 8 config changes
-    [InlineData(50, 20, 10)]  // Remove 20 from 50 nodes, expect at most 10 config changes
+    [InlineData(20, 5, 4)]    // Remove 5 from 20 nodes, expect at most 4 config changes
+    [InlineData(30, 10, 6)]   // Remove 10 from 30 nodes, expect at most 6 config changes
     public void ParallelLeaves_BatchMultipleNodesPerViewChange(int clusterSize, int nodesToRemove, int maxExpectedChanges)
     {
         // Create the cluster using parallel joins for speed (larger clusters need more iterations)

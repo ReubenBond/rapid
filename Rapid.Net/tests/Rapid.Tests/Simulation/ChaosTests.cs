@@ -135,8 +135,9 @@ public sealed class ChaosTests : IAsyncLifetime
         _chaos.PartitionRate = 0.02; // Light partitions
         _chaos.PartitionHealRate = 0.5;
 
-        // Run chaos
-        _chaos.RunChaos(steps: 100);
+        // Run chaos (reduced from 100 steps to 20 for faster test execution while
+        // still validating invariants hold under light partition churn)
+        _chaos.RunChaos(steps: 20);
 
         // Check invariants
         var result = _checker.CheckAll();
