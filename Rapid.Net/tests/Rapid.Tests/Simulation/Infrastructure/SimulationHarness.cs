@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using Rapid.Tests.Simulation.Infrastructure.Logging;
 
@@ -795,6 +796,7 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
         {
             if (!task.IsCompleted || !task.GetAwaiter().GetResult().IsCompleted)
             {
+                Debugger.Launch();
                 throw new TimeoutException($"Task did not complete within {maxIterations} iterations");
             }
         }
@@ -947,24 +949,25 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         if (_disposed) return;
-
-#pragma warning disable CA1849 // Call async methods when in an async method
-        _teardownCts.Cancel();
-#pragma warning restore CA1849 // Call async methods when in an async method
         _disposed = true;
-
-        // Clear harness queue
-        TaskQueue.Clear();
-
-        // Dispose all nodes to cancel in-flight tasks and release resources.
-        // This triggers cancellation of each node's _disposeCts, which propagates
-        // to MembershipService and MessagingClient, allowing pending tasks to complete.
-        var nodes = Nodes.ToList();
-        foreach (var node in nodes)
+#pragma warning disable CA1849 // Call async methods when in an async method
+        Run(async () =>
         {
-            await node.DisposeAsync().ConfigureAwait(false);
-            UnregisterNode(node);
-        }
+#pragma warning disable CA1849 // Call async methods when in an async method
+            _teardownCts.Cancel();
+#pragma warning restore CA1849 // Call async methods when in an async method
+
+            // Dispose all nodes to cancel in-flight tasks and release resources.
+            // This triggers cancellation of each node's _disposeCts, which propagates
+            // to MembershipService and MessagingClient, allowing pending tasks to complete.
+            var nodes = Nodes.ToList();
+            foreach (var node in nodes)
+            {
+                await node.DisposeAsync().ConfigureAwait(true);
+                UnregisterNode(node);
+            }
+        });
+#pragma warning restore CA1849 // Call async methods when in an async method
 
         // Attach logs to test context BEFORE disposing the provider
         _logManager.AttachLogsToTestContext(TestContext.Current);

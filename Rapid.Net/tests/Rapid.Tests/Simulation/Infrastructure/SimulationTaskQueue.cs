@@ -18,7 +18,6 @@ internal sealed class SimulationTaskQueue
     private readonly SortedSet<ScheduledItem> _queue = new(new ScheduledItemComparer());
     private readonly SimulationClock _clock;
     private readonly SingleThreadedGuard _guard;
-    private readonly object _lock = new();
     private long _sequenceNumber;
 
     /// <summary>
@@ -161,19 +160,15 @@ internal sealed class SimulationTaskQueue
     /// <returns>True if an item was dequeued and executed, false if no items are ready.</returns>
     public bool RunOnce()
     {
-        ScheduledItem? item;
-        using (_guard.Enter())
-        {
-            if (_queue.Count == 0)
-                return false;
+        using var _ = _guard.Enter();
+        if (_queue.Count == 0)
+            return false;
 
-            item = _queue.Min!;
-            if (item.DueTime > UtcNow)
-                return false; // No ready items
+        var item = _queue.Min!;
+        if (item.DueTime > UtcNow)
+            return false; // No ready items
 
-            _queue.Remove(item);
-        }
-
+        _queue.Remove(item);
         using (SynchronizationContext.Install())
         {
             item.Invoke();
@@ -195,16 +190,6 @@ internal sealed class SimulationTaskQueue
         }
 
         return count;
-    }
-
-    /// <summary>
-    /// Clears all items from the queue.
-    /// This is called from the simulation thread only.
-    /// </summary>
-    public void Clear()
-    {
-        using var _ = _guard.Enter();
-        _queue.Clear();
     }
 
     /// <summary>

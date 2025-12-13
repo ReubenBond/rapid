@@ -193,14 +193,7 @@ internal sealed class ConsensusCoordinator : IAsyncDisposable
                 _paxos.StartPhase1a(roundNumber, cancellationToken);
 
                 // Wait for decision or timeout using delay
-                try
-                {
-                    await Task.Delay(delay, _sharedResources.TimeProvider, cancellationToken).ConfigureAwait(true);
-                }
-                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-                {
-                    // This shouldn't happen in current flow
-                }
+                await Task.Delay(delay, _sharedResources.TimeProvider, cancellationToken).ConfigureAwait(true);
 
                 // Check if we decided during the delay
                 if (_paxos.Decided.IsCompletedSuccessfully)

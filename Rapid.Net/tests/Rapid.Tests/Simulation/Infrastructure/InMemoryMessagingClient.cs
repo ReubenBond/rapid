@@ -74,7 +74,7 @@ internal sealed class InMemoryMessagingClient(
         var deliveryTask = Task.Factory.StartNew(
             DeliverMessageAsync,
             targetCancellation,
-            TaskCreationOptions.RunContinuationsAsynchronously,
+            TaskCreationOptions.None,
             targetContext.TaskScheduler)
             .Unwrap();
 

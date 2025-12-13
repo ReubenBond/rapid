@@ -88,22 +88,6 @@ public sealed class SimulationSchedulerTests
     }
 
     [Fact]
-    public void ClearRemovesAllPendingTasks()
-    {
-        var (taskQueue, _, scheduler) = CreateComponents();
-
-        for (var i = 0; i < 5; i++)
-        {
-            var task = new Task(() => { });
-            task.Start(scheduler);
-        }
-
-        taskQueue.Clear();
-
-        Assert.Empty(scheduler.Tasks);
-    }
-
-    [Fact]
     public void TasksExecuteInFifoOrder()
     {
         var (taskQueue, _, scheduler) = CreateComponents();
