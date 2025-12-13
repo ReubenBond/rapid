@@ -85,28 +85,6 @@ internal sealed partial class GrpcClient(IOptions<RapidProtocolOptions> options,
         }
     }
 
-    public async Task<RapidResponse> SendMessageBestEffortAsync(Endpoint remote, RapidRequest request,
-        CancellationToken cancellationToken)
-    {
-#pragma warning disable CA1031
-        try
-        {
-            return await SendMessageAsync(remote, request, cancellationToken).ConfigureAwait(true);
-        }
-        catch
-        {
-            return RapidResponse.Parser.ParseFrom([]);
-        }
-#pragma warning restore CA1031
-    }
-
-    public void SendOneWayMessage(Endpoint remote, RapidRequest request, CancellationToken cancellationToken)
-    {
-        var taskId = Interlocked.Increment(ref _taskIdCounter);
-        var task = SendOneWayMessageInternalAsync(remote, request, taskId, onDeliveryFailure: null, cancellationToken);
-        _pendingTasks.TryAdd(taskId, task);
-    }
-
     public void SendOneWayMessage(Endpoint remote, RapidRequest request, DeliveryFailureCallback? onDeliveryFailure, CancellationToken cancellationToken)
     {
         var taskId = Interlocked.Increment(ref _taskIdCounter);

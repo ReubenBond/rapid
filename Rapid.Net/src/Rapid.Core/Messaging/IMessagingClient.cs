@@ -21,7 +21,8 @@ public interface IMessagingClient : IAsyncDisposable
     /// <param name="request">The request message.</param>
     /// <param name="cancellationToken">Token to cancel the operation.</param>
     /// <exception cref="OperationCanceledException">Thrown when the operation is cancelled.</exception>
-    void SendOneWayMessage(Endpoint remote, RapidRequest request, CancellationToken cancellationToken);
+    void SendOneWayMessage(Endpoint remote, RapidRequest request, CancellationToken cancellationToken) =>
+        SendOneWayMessage(remote, request, onDeliveryFailure: null, cancellationToken);
 
     /// <summary>
     /// Sends a message to a remote node without waiting for a response, with failure notification.
@@ -41,8 +42,7 @@ public interface IMessagingClient : IAsyncDisposable
     /// <param name="cancellationToken">Token to cancel the operation.</param>
     /// <returns>The response from the remote node.</returns>
     /// <exception cref="OperationCanceledException">Thrown when the operation is cancelled.</exception>
-    Task<RapidResponse> SendMessageAsync(Endpoint remote, RapidRequest request,
-        CancellationToken cancellationToken);
+    Task<RapidResponse> SendMessageAsync(Endpoint remote, RapidRequest request, CancellationToken cancellationToken);
 
     /// <summary>
     /// Sends a message to a remote node with best-effort delivery.
@@ -52,6 +52,17 @@ public interface IMessagingClient : IAsyncDisposable
     /// <param name="request">The request message.</param>
     /// <param name="cancellationToken">Token to cancel the operation.</param>
     /// <returns>The response from the remote node, or an error response.</returns>
-    Task<RapidResponse> SendMessageBestEffortAsync(Endpoint remote, RapidRequest request,
-        CancellationToken cancellationToken);
+    async Task<RapidResponse> SendMessageBestEffortAsync(Endpoint remote, RapidRequest request, CancellationToken cancellationToken)
+    {
+#pragma warning disable CA1031
+        try
+        {
+            return await SendMessageAsync(remote, request, cancellationToken).ConfigureAwait(true);
+        }
+        catch
+        {
+            return RapidResponse.Parser.ParseFrom([]);
+        }
+#pragma warning restore CA1031
+    }
 }
