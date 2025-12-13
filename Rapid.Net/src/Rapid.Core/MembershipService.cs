@@ -17,7 +17,7 @@ namespace Rapid;
 /// Note: This class is not thread-safe yet. RpcServer.start() uses a single threaded messagingExecutor during the server
 /// initialization to make sure that only a single thread runs the process* methods.
 /// </summary>
-internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDisposable, IDisposable
+internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDisposable
 {
     private readonly MembershipServiceLogger _log;
     private ICutDetector _cutDetection = null!;
@@ -500,8 +500,11 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
     {
         foreach (var node in addedNodes)
         {
-            if (_joinersToRespondTo.TryGetValue(node, out var channel))
+            if (_joinersToRespondTo.Remove(node, out var channel))
             {
+                // Prevent new attempts from writing to the channel
+                channel.Writer.TryComplete();
+
                 var waitingCount = 0;
                 var config = _membershipView.Configuration;
                 var response = new JoinResponse
@@ -522,11 +525,10 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
                 while (channel.Reader.TryRead(out var tcs))
                 {
                     waitingCount++;
-                    tcs.SetResult(rapidResponse);
+                    tcs.TrySetResult(rapidResponse);
                 }
 
                 _log.NotifyingJoiners(waitingCount, new MembershipServiceLogger.LoggableEndpoint(node));
-                _joinersToRespondTo.Remove(node);
             }
         }
     }
@@ -610,19 +612,18 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
     /// </summary>
     private async Task<RapidResponse> HandleJoinMessageAsync(JoinMessage joinMessage, CancellationToken cancellationToken)
     {
-        var tcs = new TaskCompletionSource<RapidResponse>();
-
         _log.HandleJoinMessage(new MembershipServiceLogger.LoggableEndpoint(joinMessage.Sender), joinMessage.ConfigurationId);
 
+        Task<RapidResponse> resultTask;
         lock (_membershipUpdateLock)
         {
             var currentConfiguration = _membershipView.ConfigurationId;
-
             if (currentConfiguration == joinMessage.ConfigurationId)
             {
                 _log.EnqueueingSafeToJoin(new MembershipServiceLogger.LoggableEndpoint(joinMessage.Sender), new MembershipServiceLogger.CurrentConfigId(_membershipView),
                     new MembershipServiceLogger.MembershipSize(_membershipView));
 
+                var tcs = new TaskCompletionSource<RapidResponse>();
                 ref var channel = ref CollectionsMarshal.GetValueRefOrAddDefault(_joinersToRespondTo, joinMessage.Sender, out var _);
                 channel ??= Channel.CreateUnbounded<TaskCompletionSource<RapidResponse>>();
                 channel.Writer.TryWrite(tcs);
@@ -639,6 +640,8 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
                 alertMsg.RingNumber.AddRange(joinMessage.RingNumber);
 
                 EnqueueAlertMessage(alertMsg);
+
+                resultTask = tcs.Task;
             }
             else
             {
@@ -674,11 +677,11 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
                     responseBuilder.StatusCode = JoinStatusCode.ConfigChanged;
                 }
 
-                tcs.SetResult(responseBuilder.ToRapidResponse());
+                return responseBuilder.ToRapidResponse();
             }
         }
 
-        return await tcs.Task.WaitAsync(cancellationToken).ConfigureAwait(true);
+        return await resultTask.WaitAsync(TimeSpan.FromSeconds(30), _sharedResources.TimeProvider, cancellationToken).ConfigureAwait(true);
     }
 
     /// <summary>
@@ -1589,6 +1592,12 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
     {
         var continuationTask = consensusInstance.Decided.ContinueWith(async decision =>
         {
+            if (decision.IsCanceled)
+            {
+                // Consensus was cancelled (e.g., during shutdown or view change) - nothing to do
+                return;
+            }
+
             if (decision.IsFaulted)
             {
                 _log.ConsensusDecidedFaulted(decision.Exception!);
@@ -1775,40 +1784,11 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
         }
         _failureDetectors.Clear();
 
-        // Dispose consensus instance
-        await _consensusInstance.DisposeAsync();
+        // Dispose consensus instance (may be null if initialization failed)
+        if (_consensusInstance is not null)
+        {
+            await _consensusInstance.DisposeAsync();
+        }
     }
 
-    /// <summary>
-    /// Synchronously disposes the membership service.
-    /// Note: Callers should prefer DisposeAsync when possible.
-    /// </summary>
-    public void Dispose()
-    {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0)
-        {
-            return; // Already disposed
-        }
-
-        _log.Dispose();
-
-        // Cancel background tasks (in case StopAsync wasn't called)
-#pragma warning disable CA1849 // Call async methods when in an async method - sync Dispose
-        _stoppingCts.Cancel();
-#pragma warning restore CA1849
-        _stoppingCts.Dispose();
-
-        // Dispose the event channel to signal completion to all subscribers
-        _eventChannel.Dispose();
-
-        // Dispose failure detectors
-        foreach (var fd in _failureDetectors)
-        {
-            fd.Dispose();
-        }
-        _failureDetectors.Clear();
-
-        // Dispose consensus instance
-        _consensusInstance.DisposeAsync().AsTask().GetAwaiter().GetResult();
-    }
 }

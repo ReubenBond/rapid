@@ -385,12 +385,20 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
 
     /// <summary>
     /// Crashes a node (simulates sudden failure).
-    /// Simply unregisters the node - no cleanup or leave messages.
+    /// Disposes and unregisters the node - no cleanup or leave messages are sent.
+    /// The disposal cancels in-flight tasks and releases resources to prevent memory leaks.
     /// </summary>
     public void CrashNode(SimulationNode node)
     {
         ArgumentNullException.ThrowIfNull(node);
+
+        // Dispose the node while it's still registered so Run() can drive its task queue.
+        // This cancels in-flight tasks and releases resources.
+        Run(() => node.DisposeAsync().AsTask());
+
+        // Unregister after disposal - no new messages will be delivered
         UnregisterNode(node);
+
         _log.NodeCrashed();
     }
 
@@ -936,9 +944,9 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
     public void LogSeedForReproduction() => _logger.LogInformation("[SEED FOR REPRODUCTION] {Seed}", Seed);
 
     /// <inheritdoc />
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
-        if (_disposed) return ValueTask.CompletedTask;
+        if (_disposed) return;
 
 #pragma warning disable CA1849 // Call async methods when in an async method
         _teardownCts.Cancel();
@@ -948,9 +956,13 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
         // Clear harness queue
         TaskQueue.Clear();
 
-        // Unregister all nodes (hard crash - no cleanup needed, just drop references)
-        foreach (var node in Nodes.ToList())
+        // Dispose all nodes to cancel in-flight tasks and release resources.
+        // This triggers cancellation of each node's _disposeCts, which propagates
+        // to MembershipService and MessagingClient, allowing pending tasks to complete.
+        var nodes = Nodes.ToList();
+        foreach (var node in nodes)
         {
+            await node.DisposeAsync().ConfigureAwait(false);
             UnregisterNode(node);
         }
 
@@ -960,6 +972,5 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
         // Dispose the log manager (disposes logger factory and provider)
         _logManager.Dispose();
         _teardownCts.Dispose();
-        return ValueTask.CompletedTask;
     }
 }

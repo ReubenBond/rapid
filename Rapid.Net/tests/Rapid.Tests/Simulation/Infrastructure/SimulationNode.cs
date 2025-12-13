@@ -30,6 +30,7 @@ internal sealed class SimulationNode
     private readonly CutDetectorFactory _cutDetectorFactory;
     private readonly MembershipViewAccessor _viewAccessor;
     private readonly ILogger<MembershipService> _membershipServiceLogger;
+    private readonly CancellationTokenSource _disposeCts = new();
     private bool _disposed;
 
     /// <summary>
@@ -229,7 +230,10 @@ internal sealed class SimulationNode
     {
         _log.HandlingRequest(RapidUtils.Loggable(Address), request.ContentCase);
 
-        return await _membershipService.HandleMessageAsync(request, cancellationToken).ConfigureAwait(true);
+        // Link the caller's cancellation token with our disposal token so that
+        // in-flight requests complete when this node is disposed
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _disposeCts.Token);
+        return await _membershipService.HandleMessageAsync(request, linkedCts.Token).ConfigureAwait(true);
     }
 
     /// <summary>
@@ -272,8 +276,15 @@ internal sealed class SimulationNode
         if (_disposed) return;
         _disposed = true;
 
+        // Cancel any in-flight requests first so they complete promptly
+#pragma warning disable CA1849 // CancelAsync posts to SynchronizationContext which breaks simulation determinism
+        _disposeCts.Cancel();
+#pragma warning restore CA1849
+
         await _membershipService.DisposeAsync().ConfigureAwait(true);
         await MessagingClient.DisposeAsync().ConfigureAwait(true);
+
+        _disposeCts.Dispose();
     }
 
     /// <summary>
