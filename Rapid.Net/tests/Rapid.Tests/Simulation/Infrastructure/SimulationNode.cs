@@ -79,6 +79,11 @@ internal sealed class SimulationNode
     public bool IsSuspended => _context.State == SimulationNodeState.Suspended;
 
     /// <summary>
+    /// Gets the cancellation token that is triggered when this node is being torn down.
+    /// </summary>
+    internal CancellationToken TeardownCancellationToken => _disposeCts.Token;
+
+    /// <summary>
     /// Suspends this node, preventing it from executing tasks.
     /// Messages sent to the node will be queued but not processed until resumed.
     /// </summary>
