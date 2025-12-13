@@ -22,6 +22,29 @@ internal sealed class EndpointComparer : IComparer<Endpoint>
 }
 
 /// <summary>
+/// Equality comparer for Endpoint instances.
+/// Used with HashSet and Dictionary to ensure proper equality checking.
+/// </summary>
+internal sealed class EndpointEqualityComparer : IEqualityComparer<Endpoint>
+{
+    public static readonly EndpointEqualityComparer Instance = new();
+
+    private EndpointEqualityComparer() { }
+
+    public bool Equals(Endpoint? x, Endpoint? y)
+    {
+        if (ReferenceEquals(x, y)) return true;
+        if (x is null || y is null) return false;
+        return x.Hostname == y.Hostname && x.Port == y.Port;
+    }
+
+    public int GetHashCode(Endpoint obj)
+    {
+        return HashCode.Combine(obj.Hostname, obj.Port);
+    }
+}
+
+/// <summary>
 /// Comparer for NodeId instances. Delegates to NodeId.CompareTo.
 /// Used with SortedSet to ensure consistent ordering across nodes.
 /// </summary>
@@ -63,4 +86,46 @@ internal sealed class ListEndpointComparer : IEqualityComparer<List<Endpoint>>
         return hash.ToHashCode();
     }
 }
+
+/// <summary>
+/// Comparer for MembershipProposal instances.
+/// Two proposals are equal if they have the same configurationId and the same members (by endpoint).
+/// </summary>
+internal sealed class MembershipProposalComparer : IEqualityComparer<MembershipProposal>
+{
+    public static readonly MembershipProposalComparer Instance = new();
+
+    private MembershipProposalComparer() { }
+
+    public bool Equals(MembershipProposal? x, MembershipProposal? y)
+    {
+        if (ReferenceEquals(x, y)) return true;
+        if (x is null || y is null) return false;
+
+        // Compare by configurationId and member endpoints
+        if (x.ConfigurationId != y.ConfigurationId) return false;
+        if (x.Members.Count != y.Members.Count) return false;
+
+        for (var i = 0; i < x.Members.Count; i++)
+        {
+            if (EndpointComparer.Instance.Compare(x.Members[i].Endpoint, y.Members[i].Endpoint) != 0)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    public int GetHashCode(MembershipProposal obj)
+    {
+        var hash = new HashCode();
+        hash.Add(obj.ConfigurationId);
+        foreach (var member in obj.Members)
+        {
+            hash.Add(member.Endpoint?.GetHashCode() ?? 0);
+        }
+        return hash.ToHashCode();
+    }
+}
+
 

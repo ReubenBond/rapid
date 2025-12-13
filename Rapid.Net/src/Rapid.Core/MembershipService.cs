@@ -27,6 +27,7 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
     private readonly Dictionary<Endpoint, Channel<TaskCompletionSource<RapidResponse>>> _joinersToRespondTo = [];
     private readonly Dictionary<Endpoint, NodeId> _joinerUuid = [];
     private readonly Dictionary<Endpoint, Metadata> _joinerMetadata = [];
+    private readonly Dictionary<Endpoint, NodeId> _memberNodeIds = [];  // Maps current members to their NodeIds
     private readonly IMessagingClient _messagingClient;
     private readonly MetadataManager _metadataManager;
     private readonly IConsensusCoordinatorFactory _consensusCoordinatorFactory;
@@ -190,6 +191,9 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
         _membershipView = new MembershipViewBuilder(_options.ObserversPerSubject, [nodeId], [_myAddr]).Build();
         _cutDetection = _cutDetectorFactory.Create(_membershipView);
 
+        // Initialize member NodeId tracking
+        _memberNodeIds[_myAddr] = nodeId;
+
         _metadataManager.Add(_myAddr, _nodeMetadata);
 
         FinalizeInitialization();
@@ -274,6 +278,13 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
             [.. successfulResponse.Endpoints]).BuildWithConfigurationId(new ConfigurationId(successfulResponse.ConfigurationId));
         _cutDetection = _cutDetectorFactory.Create(_membershipView);
         _metadataManager.AddMetadata(metadataMap);
+
+        // Initialize member NodeId tracking for all initial members
+        _memberNodeIds.Clear();
+        for (var i = 0; i < successfulResponse.Endpoints.Count && i < successfulResponse.Identifiers.Count; i++)
+        {
+            _memberNodeIds[successfulResponse.Endpoints[i]] = successfulResponse.Identifiers[i];
+        }
 
         FinalizeInitialization();
     }
@@ -685,6 +696,71 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
     }
 
     /// <summary>
+    /// Creates a MembershipProposal from a list of endpoints to add/remove.
+    /// The proposal contains the complete new membership state including all NodeIds,
+    /// ensuring that nodes can correctly apply the view change even without receiving
+    /// AlertMessages containing the joiner UUIDs.
+    /// </summary>
+    /// <param name="endpointsToChange">Endpoints being added or removed from the cluster.</param>
+    /// <returns>A complete MembershipProposal with the new view state.</returns>
+    private MembershipProposal CreateMembershipProposal(List<Endpoint> endpointsToChange)
+    {
+        var proposal = new MembershipProposal
+        {
+            ConfigurationId = _membershipView.ConfigurationId + 1
+        };
+
+        // Compute new member set: current members +/- changes
+        var newMembers = new List<Endpoint>(_membershipView.Members);
+        foreach (var endpoint in endpointsToChange)
+        {
+            if (_membershipView.IsHostPresent(endpoint))
+            {
+                newMembers.Remove(endpoint);  // Removing
+            }
+            else
+            {
+                newMembers.Add(endpoint);      // Adding
+            }
+        }
+
+        // Build MemberInfo list with NodeIds for each member in the new view
+        foreach (var endpoint in newMembers)
+        {
+            NodeId? nodeId = null;
+
+            // Try to get NodeId from existing members first
+            if (_memberNodeIds.TryGetValue(endpoint, out var existingId))
+            {
+                nodeId = existingId;
+            }
+            // Then try joiner UUIDs for new joiners
+            else if (_joinerUuid.TryGetValue(endpoint, out var joinerId))
+            {
+                nodeId = joinerId;
+            }
+
+            if (nodeId == null)
+            {
+                // This should not happen - skip the node if we don't have its ID
+                _log.DecidedNodeWithoutUuid(new MembershipServiceLogger.LoggableEndpoint(endpoint));
+                continue;
+            }
+
+            proposal.Members.Add(new MemberInfo { Endpoint = endpoint, NodeId = nodeId });
+
+            // Add metadata for this member
+            var metadata = _metadataManager.Get(endpoint) ?? _joinerMetadata.GetValueOrDefault(endpoint, new Metadata());
+            proposal.MemberMetadata.Add(metadata);
+        }
+
+        // Include all NodeIds ever seen (for UUID uniqueness checking)
+        proposal.AllNodeIds.AddRange(_membershipView.NodeIds);
+
+        return proposal;
+    }
+
+    /// <summary>
     /// This method receives edge update events and delivers them to
     /// the cut detector to check if it will return a valid
     /// proposal.
@@ -764,7 +840,9 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
 
                     PublishEvent(ClusterEvents.ViewChangeProposal, clusterStatusChange);
 
-                    _consensusInstance.Propose(proposalList, cancellationToken);
+                    // Create full membership proposal with NodeIds for all members
+                    var membershipProposal = CreateMembershipProposal(proposalList);
+                    _consensusInstance.Propose(membershipProposal, cancellationToken);
                 }
             }
 
@@ -903,14 +981,15 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
     /// <summary>
     /// This is invoked by FastPaxos modules when they arrive at a decision.
     ///
-    /// Any node that is not in the membership list will be added to the cluster,
-    /// and any node that is currently in the membership list will be removed from it.
+    /// The MembershipProposal contains the complete new membership view state,
+    /// including all members and their NodeIds. This eliminates the race condition
+    /// where nodes might not have received AlertMessages with joiner UUIDs.
     /// </summary>
-    /// <param name="proposal">The list of nodes that were decided to join or leave.</param>
+    /// <param name="proposal">The decided membership proposal containing the complete new view state.</param>
     /// <param name="decidingConfigurationId">The configuration ID when consensus was started.</param>
-    private async Task DecideViewChange(List<Endpoint> proposal, ConfigurationId decidingConfigurationId)
+    private async Task DecideViewChange(MembershipProposal proposal, ConfigurationId decidingConfigurationId)
     {
-        _log.DecideViewChange(proposal.Count);
+        _log.DecideViewChange(proposal.Members.Count);
 
         ConsensusCoordinator? previousConsensusInstance;
         lock (_membershipUpdateLock)
@@ -925,7 +1004,7 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
             // instance has already been disposed when the view changed (via SetMembershipView).
             if (_membershipView.ConfigurationId != decidingConfigurationId)
             {
-                _log.IgnoringStaleConsensusDecision(proposal.Count);
+                _log.IgnoringStaleConsensusDecision(proposal.Members.Count);
                 return;
             }
 
@@ -936,44 +1015,63 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
 
             // Build status changes during the loop, capturing state BEFORE modifications
             // This ensures consistent semantics: Up = joining, Down = leaving/failing
-            var nodeStatusChanges = new List<NodeStatusChange>(proposal.Count);
+            var nodeStatusChanges = new List<NodeStatusChange>(proposal.Members.Count);
 
             // Create a builder from the current view to make modifications
             var builder = _membershipView.ToBuilder();
 
-            foreach (var node in proposal)
+            // Build a lookup from the proposal for fast access to NodeIds
+            var proposalMemberLookup = proposal.Members.ToDictionary(m => m.Endpoint, m => m.NodeId, EndpointEqualityComparer.Instance);
+            var proposalMetadataLookup = new Dictionary<Endpoint, Metadata>(EndpointEqualityComparer.Instance);
+            for (var i = 0; i < proposal.Members.Count; i++)
             {
-                // If the node is already in the ring, remove it. Else, add it.
-                // XXX: Maybe there's a cleaner way to do this in the future because
-                // this ties us to just two states a node can be in.
-                var isPresent = _membershipView.IsHostPresent(node);
-                if (isPresent)
+                if (i < proposal.MemberMetadata.Count)
                 {
-                    _log.RemovingNode(new MembershipServiceLogger.LoggableEndpoint(node));
-                    builder.RingDelete(node);
-                    nodeStatusChanges.Add(new NodeStatusChange(node, EdgeStatus.Down, _metadataManager.Get(node) ?? new Metadata()));
+                    proposalMetadataLookup[proposal.Members[i].Endpoint] = proposal.MemberMetadata[i];
                 }
-                else
+            }
+
+            // Determine which nodes are being added and which are being removed
+            var currentMembers = new HashSet<Endpoint>(_membershipView.Members, EndpointEqualityComparer.Instance);
+            var proposedMembers = new HashSet<Endpoint>(proposal.Members.Select(m => m.Endpoint), EndpointEqualityComparer.Instance);
+
+            // Nodes to remove: in current but not in proposed
+            foreach (var node in currentMembers.Except(proposedMembers, EndpointEqualityComparer.Instance))
+            {
+                _log.RemovingNode(new MembershipServiceLogger.LoggableEndpoint(node));
+                builder.RingDelete(node);
+                nodeStatusChanges.Add(new NodeStatusChange(node, EdgeStatus.Down, _metadataManager.Get(node) ?? new Metadata()));
+
+                // Remove from memberNodeIds tracking
+                _memberNodeIds.Remove(node);
+            }
+
+            // Nodes to add: in proposed but not in current
+            foreach (var node in proposedMembers.Except(currentMembers, EndpointEqualityComparer.Instance))
+            {
+                if (!proposalMemberLookup.TryGetValue(node, out var nodeId))
                 {
-                    if (!_joinerUuid.TryGetValue(node, out var nodeId))
-                    {
-                        _log.DecidedNodeWithoutUuid(new MembershipServiceLogger.LoggableEndpoint(node));
-                        continue;
-                    }
-
-                    var metadata = _joinerMetadata.GetValueOrDefault(node, new Metadata());
-
-                    _log.AddingNode(new MembershipServiceLogger.LoggableEndpoint(node));
-                    builder.RingAdd(node, nodeId);
-                    _metadataManager.Add(node, metadata);
-                    nodeStatusChanges.Add(new NodeStatusChange(node, EdgeStatus.Up, metadata));
-
-                    _joinerUuid.Remove(node);
-                    _joinerMetadata.Remove(node);
-
-                    // Track this node for later notification
-                    addedNodes.Add(node);
+                    // This should never happen - the proposal should always have the NodeId
+                    _log.DecidedNodeWithoutUuid(new MembershipServiceLogger.LoggableEndpoint(node));
+                    continue;
                 }
+
+                var metadata = proposalMetadataLookup.GetValueOrDefault(node) ?? _joinerMetadata.GetValueOrDefault(node, new Metadata());
+
+                _log.AddingNode(new MembershipServiceLogger.LoggableEndpoint(node));
+                builder.RingAdd(node, nodeId);
+                _metadataManager.Add(node, metadata);
+                nodeStatusChanges.Add(new NodeStatusChange(node, EdgeStatus.Up, metadata));
+
+                // Track NodeId for this member
+                _memberNodeIds[node] = nodeId;
+
+                // Clean up joiner data
+                _joinerUuid.Remove(node);
+                _joinerMetadata.Remove(node);
+
+                // Track this node for later notification
+                addedNodes.Add(node);
             }
 
             // Build the new immutable view with incremented version
@@ -1307,6 +1405,13 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
                 [.. response.Identifiers],
                 [.. response.Endpoints]).BuildWithConfigurationId(new ConfigurationId(response.ConfigurationId));
 
+            // Update _memberNodeIds for all members in the new view
+            _memberNodeIds.Clear();
+            for (var i = 0; i < response.Endpoints.Count && i < response.Identifiers.Count; i++)
+            {
+                _memberNodeIds[response.Endpoints[i]] = response.Identifiers[i];
+            }
+
             // Use SetMembershipView to apply all changes - for rejoin, all nodes are treated as Up
             oldConsensus = SetMembershipView(newView, metadataMap, nodeStatusChanges: null, addedNodes: null);
         }
@@ -1489,6 +1594,13 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
                     }
                 }
 
+                // Update _memberNodeIds for all members in the new view
+                _memberNodeIds.Clear();
+                for (var i = 0; i < viewResponse.Endpoints.Count && i < viewResponse.Identifiers.Count; i++)
+                {
+                    _memberNodeIds[viewResponse.Endpoints[i]] = viewResponse.Identifiers[i];
+                }
+
                 // Apply the new view
                 oldConsensus = SetMembershipView(newView, metadataMap, nodeStatusChanges, addedNodes: null);
             }
@@ -1528,6 +1640,7 @@ internal sealed class MembershipService : IMembershipServiceHandler, IAsyncDispo
         var configurationId = _membershipView.ConfigurationId;
 
         _log.CreateFailureDetectors(subjects.Length);
+        _log.CreateFailureDetectorsSummary(new MembershipServiceLogger.LoggableEndpoints(subjects), configurationId);
 
         for (var i = 0; i < subjects.Length; i++)
         {

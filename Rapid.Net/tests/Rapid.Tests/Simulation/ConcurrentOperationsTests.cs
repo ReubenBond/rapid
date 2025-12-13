@@ -348,8 +348,6 @@ public sealed class ConcurrentOperationsTests : IAsyncLifetime
         seedNode.Resume();
     }
 
-
-
     /// <summary>
     /// Tests a complex scenario with mixed concurrent operations.
     /// </summary>

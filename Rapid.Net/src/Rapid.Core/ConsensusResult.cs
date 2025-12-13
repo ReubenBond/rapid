@@ -9,10 +9,11 @@ namespace Rapid;
 internal abstract record ConsensusResult
 {
     /// <summary>
-    /// Consensus succeeded with a decided value.
+    /// Consensus succeeded with a decided membership proposal.
+    /// The proposal contains the complete new membership view state.
     /// </summary>
-    /// <param name="Value">The decided list of endpoints.</param>
-    public sealed record Decided(List<Endpoint> Value) : ConsensusResult;
+    /// <param name="Value">The decided membership proposal with all member info.</param>
+    public sealed record Decided(MembershipProposal Value) : ConsensusResult;
 
     /// <summary>
     /// Fast round failed due to vote split (multiple proposals, none reached threshold).

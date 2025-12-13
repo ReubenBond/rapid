@@ -789,7 +789,6 @@ internal sealed partial class SimulationHarness : IAsyncDisposable
         {
             if (!task.IsCompleted || !task.GetAwaiter().GetResult().IsCompleted)
             {
-                Debugger.Launch();
                 throw new TimeoutException($"Task did not complete within {maxIterations} iterations");
             }
         }

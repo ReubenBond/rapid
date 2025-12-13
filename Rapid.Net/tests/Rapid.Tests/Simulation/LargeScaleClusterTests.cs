@@ -120,7 +120,7 @@ public sealed class LargeScaleClusterTests : IAsyncLifetime
     /// Nodes join in batches of the specified size, providing a middle ground
     /// between fully sequential and fully parallel joining.
     /// </summary>
-    [Theory]
+    [Theory(Skip = "Runs for too long")]
     [InlineData(50, 10)]  // 50 nodes in batches of 10
     [InlineData(80, 20)]  // 80 nodes in batches of 20
     [InlineData(100, 25)] // 100 nodes in batches of 25

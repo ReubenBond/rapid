@@ -245,12 +245,19 @@ public class RapidUtilsTests
     [Fact]
     public void ToRapidRequestFastRoundPhase2bMessageWrapsCorrectly()
     {
+        var proposal = new MembershipProposal { ConfigurationId = 100 };
+        proposal.Members.Add(new MemberInfo
+        {
+            Endpoint = RapidUtils.HostFromParts("127.0.0.1", 1235),
+            NodeId = new NodeId { High = 1, Low = 2 }
+        });
+
         var msg = new FastRoundPhase2bMessage
         {
             ConfigurationId = 100,
-            Sender = RapidUtils.HostFromParts("127.0.0.1", 1234)
+            Sender = RapidUtils.HostFromParts("127.0.0.1", 1234),
+            Proposal = proposal
         };
-        msg.Endpoints.Add(RapidUtils.HostFromParts("127.0.0.1", 1235));
 
         var request = msg.ToRapidRequest();
 
@@ -294,35 +301,49 @@ public class RapidUtilsTests
     [Fact]
     public void ToRapidRequestPhase2aMessageWrapsCorrectly()
     {
+        var proposal = new MembershipProposal { ConfigurationId = 100 };
+        proposal.Members.Add(new MemberInfo
+        {
+            Endpoint = RapidUtils.HostFromParts("127.0.0.1", 1235),
+            NodeId = new NodeId { High = 1, Low = 2 }
+        });
+
         var msg = new Phase2aMessage
         {
             ConfigurationId = 100,
             Sender = RapidUtils.HostFromParts("127.0.0.1", 1234),
-            Rnd = new Rank { Round = 2, NodeIndex = 5 }
+            Rnd = new Rank { Round = 2, NodeIndex = 5 },
+            Proposal = proposal
         };
-        msg.Vval.Add(RapidUtils.HostFromParts("127.0.0.1", 1235));
 
         var request = msg.ToRapidRequest();
 
         Assert.NotNull(request.Phase2AMessage);
-        Assert.Single(request.Phase2AMessage.Vval);
+        Assert.Single(request.Phase2AMessage.Proposal.Members);
     }
 
     [Fact]
     public void ToRapidRequestPhase2bMessageWrapsCorrectly()
     {
+        var proposal = new MembershipProposal { ConfigurationId = 100 };
+        proposal.Members.Add(new MemberInfo
+        {
+            Endpoint = RapidUtils.HostFromParts("127.0.0.1", 1235),
+            NodeId = new NodeId { High = 1, Low = 2 }
+        });
+
         var msg = new Phase2bMessage
         {
             ConfigurationId = 100,
             Sender = RapidUtils.HostFromParts("127.0.0.1", 1234),
-            Rnd = new Rank { Round = 2, NodeIndex = 5 }
+            Rnd = new Rank { Round = 2, NodeIndex = 5 },
+            Proposal = proposal
         };
-        msg.Endpoints.Add(RapidUtils.HostFromParts("127.0.0.1", 1235));
 
         var request = msg.ToRapidRequest();
 
         Assert.NotNull(request.Phase2BMessage);
-        Assert.Single(request.Phase2BMessage.Endpoints);
+        Assert.Single(request.Phase2BMessage.Proposal.Members);
     }
 
     [Fact]

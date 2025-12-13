@@ -25,7 +25,7 @@ internal sealed class FastPaxos
     private readonly long _configurationId;
     private readonly long _membershipSize;
     private readonly IBroadcaster _broadcaster;
-    private readonly Dictionary<List<Endpoint>, int> _votesPerProposal = new(ListEndpointComparer.Instance);
+    private readonly Dictionary<MembershipProposal, int> _votesPerProposal = new(MembershipProposalComparer.Instance);
     private readonly HashSet<Endpoint> _votesReceived = [];
 
     private readonly TaskCompletionSource<ConsensusResult> _resultTcs = new();
@@ -73,16 +73,16 @@ internal sealed class FastPaxos
     /// </summary>
     /// <param name="proposal">the membership change proposal towards a configuration change.</param>
     /// <param name="cancellationToken">Cancellation token</param>
-    public void Propose(List<Endpoint> proposal, CancellationToken cancellationToken = default)
+    public void Propose(MembershipProposal proposal, CancellationToken cancellationToken = default)
     {
-        _log.Propose(new FastPaxosLogger.LoggableEndpoints(proposal));
+        _log.Propose(new FastPaxosLogger.LoggableEndpoints(proposal.Members.Select(m => m.Endpoint)));
 
         var consensusMessage = new FastRoundPhase2bMessage
         {
             ConfigurationId = _configurationId,
-            Sender = _myAddr
+            Sender = _myAddr,
+            Proposal = proposal
         };
-        consensusMessage.Endpoints.AddRange(proposal);
 
         var proposalMessage = consensusMessage.ToRapidRequest();
 
@@ -117,11 +117,11 @@ internal sealed class FastPaxos
     /// <param name="proposalMessage">the membership change proposal towards a configuration change.</param>
     public void HandleFastRoundProposal(FastRoundPhase2bMessage proposalMessage)
     {
-        _log.HandleFastRoundProposalReceived(new FastPaxosLogger.LoggableEndpoint(proposalMessage.Sender), new FastPaxosLogger.LoggableEndpoints(proposalMessage.Endpoints), proposalMessage.ConfigurationId);
+        _log.HandleFastRoundProposalReceived(new FastPaxosLogger.LoggableEndpoint(proposalMessage.Sender), new FastPaxosLogger.LoggableEndpoints(proposalMessage.Proposal?.Members.Select(m => m.Endpoint) ?? []), proposalMessage.ConfigurationId);
 
         if (proposalMessage.ConfigurationId != _configurationId)
         {
-            _log.ConfigurationMismatch(_configurationId);
+            _log.ConfigurationMismatch(_configurationId, proposalMessage.ConfigurationId);
             return;
         }
 
@@ -133,14 +133,20 @@ internal sealed class FastPaxos
 
         if (_resultTcs.Task.IsCompleted)
         {
-            _log.FastRoundAlreadyDecided();
+            _log.FastRoundAlreadyDecided(_configurationId);
             return;
         }
 
         _votesReceived.Add(proposalMessage.Sender);
 
-        var proposalList = new List<Endpoint>(proposalMessage.Endpoints);
-        ref var entry = ref CollectionsMarshal.GetValueRefOrAddDefault(_votesPerProposal, proposalList, out var exists);
+        var proposal = proposalMessage.Proposal;
+        if (proposal == null)
+        {
+            _log.FastRoundAlreadyDecided(_configurationId); // Log as no-op
+            return;
+        }
+
+        ref var entry = ref CollectionsMarshal.GetValueRefOrAddDefault(_votesPerProposal, proposal, out var exists);
         ++entry;
 
         var count = entry;
@@ -153,12 +159,12 @@ internal sealed class FastPaxos
         {
             if (count >= _membershipSize - f)
             {
-                _log.DecidedViewChange(new FastPaxosLogger.LoggableEndpoints(proposalList));
+                _log.DecidedViewChange(new FastPaxosLogger.LoggableEndpoints(proposal.Members.Select(m => m.Endpoint)));
 
                 // We have a successful proposal. Consume it.
-                if (_resultTcs.TrySetResult(new ConsensusResult.Decided(proposalList)))
+                if (_resultTcs.TrySetResult(new ConsensusResult.Decided(proposal)))
                 {
-                    _log.FastRoundSucceeded();
+                    _log.FastRoundSucceeded(_configurationId);
                 }
             }
             else

@@ -1,4 +1,3 @@
-using Rapid;
 using Rapid.Pb;
 
 namespace Rapid.Tests.Unit;
@@ -86,14 +85,14 @@ public class PaxosTests
         {
             Sender = sender,
             ConfigurationId = 100,
-            Rnd = rnd
+            Rnd = rnd,
+            Proposal = CreateProposal(value)
         };
-        msg.Vval.Add(value);
 
         Assert.Equal(sender, msg.Sender);
         Assert.Equal(100, msg.ConfigurationId);
         Assert.Equal(5, msg.Rnd.Round);
-        Assert.Single(msg.Vval);
+        Assert.Single(msg.Proposal.Members);
     }
 
     private static int CompareRanks(Rank r1, Rank r2)
@@ -169,20 +168,20 @@ public class PaxosTests
             Sender = sender,
             ConfigurationId = 100,
             Rnd = rnd,
-            Vrnd = vrnd
+            Vrnd = vrnd,
+            Proposal = CreateProposal(vval)
         };
-        msg.Vval.Add(vval);
 
         Assert.Equal(sender, msg.Sender);
         Assert.Equal(100, msg.ConfigurationId);
         Assert.Equal(5, msg.Rnd.Round);
         Assert.Equal(3, msg.Vrnd.Round);
-        Assert.Single(msg.Vval);
-        Assert.Equal(vval, msg.Vval[0]);
+        Assert.Single(msg.Proposal.Members);
+        Assert.Equal(vval, msg.Proposal.Members[0].Endpoint);
     }
 
     [Fact]
-    public void Phase1bMessageEmptyVvalIsValid()
+    public void Phase1bMessageEmptyProposalIsValid()
     {
         var msg = new Phase1bMessage
         {
@@ -192,24 +191,27 @@ public class PaxosTests
             Vrnd = new Rank { Round = 0, NodeIndex = 0 }
         };
 
-        Assert.Empty(msg.Vval);
+        Assert.Null(msg.Proposal);
     }
 
     [Fact]
-    public void Phase1bMessageMultipleVvalAllStored()
+    public void Phase1bMessageMultipleMembersAllStored()
     {
+        var proposal = new MembershipProposal { ConfigurationId = 101 };
+        proposal.Members.Add(new MemberInfo { Endpoint = Utils.HostFromParts("127.0.0.1", 1001), NodeId = CreateNodeId("id1") });
+        proposal.Members.Add(new MemberInfo { Endpoint = Utils.HostFromParts("127.0.0.1", 1002), NodeId = CreateNodeId("id2") });
+        proposal.Members.Add(new MemberInfo { Endpoint = Utils.HostFromParts("127.0.0.1", 1003), NodeId = CreateNodeId("id3") });
+
         var msg = new Phase1bMessage
         {
             Sender = Utils.HostFromParts("127.0.0.1", 1234),
             ConfigurationId = 100,
             Rnd = new Rank { Round = 5, NodeIndex = 1 },
-            Vrnd = new Rank { Round = 1, NodeIndex = 0 }
+            Vrnd = new Rank { Round = 1, NodeIndex = 0 },
+            Proposal = proposal
         };
-        msg.Vval.Add(Utils.HostFromParts("127.0.0.1", 1001));
-        msg.Vval.Add(Utils.HostFromParts("127.0.0.1", 1002));
-        msg.Vval.Add(Utils.HostFromParts("127.0.0.1", 1003));
 
-        Assert.Equal(3, msg.Vval.Count);
+        Assert.Equal(3, msg.Proposal.Members.Count);
     }
 
 
@@ -224,35 +226,31 @@ public class PaxosTests
         {
             Sender = sender,
             ConfigurationId = 100,
-            Rnd = rnd
+            Rnd = rnd,
+            Proposal = CreateProposal(Utils.HostFromParts("127.0.0.1", 5678))
         };
-        msg.Vval.Add(Utils.HostFromParts("127.0.0.1", 5678));
 
         Assert.Equal(sender, msg.Sender);
         Assert.Equal(100, msg.ConfigurationId);
         Assert.Equal(5, msg.Rnd.Round);
-        Assert.Single(msg.Vval);
+        Assert.Single(msg.Proposal.Members);
     }
 
     [Fact]
-    public void Phase2aMessageAddRangeWorksCorrectly()
+    public void Phase2aMessageMultipleMembersWorksCorrectly()
     {
         var msg = new Phase2aMessage
         {
             Sender = Utils.HostFromParts("127.0.0.1", 1234),
             ConfigurationId = 100,
-            Rnd = new Rank { Round = 2, NodeIndex = 1 }
+            Rnd = new Rank { Round = 2, NodeIndex = 1 },
+            Proposal = CreateProposal(
+                Utils.HostFromParts("10.0.0.1", 5001),
+                Utils.HostFromParts("10.0.0.2", 5002),
+                Utils.HostFromParts("10.0.0.3", 5003))
         };
 
-        var endpoints = new List<Endpoint>
-        {
-            Utils.HostFromParts("10.0.0.1", 5001),
-            Utils.HostFromParts("10.0.0.2", 5002),
-            Utils.HostFromParts("10.0.0.3", 5003)
-        };
-        msg.Vval.AddRange(endpoints);
-
-        Assert.Equal(3, msg.Vval.Count);
+        Assert.Equal(3, msg.Proposal.Members.Count);
     }
 
 
@@ -267,32 +265,38 @@ public class PaxosTests
         {
             Sender = sender,
             ConfigurationId = 100,
-            Rnd = rnd
+            Rnd = rnd,
+            Proposal = CreateProposal(Utils.HostFromParts("127.0.0.1", 5678))
         };
-        msg.Endpoints.Add(Utils.HostFromParts("127.0.0.1", 5678));
 
         Assert.Equal(sender, msg.Sender);
         Assert.Equal(100, msg.ConfigurationId);
         Assert.Equal(5, msg.Rnd.Round);
-        Assert.Single(msg.Endpoints);
+        Assert.Single(msg.Proposal.Members);
     }
 
     [Fact]
-    public void Phase2bMessageMultipleEndpointsAllStored()
+    public void Phase2bMessageMultipleMembersAllStored()
     {
+        var proposal = new MembershipProposal { ConfigurationId = 101 };
+        for (var i = 0; i < 10; i++)
+        {
+            proposal.Members.Add(new MemberInfo
+            {
+                Endpoint = Utils.HostFromParts("192.168.1." + i, 5000 + i),
+                NodeId = CreateNodeId("id" + i)
+            });
+        }
+
         var msg = new Phase2bMessage
         {
             Sender = Utils.HostFromParts("127.0.0.1", 1234),
             ConfigurationId = 100,
-            Rnd = new Rank { Round = 2, NodeIndex = 1 }
+            Rnd = new Rank { Round = 2, NodeIndex = 1 },
+            Proposal = proposal
         };
 
-        for (var i = 0; i < 10; i++)
-        {
-            msg.Endpoints.Add(Utils.HostFromParts("192.168.1." + i, 5000 + i));
-        }
-
-        Assert.Equal(10, msg.Endpoints.Count);
+        Assert.Equal(10, msg.Proposal.Members.Count);
     }
 
 
@@ -305,17 +309,17 @@ public class PaxosTests
         var msg = new FastRoundPhase2bMessage
         {
             Sender = sender,
-            ConfigurationId = 100
+            ConfigurationId = 100,
+            Proposal = CreateProposal(Utils.HostFromParts("127.0.0.1", 5678))
         };
-        msg.Endpoints.Add(Utils.HostFromParts("127.0.0.1", 5678));
 
         Assert.Equal(sender, msg.Sender);
         Assert.Equal(100, msg.ConfigurationId);
-        Assert.Single(msg.Endpoints);
+        Assert.Single(msg.Proposal.Members);
     }
 
     [Fact]
-    public void FastRoundPhase2bMessageEmptyEndpointsIsValid()
+    public void FastRoundPhase2bMessageEmptyProposalIsValid()
     {
         var msg = new FastRoundPhase2bMessage
         {
@@ -323,24 +327,30 @@ public class PaxosTests
             ConfigurationId = 100
         };
 
-        Assert.Empty(msg.Endpoints);
+        Assert.Null(msg.Proposal);
     }
 
     [Fact]
     public void FastRoundPhase2bMessageLargeProposalHandledCorrectly()
     {
+        var proposal = new MembershipProposal { ConfigurationId = 101 };
+        for (var i = 0; i < 100; i++)
+        {
+            proposal.Members.Add(new MemberInfo
+            {
+                Endpoint = Utils.HostFromParts("10.0.0." + i, 5000),
+                NodeId = CreateNodeId("id" + i)
+            });
+        }
+
         var msg = new FastRoundPhase2bMessage
         {
             Sender = Utils.HostFromParts("127.0.0.1", 1234),
-            ConfigurationId = 100
+            ConfigurationId = 100,
+            Proposal = proposal
         };
 
-        for (var i = 0; i < 100; i++)
-        {
-            msg.Endpoints.Add(Utils.HostFromParts("10.0.0." + i, 5000));
-        }
-
-        Assert.Equal(100, msg.Endpoints.Count);
+        Assert.Equal(100, msg.Proposal.Members.Count);
     }
 
 
@@ -429,23 +439,24 @@ public class PaxosTests
     }
 
     [Fact]
-    public void Phase2aMessageSerializeDeserializePreservesEndpoints()
+    public void Phase2aMessageSerializeDeserializePreservesProposal()
     {
         var original = new Phase2aMessage
         {
             Sender = Utils.HostFromParts("127.0.0.1", 1234),
             ConfigurationId = 100,
-            Rnd = new Rank { Round = 5, NodeIndex = 10 }
+            Rnd = new Rank { Round = 5, NodeIndex = 10 },
+            Proposal = CreateProposal(
+                Utils.HostFromParts("10.0.0.1", 5001),
+                Utils.HostFromParts("10.0.0.2", 5002))
         };
-        original.Vval.Add(Utils.HostFromParts("10.0.0.1", 5001));
-        original.Vval.Add(Utils.HostFromParts("10.0.0.2", 5002));
 
         var bytes = Google.Protobuf.MessageExtensions.ToByteArray(original);
         var deserialized = Phase2aMessage.Parser.ParseFrom(bytes);
 
-        Assert.Equal(2, deserialized.Vval.Count);
-        Assert.Equal("10.0.0.1", deserialized.Vval[0].Hostname.ToStringUtf8());
-        Assert.Equal(5001, deserialized.Vval[0].Port);
+        Assert.Equal(2, deserialized.Proposal.Members.Count);
+        Assert.Equal("10.0.0.1", deserialized.Proposal.Members[0].Endpoint.Hostname.ToStringUtf8());
+        Assert.Equal(5001, deserialized.Proposal.Members[0].Endpoint.Port);
     }
 
 
@@ -500,11 +511,40 @@ public class PaxosTests
     }
 
 
+    /// <summary>
+    /// Helper to create a MembershipProposal with specified endpoints
+    /// </summary>
+    private static MembershipProposal CreateProposal(params Endpoint[] endpoints)
+    {
+        var proposal = new MembershipProposal { ConfigurationId = 100 };
+        var counter = 0;
+        foreach (var endpoint in endpoints)
+        {
+            proposal.Members.Add(new MemberInfo
+            {
+                Endpoint = endpoint,
+                NodeId = CreateNodeId("node" + counter++)
+            });
+        }
+        return proposal;
+    }
 
     /// <summary>
-    /// Helper to create a Phase1bMessage with specific vrnd and vval
+    /// Helper to create a NodeId
     /// </summary>
-    private static Phase1bMessage CreatePhase1bMessage(int vrndRound, int vrndNodeIndex, params Endpoint[] vval)
+    private static NodeId CreateNodeId(string id)
+    {
+        return new NodeId
+        {
+            High = (long)id.GetHashCode(StringComparison.Ordinal),
+            Low = (long)id.GetHashCode(StringComparison.Ordinal) * 31
+        };
+    }
+
+    /// <summary>
+    /// Helper to create a Phase1bMessage with specific vrnd and proposal
+    /// </summary>
+    private static Phase1bMessage CreatePhase1bMessage(int vrndRound, int vrndNodeIndex, params Endpoint[] endpoints)
     {
         var msg = new Phase1bMessage
         {
@@ -513,27 +553,32 @@ public class PaxosTests
             Rnd = new Rank { Round = 2, NodeIndex = 1 },
             Vrnd = new Rank { Round = vrndRound, NodeIndex = vrndNodeIndex }
         };
-        msg.Vval.AddRange(vval);
+
+        if (endpoints.Length > 0)
+        {
+            msg.Proposal = CreateProposal(endpoints);
+        }
+
         return msg;
     }
 
     [Fact]
-    public void ChooseValue_ReturnsEmpty_WhenAllMessagesHaveEmptyVval()
+    public void ChooseValue_ReturnsNull_WhenAllMessagesHaveEmptyProposal()
     {
         var messages = new List<Phase1bMessage>
         {
-            CreatePhase1bMessage(0, 0),  // empty vval
-            CreatePhase1bMessage(0, 0),  // empty vval
-            CreatePhase1bMessage(0, 0)   // empty vval
+            CreatePhase1bMessage(0, 0),  // empty proposal
+            CreatePhase1bMessage(0, 0),  // empty proposal
+            CreatePhase1bMessage(0, 0)   // empty proposal
         };
 
         var result = Paxos.ChooseValue(messages, n: 5);
 
-        Assert.Empty(result);
+        Assert.Null(result);
     }
 
     [Fact]
-    public void ChooseValue_ReturnsSingleValue_WhenAllVvalsIdentical()
+    public void ChooseValue_ReturnsSingleValue_WhenAllProposalsIdentical()
     {
         var node1 = Utils.HostFromParts("10.0.0.1", 5001);
         var messages = new List<Phase1bMessage>
@@ -545,8 +590,10 @@ public class PaxosTests
 
         var result = Paxos.ChooseValue(messages, n: 5);
 
-        Assert.Single(result);
-        Assert.Equal(node1, result[0]);
+        Assert.NotNull(result);
+        Assert.Single(result.Members);
+        Assert.Equal(node1.Hostname, result.Members[0].Endpoint.Hostname);
+        Assert.Equal(node1.Port, result.Members[0].Endpoint.Port);
     }
 
     [Fact]
@@ -564,8 +611,10 @@ public class PaxosTests
 
         var result = Paxos.ChooseValue(messages, n: 5);
 
-        Assert.Single(result);
-        Assert.Equal(node1, result[0]);
+        Assert.NotNull(result);
+        Assert.Single(result.Members);
+        Assert.Equal(node1.Hostname, result.Members[0].Endpoint.Hostname);
+        Assert.Equal(node1.Port, result.Members[0].Endpoint.Port);
     }
 
     [Fact]
@@ -584,12 +633,14 @@ public class PaxosTests
 
         var result = Paxos.ChooseValue(messages, n: 5);
 
-        Assert.Single(result);
-        Assert.Equal(node1, result[0]);
+        Assert.NotNull(result);
+        Assert.Single(result.Members);
+        Assert.Equal(node1.Hostname, result.Members[0].Endpoint.Hostname);
+        Assert.Equal(node1.Port, result.Members[0].Endpoint.Port);
     }
 
     [Fact]
-    public void ChooseValue_FallsBackToAnyNonEmptyVval_WhenNoMajority()
+    public void ChooseValue_FallsBackToAnyNonEmptyProposal_WhenNoMajority()
     {
         var node1 = Utils.HostFromParts("10.0.0.1", 5001);
         var node2 = Utils.HostFromParts("10.0.0.2", 5002);
@@ -606,29 +657,36 @@ public class PaxosTests
 
         var result = Paxos.ChooseValue(messages, n: 20);
 
-        // Should return one of the values (first non-empty vval from any message)
-        Assert.Single(result);
-        Assert.True(result[0].Equals(node1) || result[0].Equals(node2) || result[0].Equals(node3));
+        // Should return one of the values (first non-empty proposal from any message)
+        Assert.NotNull(result);
+        Assert.Single(result.Members);
+        var endpoint = result.Members[0].Endpoint;
+        Assert.True(
+            (endpoint.Hostname.Equals(node1.Hostname) && endpoint.Port == node1.Port) ||
+            (endpoint.Hostname.Equals(node2.Hostname) && endpoint.Port == node2.Port) ||
+            (endpoint.Hostname.Equals(node3.Hostname) && endpoint.Port == node3.Port));
     }
 
     [Fact]
-    public void ChooseValue_FallsBackToNonEmptyVval_WhenMaxVrndMessagesHaveEmptyVvals()
+    public void ChooseValue_FallsBackToNonEmptyProposal_WhenMaxVrndMessagesHaveEmptyProposals()
     {
         var node1 = Utils.HostFromParts("10.0.0.1", 5001);
 
-        // Higher vrnd messages have empty vval, lower vrnd has value
+        // Higher vrnd messages have empty proposal, lower vrnd has value
         var messages = new List<Phase1bMessage>
         {
             CreatePhase1bMessage(0, 0, node1),  // lower vrnd with value
-            CreatePhase1bMessage(1, 1),          // higher vrnd, empty vval
-            CreatePhase1bMessage(1, 1)           // higher vrnd, empty vval
+            CreatePhase1bMessage(1, 1),          // higher vrnd, empty proposal
+            CreatePhase1bMessage(1, 1)           // higher vrnd, empty proposal
         };
 
         var result = Paxos.ChooseValue(messages, n: 5);
 
-        // Should fall back to the first non-empty vval
-        Assert.Single(result);
-        Assert.Equal(node1, result[0]);
+        // Should fall back to the first non-empty proposal
+        Assert.NotNull(result);
+        Assert.Single(result.Members);
+        Assert.Equal(node1.Hostname, result.Members[0].Endpoint.Hostname);
+        Assert.Equal(node1.Port, result.Members[0].Endpoint.Port);
     }
 
     [Fact]
@@ -652,9 +710,11 @@ public class PaxosTests
         var result = Paxos.ChooseValue(messages, n: 20);
 
         // No value exceeds N/4, should fall back to first non-empty
-        Assert.Single(result);
+        Assert.NotNull(result);
+        Assert.Single(result.Members);
         // Falls back to first message's value
-        Assert.Equal(node2, result[0]);
+        Assert.Equal(node2.Hostname, result.Members[0].Endpoint.Hostname);
+        Assert.Equal(node2.Port, result.Members[0].Endpoint.Port);
     }
 
     [Fact]
@@ -681,8 +741,10 @@ public class PaxosTests
         var result = Paxos.ChooseValue(messages, n: 20);
 
         // node2 has 6 votes which exceeds N/4=5
-        Assert.Single(result);
-        Assert.Equal(node2, result[0]);
+        Assert.NotNull(result);
+        Assert.Single(result.Members);
+        Assert.Equal(node2.Hostname, result.Members[0].Endpoint.Hostname);
+        Assert.Equal(node2.Port, result.Members[0].Endpoint.Port);
     }
 
     [Fact]
@@ -700,19 +762,22 @@ public class PaxosTests
 
         var result = Paxos.ChooseValue(messages, n: 5);
 
-        Assert.Equal(2, result.Count);
-        Assert.Equal(node1, result[0]);
-        Assert.Equal(node2, result[1]);
+        Assert.NotNull(result);
+        Assert.Equal(2, result.Members.Count);
+        Assert.Equal(node1.Hostname, result.Members[0].Endpoint.Hostname);
+        Assert.Equal(node1.Port, result.Members[0].Endpoint.Port);
+        Assert.Equal(node2.Hostname, result.Members[1].Endpoint.Hostname);
+        Assert.Equal(node2.Port, result.Members[1].Endpoint.Port);
     }
 
     [Fact]
-    public void ChooseValue_EmptyMessageList_ReturnsEmpty()
+    public void ChooseValue_EmptyMessageList_ReturnsNull()
     {
         var messages = new List<Phase1bMessage>();
 
         var result = Paxos.ChooseValue(messages, n: 5);
 
-        Assert.Empty(result);
+        Assert.Null(result);
     }
 
     [Fact]
@@ -732,8 +797,10 @@ public class PaxosTests
         var result = Paxos.ChooseValue(messages, n: 5);
 
         // Should choose node1 because vrnd (1,2) > (1,1)
-        Assert.Single(result);
-        Assert.Equal(node1, result[0]);
+        Assert.NotNull(result);
+        Assert.Single(result.Members);
+        Assert.Equal(node1.Hostname, result.Members[0].Endpoint.Hostname);
+        Assert.Equal(node1.Port, result.Members[0].Endpoint.Port);
     }
 
 }

@@ -26,12 +26,12 @@ internal sealed class Paxos
 
     private Rank _rnd;
     private Rank _vrnd;
-    private List<Endpoint> _vval = [];
+    private MembershipProposal? _vval;
     private readonly List<Phase1bMessage> _phase1bMessages = [];
     private readonly Dictionary<Rank, Dictionary<Endpoint, Phase2bMessage>> _acceptResponses = [];
 
     private Rank _crnd;
-    private List<Endpoint> _cval = [];
+    private MembershipProposal? _cval;
 
     private readonly TaskCompletionSource<ConsensusResult> _decidedTcs = new();
 
@@ -41,7 +41,7 @@ internal sealed class Paxos
     public Task<ConsensusResult> Decided => _decidedTcs.Task;
 
     // Fast round votes tracking
-    private readonly Dictionary<List<Endpoint>, int> _fastRoundVotes = new(ListEndpointComparer.Instance);
+    private readonly Dictionary<MembershipProposal, int> _fastRoundVotes = new(MembershipProposalComparer.Instance);
 
     public Paxos(
         Endpoint myAddr,
@@ -70,7 +70,7 @@ internal sealed class Paxos
     /// represents the logic at an acceptor receiving a phase2a message directly.
     /// </summary>
     /// <param name="proposal">the vote for the fast round</param>
-    public void RegisterFastRoundVote(List<Endpoint> proposal)
+    public void RegisterFastRoundVote(MembershipProposal proposal)
     {
         // Do not participate in our only fast round if we are already participating in a classic round.
         if (_rnd.Round > 1)
@@ -85,11 +85,11 @@ internal sealed class Paxos
         // initiated by different endpoints.
         _rnd = new Rank { Round = 1, NodeIndex = 1 };
         _vrnd = _rnd;
-        _vval = [.. proposal];
+        _vval = proposal;
 
         ref var voteCount = ref CollectionsMarshal.GetValueRefOrAddDefault(_fastRoundVotes, proposal, out var _);
         ++voteCount;
-        _log.RegisterFastRoundVote(new PaxosLogger.LoggableEndpoints(proposal), voteCount);
+        _log.RegisterFastRoundVote(new PaxosLogger.LoggableEndpoints(proposal.Members.Select(m => m.Endpoint)), voteCount);
     }
 
     /// <summary>
@@ -151,11 +151,11 @@ internal sealed class Paxos
                 ConfigurationId = _configurationId,
                 Sender = _myAddr,
                 Rnd = _rnd,
-                Vrnd = _vrnd
+                Vrnd = _vrnd,
+                Proposal = _vval
             };
-            phase1b.Vval.AddRange(_vval);
 
-            _log.SendingPhase1b(new PaxosLogger.LoggableEndpoint(phase1aMessage.Sender), _rnd, _vrnd, new PaxosLogger.LoggableEndpoints(_vval));
+            _log.SendingPhase1b(new PaxosLogger.LoggableEndpoint(phase1aMessage.Sender), _rnd, _vrnd, new PaxosLogger.LoggableEndpoints(_vval?.Members.Select(m => m.Endpoint) ?? []));
 
             var request = phase1b.ToRapidRequest();
             _client.SendOneWayMessage(phase1aMessage.Sender, request, cancellationToken);
@@ -201,21 +201,21 @@ internal sealed class Paxos
             // being received, but we can enter the following if statement only once when a valid cval is identified.
             var chosenValue = ChooseValue(_phase1bMessages, _membershipSize);
 
-            // Only proceed if we haven't already chosen a value AND the chosen value is non-empty
+            // Only proceed if we haven't already chosen a value AND the chosen value is non-null
             // This matches the Java implementation guard: cval.isEmpty() && !chosenProposal.isEmpty()
-            if (_cval.Count == 0 && chosenValue.Count > 0)
+            if (_cval == null && chosenValue != null)
             {
                 _cval = chosenValue;
 
-                _log.Phase1bChosenValue(new PaxosLogger.LoggableEndpoints(_cval));
+                _log.Phase1bChosenValue(new PaxosLogger.LoggableEndpoints(_cval.Members.Select(m => m.Endpoint)));
 
                 var phase2a = new Phase2aMessage
                 {
                     ConfigurationId = _configurationId,
                     Sender = _myAddr,
-                    Rnd = _crnd
+                    Rnd = _crnd,
+                    Proposal = _cval
                 };
-                phase2a.Vval.AddRange(_cval);
 
                 var request = phase2a.ToRapidRequest();
                 _broadcaster.Broadcast(request, cancellationToken);
@@ -231,7 +231,7 @@ internal sealed class Paxos
     /// <param name="cancellationToken">Cancellation token</param>
     public void HandlePhase2aMessage(Phase2aMessage phase2aMessage, CancellationToken cancellationToken = default)
     {
-        _log.HandlePhase2aReceived(new PaxosLogger.LoggableEndpoint(phase2aMessage.Sender), phase2aMessage.Rnd, new PaxosLogger.LoggableEndpoints(phase2aMessage.Vval), phase2aMessage.ConfigurationId);
+        _log.HandlePhase2aReceived(new PaxosLogger.LoggableEndpoint(phase2aMessage.Sender), phase2aMessage.Rnd, new PaxosLogger.LoggableEndpoints(phase2aMessage.Proposal?.Members.Select(m => m.Endpoint) ?? []), phase2aMessage.ConfigurationId);
 
         if (phase2aMessage.ConfigurationId != _configurationId)
         {
@@ -244,17 +244,17 @@ internal sealed class Paxos
         {
             _rnd = phase2aMessage.Rnd;
             _vrnd = phase2aMessage.Rnd;
-            _vval = [.. phase2aMessage.Vval];
+            _vval = phase2aMessage.Proposal;
 
             var phase2b = new Phase2bMessage
             {
                 ConfigurationId = _configurationId,
                 Sender = _myAddr,
-                Rnd = _rnd
+                Rnd = _rnd,
+                Proposal = _vval
             };
-            phase2b.Endpoints.AddRange(_vval);
 
-            _log.SendingPhase2b(new PaxosLogger.LoggableEndpoint(phase2aMessage.Sender), _rnd, new PaxosLogger.LoggableEndpoints(_vval));
+            _log.SendingPhase2b(new PaxosLogger.LoggableEndpoint(phase2aMessage.Sender), _rnd, new PaxosLogger.LoggableEndpoints(_vval?.Members.Select(m => m.Endpoint) ?? []));
 
             // Broadcast to all nodes so they can independently learn the decision
             // This matches the Java implementation
@@ -275,7 +275,7 @@ internal sealed class Paxos
     /// <param name="phase2bMessage">acceptor's vote</param>
     public void HandlePhase2bMessage(Phase2bMessage phase2bMessage)
     {
-        _log.HandlePhase2bReceived(new PaxosLogger.LoggableEndpoint(phase2bMessage.Sender), phase2bMessage.Rnd, new PaxosLogger.LoggableEndpoints(phase2bMessage.Endpoints), phase2bMessage.ConfigurationId);
+        _log.HandlePhase2bReceived(new PaxosLogger.LoggableEndpoint(phase2bMessage.Sender), phase2bMessage.Rnd, new PaxosLogger.LoggableEndpoints(phase2bMessage.Proposal?.Members.Select(m => m.Endpoint) ?? []), phase2bMessage.ConfigurationId);
 
         if (phase2bMessage.ConfigurationId != _configurationId)
         {
@@ -300,10 +300,10 @@ internal sealed class Paxos
 
         if (acceptResponses.Count >= majorityThreshold)
         {
-            var endpoints = new List<Endpoint>(phase2bMessage.Endpoints);
-            if (_decidedTcs.TrySetResult(new ConsensusResult.Decided(endpoints)))
+            var proposal = phase2bMessage.Proposal;
+            if (proposal != null && _decidedTcs.TrySetResult(new ConsensusResult.Decided(proposal)))
             {
-                _log.DecidedValue(new PaxosLogger.LoggableEndpoints(endpoints));
+                _log.DecidedValue(new PaxosLogger.LoggableEndpoints(proposal.Members.Select(m => m.Endpoint)));
             }
         }
     }
@@ -315,8 +315,8 @@ internal sealed class Paxos
     /// </summary>
     /// <param name="phase1bMessages">A list of phase1b messages from acceptors.</param>
     /// <param name="n">The membership size</param>
-    /// <returns>a proposal to apply</returns>
-    internal static List<Endpoint> ChooseValue(List<Phase1bMessage> phase1bMessages, int n)
+    /// <returns>a proposal to apply, or null if none</returns>
+    internal static MembershipProposal? ChooseValue(List<Phase1bMessage> phase1bMessages, int n)
     {
         // Find the maximum vrnd among all messages
         var maxVrnd = phase1bMessages
@@ -325,22 +325,22 @@ internal sealed class Paxos
 
         if (maxVrnd == null)
         {
-            return [];
+            return null;
         }
 
         // Let k be the largest value of vr(a) for all a in Q.
         // V (collectedVvals) be the set of all vv(a) for all a in Q s.t vr(a) == k
-        var collectedVvals = phase1bMessages
+        var collectedProposals = phase1bMessages
             .Where(m => RankComparer.Instance.Compare(m.Vrnd, maxVrnd) == 0)
-            .Where(m => m.Vval.Count > 0)
-            .Select(m => m.Vval.ToList())
+            .Where(m => m.Proposal != null && m.Proposal.Members.Count > 0)
+            .Select(m => m.Proposal!)
             .ToList();
 
         // If V has a single unique element (all values identical), then choose v.
-        if (collectedVvals.Count > 0)
+        if (collectedProposals.Count > 0)
         {
-            var firstValue = collectedVvals[0];
-            var allIdentical = collectedVvals.All(v => v.SequenceEqual(firstValue));
+            var firstValue = collectedProposals[0];
+            var allIdentical = collectedProposals.All(p => MembershipProposalComparer.Instance.Equals(p, firstValue));
             if (allIdentical)
             {
                 return firstValue;
@@ -350,33 +350,33 @@ internal sealed class Paxos
         // if i-quorum Q of acceptors respond, and there is a k-quorum R such that vrnd = k and vval = v,
         // for all a in intersection(R, Q) -> then choose "v". When choosing E = N/4 and F = N/2, then
         // R intersection Q is N/4 -- meaning if there are more than N/4 identical votes.
-        if (collectedVvals.Count > 1)
+        if (collectedProposals.Count > 1)
         {
             // Multiple values were proposed, check if any has more than N/4 votes
-            var valueCounts = new Dictionary<List<Endpoint>, int>(ListEndpointComparer.Instance);
-            foreach (var value in collectedVvals)
+            var valueCounts = new Dictionary<MembershipProposal, int>(MembershipProposalComparer.Instance);
+            foreach (var proposal in collectedProposals)
             {
-                ref var count = ref CollectionsMarshal.GetValueRefOrAddDefault(valueCounts, value, out _);
+                ref var count = ref CollectionsMarshal.GetValueRefOrAddDefault(valueCounts, proposal, out _);
                 if (count + 1 > n / 4)
                 {
-                    return value;
+                    return proposal;
                 }
                 count = count + 1;
             }
         }
 
         // At this point, no value has been selected yet and it is safe for the coordinator to pick any proposed value.
-        // Fall back to picking the first non-empty vval from any message (matching Java behavior).
+        // Fall back to picking the first non-empty proposal from any message (matching Java behavior).
         // This can happen because a quorum of acceptors that did not vote in prior rounds may have responded
         // to the coordinator first. This is safe to do here for two reasons:
         //      1) The coordinator will only proceed with phase 2 if it has a valid vote.
-        //      2) It is likely that the coordinator (itself being an acceptor) is the only one with a valid vval,
+        //      2) It is likely that the coordinator (itself being an acceptor) is the only one with a valid proposal,
         //         and has not heard a Phase1bMessage from itself yet. Once that arrives, phase1b will be triggered
         //         again.
         return phase1bMessages
-            .Where(m => m.Vval.Count > 0)
-            .Select(m => m.Vval.ToList())
-            .FirstOrDefault() ?? [];
+            .Where(m => m.Proposal != null && m.Proposal.Members.Count > 0)
+            .Select(m => m.Proposal)
+            .FirstOrDefault();
     }
 
     /// <summary>

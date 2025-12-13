@@ -20,8 +20,8 @@ internal sealed partial class FastPaxosLogger(ILogger<FastPaxos> logger)
         public override readonly string ToString() => RapidUtils.Loggable(_endpoint);
     }
 
-    [LoggerMessage(Level = LogLevel.Trace, Message = "Configuration ID mismatch for proposal: current_config:{CurrentConfig}")]
-    public partial void ConfigurationMismatch(long currentConfig);
+    [LoggerMessage(Level = LogLevel.Debug, Message = "HandleFastRoundProposal: config mismatch, expected={CurrentConfig}, got={ReceivedConfig}")]
+    public partial void ConfigurationMismatch(long currentConfig, long receivedConfig);
 
     [LoggerMessage(Level = LogLevel.Trace, Message = "Decided on a view change: {Proposal}")]
     public partial void DecidedViewChange(LoggableEndpoints proposal);
@@ -41,14 +41,14 @@ internal sealed partial class FastPaxosLogger(ILogger<FastPaxos> logger)
     [LoggerMessage(Level = LogLevel.Debug, Message = "HandleFastRoundProposal: duplicate vote from {Sender}, ignoring")]
     public partial void DuplicateFastRoundVote(LoggableEndpoint sender);
 
-    [LoggerMessage(Level = LogLevel.Debug, Message = "HandleFastRoundProposal: already decided, ignoring")]
-    public partial void FastRoundAlreadyDecided();
+    [LoggerMessage(Level = LogLevel.Debug, Message = "HandleFastRoundProposal: already decided (configId={ConfigId}), ignoring")]
+    public partial void FastRoundAlreadyDecided(long configId);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "HandleFastRoundProposal: vote count for proposal={Count}, total votes received={TotalVotes}, threshold={Threshold}, f={F}")]
     public partial void FastRoundVoteCount(int count, int totalVotes, long threshold, int f);
 
-    [LoggerMessage(Level = LogLevel.Debug, Message = "HandleFastRoundProposal: fast round succeeded")]
-    public partial void FastRoundSucceeded();
+    [LoggerMessage(Level = LogLevel.Debug, Message = "HandleFastRoundProposal: fast round succeeded (configId={ConfigId})")]
+    public partial void FastRoundSucceeded(long configId);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Early fallback needed: {FailureCount} delivery failures (f={F}, need at least {Threshold} for Fast Paxos)")]
     public partial void EarlyFallbackNeeded(int failureCount, int f, long threshold);

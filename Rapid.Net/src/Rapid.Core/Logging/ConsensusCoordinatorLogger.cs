@@ -34,11 +34,11 @@ internal sealed partial class ConsensusCoordinatorLogger(ILogger<ConsensusCoordi
     [LoggerMessage(Level = LogLevel.Debug, Message = "Starting fast round (round 1)")]
     public partial void StartingFastRound();
 
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Fast round decided: {Decision}")]
-    public partial void FastRoundDecided(LoggableEndpoints decision);
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Fast round decided (configId={ConfigId}): {Decision}")]
+    public partial void FastRoundDecided(long configId, LoggableEndpoints decision);
 
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Fast round timed out or cancelled after {Timeout}, falling back to classic Paxos")]
-    public partial void FastRoundTimeout(TimeSpan timeout);
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Fast round timed out or cancelled (configId={ConfigId}) after {Timeout}, falling back to classic Paxos")]
+    public partial void FastRoundTimeout(long configId, TimeSpan timeout);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Fast round failed early, falling back to classic Paxos")]
     public partial void FastRoundFailedEarly();
@@ -49,8 +49,8 @@ internal sealed partial class ConsensusCoordinatorLogger(ILogger<ConsensusCoordi
     [LoggerMessage(Level = LogLevel.Debug, Message = "Starting classic round {Round} with delay {Delay}")]
     public partial void StartingClassicRound(int round, TimeSpan delay);
 
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Classic round {Round} decided: {Decision}")]
-    public partial void ClassicRoundDecided(int round, LoggableEndpoints decision);
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Classic round {Round} decided (configId={ConfigId}): {Decision}")]
+    public partial void ClassicRoundDecided(int round, long configId, LoggableEndpoints decision);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Consensus loop cancelled")]
     public partial void ConsensusCancelled();

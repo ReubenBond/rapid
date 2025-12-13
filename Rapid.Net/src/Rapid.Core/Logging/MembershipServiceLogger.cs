@@ -166,6 +166,9 @@ internal sealed partial class MembershipServiceLogger(ILogger<MembershipService>
     [LoggerMessage(Level = LogLevel.Debug, Message = "CreateFailureDetectorsForCurrentConfiguration: creating {Count} failure detectors for subjects")]
     public partial void CreateFailureDetectors(int count);
 
+    [LoggerMessage(Level = LogLevel.Debug, Message = "CreateFailureDetectorsForCurrentConfiguration: monitoring subjects={Subjects}, configId={ConfigId}")]
+    public partial void CreateFailureDetectorsSummary(LoggableEndpoints subjects, long configId);
+
     [LoggerMessage(Level = LogLevel.Debug, Message = "CreateFailureDetectorsForCurrentConfiguration: created detector for subject {Subject}, ringNumber={RingNumber}")]
     public partial void CreatedFailureDetector(LoggableEndpoint subject, int ringNumber);
 

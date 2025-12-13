@@ -47,12 +47,12 @@ internal sealed class ConsensusCoordinator : IAsyncDisposable
     private int _disposed;
 
     // Decision
-    private readonly TaskCompletionSource<List<Endpoint>> _onDecidedTcs = new();
+    private readonly TaskCompletionSource<MembershipProposal> _onDecidedTcs = new();
 
     /// <summary>
     /// Task that completes when consensus is reached.
     /// </summary>
-    public Task<List<Endpoint>> Decided => _onDecidedTcs.Task;
+    public Task<MembershipProposal> Decided => _onDecidedTcs.Task;
 
     public ConsensusCoordinator(
         Endpoint myAddr,
@@ -103,9 +103,9 @@ internal sealed class ConsensusCoordinator : IAsyncDisposable
     /// <summary>
     /// Propose a value for consensus, starting the consensus loop.
     /// </summary>
-    public void Propose(List<Endpoint> proposal, CancellationToken cancellationToken = default)
+    public void Propose(MembershipProposal proposal, CancellationToken cancellationToken = default)
     {
-        _log.Propose(new ConsensusCoordinatorLogger.LoggableEndpoints(proposal));
+        _log.Propose(new ConsensusCoordinatorLogger.LoggableEndpoints(proposal.Members.Select(m => m.Endpoint)));
 
         // Register our fast round vote in the acceptor state
         _paxos.RegisterFastRoundVote(proposal);
@@ -117,7 +117,7 @@ internal sealed class ConsensusCoordinator : IAsyncDisposable
     /// <summary>
     /// The main consensus loop. Runs until a decision is reached or cancelled.
     /// </summary>
-    private async Task RunConsensusLoopAsync(List<Endpoint> proposal, CancellationToken cancellationToken)
+    private async Task RunConsensusLoopAsync(MembershipProposal proposal, CancellationToken cancellationToken)
     {
         try
         {
@@ -143,7 +143,7 @@ internal sealed class ConsensusCoordinator : IAsyncDisposable
             switch (fastRoundResult)
             {
                 case ConsensusResult.Decided decided:
-                    _log.FastRoundDecided(new ConsensusCoordinatorLogger.LoggableEndpoints(decided.Value));
+                    _log.FastRoundDecided(_configurationId, new ConsensusCoordinatorLogger.LoggableEndpoints(decided.Value.Members.Select(m => m.Endpoint)));
                     _onDecidedTcs.TrySetResult(decided.Value);
                     return;
 
@@ -160,11 +160,11 @@ internal sealed class ConsensusCoordinator : IAsyncDisposable
                         return;
                     }
                     // Otherwise it was a timeout - fall through to classic rounds
-                    _log.FastRoundTimeout(fastRoundTimeout);
+                    _log.FastRoundTimeout(_configurationId, fastRoundTimeout);
                     break;
 
                 case ConsensusResult.Timeout:
-                    _log.FastRoundTimeout(fastRoundTimeout);
+                    _log.FastRoundTimeout(_configurationId, fastRoundTimeout);
                     break;
             }
 
@@ -180,7 +180,7 @@ internal sealed class ConsensusCoordinator : IAsyncDisposable
                     var paxosResult = await _paxos.Decided.WaitAsync(cancellationToken).ConfigureAwait(true);
                     if (paxosResult is ConsensusResult.Decided decided)
                     {
-                        _log.ClassicRoundDecided(roundNumber - 1, new ConsensusCoordinatorLogger.LoggableEndpoints(decided.Value));
+                        _log.ClassicRoundDecided(roundNumber - 1, _configurationId, new ConsensusCoordinatorLogger.LoggableEndpoints(decided.Value.Members.Select(m => m.Endpoint)));
                         _onDecidedTcs.TrySetResult(decided.Value);
                         return;
                     }
@@ -201,7 +201,7 @@ internal sealed class ConsensusCoordinator : IAsyncDisposable
                     var paxosResult = await _paxos.Decided.ConfigureAwait(true);
                     if (paxosResult is ConsensusResult.Decided decided)
                     {
-                        _log.ClassicRoundDecided(roundNumber, new ConsensusCoordinatorLogger.LoggableEndpoints(decided.Value));
+                        _log.ClassicRoundDecided(roundNumber, _configurationId, new ConsensusCoordinatorLogger.LoggableEndpoints(decided.Value.Members.Select(m => m.Endpoint)));
                         _onDecidedTcs.TrySetResult(decided.Value);
                         return;
                     }
